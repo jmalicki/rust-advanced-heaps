@@ -163,7 +163,7 @@ impl<T, P: Ord> Heap<T, P> for RankPairingHeap<T, P> {
             parent: None,
             child: None,
             sibling: None,
-            rank: 0, // Leaf nodes have rank 0
+            rank: 0,       // Leaf nodes have rank 0
             marked: false, // New nodes are unmarked
         }));
 
@@ -228,7 +228,7 @@ impl<T, P: Ord> Heap<T, P> for RankPairingHeap<T, P> {
     /// - The pairing strategy ensures O(log n) children after merging
     /// - Ranks are updated as children are merged
     ///
-    /// **Why O(log n)?** 
+    /// **Why O(log n)?**
     /// - At most O(log n) children (bounded by rank constraints)
     /// - Merging maintains rank constraints
     /// - Amortized analysis shows the pairing strategy achieves O(log n) total cost
@@ -238,10 +238,7 @@ impl<T, P: Ord> Heap<T, P> for RankPairingHeap<T, P> {
         unsafe {
             let node = root_ptr.as_ptr();
             // Read out item and priority before freeing the node
-            let (priority, item) = (
-                ptr::read(&(*node).priority),
-                ptr::read(&(*node).item),
-            );
+            let (priority, item) = (ptr::read(&(*node).priority), ptr::read(&(*node).item));
 
             // Collect all children of the root
             // Each child is a root of a subtree (parent links will be cleared)
@@ -316,7 +313,7 @@ impl<T, P: Ord> Heap<T, P> for RankPairingHeap<T, P> {
                     // Heap property violated: cut node from parent
                     // This operation may trigger cascading cuts if parent was marked
                     self.cut(node_ptr);
-                    
+
                     // Merge cut node with root
                     // If cut node has smaller priority, it becomes the new root
                     // Otherwise, it becomes a child of the current root
@@ -415,7 +412,7 @@ impl<T, P: Ord> RankPairingHeap<T, P> {
         // Add y to x's child list (insert at front)
         (*y_ptr).sibling = (*x_ptr).child;
         (*x_ptr).child = Some(y);
-        
+
         // Update rank: x's rank must be recomputed based on its children
         // Rank formula: rank(x) = min(rank(w₁), rank(w₂)) + 1
         // This ensures rank constraints are maintained
@@ -438,35 +435,35 @@ impl<T, P: Ord> RankPairingHeap<T, P> {
     /// - One child: rank = child_rank + 1
     /// - Two or more children: rank = max(r₁, r₂) + 1 where r₁, r₂ are smallest two ranks
     ///
-    /// **Why max(r₁, r₂) + 1?** 
+    /// **Why max(r₁, r₂) + 1?**
     /// The rank constraint requires rank(v) ≤ rank(w₁) + 1 and rank(v) ≤ rank(w₂) + 1.
     /// Setting rank(v) = max(r₁, r₂) + 1 satisfies both constraints.
     unsafe fn update_rank(&self, node: NonNull<Node<T, P>>) {
         let node_ptr = node.as_ptr();
-        
+
         if let Some(child) = (*node_ptr).child {
             // Collect all children's ranks
             // We need to find the two smallest ranks to compute the new rank
             let mut ranks = Vec::new();
             let mut current = Some(child);
-            
+
             // Traverse child list to collect all ranks
             while let Some(curr) = current {
                 ranks.push((*curr.as_ptr()).rank);
                 current = (*curr.as_ptr()).sibling;
             }
-            
+
             // Sort ranks to find smallest two
             ranks.sort();
             ranks.reverse(); // Largest first (for easier indexing)
-            
+
             // Compute rank based on rank constraint
             // rank(v) = max(r₁, r₂) + 1 where r₁, r₂ are smallest ranks
             if ranks.len() >= 2 {
                 // Two or more children: use two smallest ranks
                 let r1 = ranks[0]; // Second smallest (largest in reversed list)
                 let r2 = ranks[1]; // Smallest
-                // rank(v) = max(r₁, r₂) + 1 satisfies both constraints
+                                   // rank(v) = max(r₁, r₂) + 1 satisfies both constraints
                 (*node_ptr).rank = (r1.max(r2)) + 1;
             } else if ranks.len() == 1 {
                 // One child: rank = child_rank + 1
@@ -558,7 +555,7 @@ impl<T, P: Ord> RankPairingHeap<T, P> {
         // For type-A rank-pairing heaps, we need to ensure rank constraints
         // are maintained. The cut operation may have violated them.
         let node_ptr = node.as_ptr();
-        
+
         // If this is not a root, we may need to fix up the parent chain
         if (*node_ptr).parent.is_some() {
             // The rank update already happened in cut()
@@ -584,7 +581,10 @@ impl<T, P: Ord> RankPairingHeap<T, P> {
     }
 
     /// Merges a list of trees using rank-based pairing
-    unsafe fn merge_children(&mut self, mut children: Vec<NonNull<Node<T, P>>>) -> NonNull<Node<T, P>> {
+    unsafe fn merge_children(
+        &mut self,
+        mut children: Vec<NonNull<Node<T, P>>>,
+    ) -> NonNull<Node<T, P>> {
         if children.len() == 1 {
             return children.pop().unwrap();
         }
@@ -595,7 +595,7 @@ impl<T, P: Ord> RankPairingHeap<T, P> {
         while children.len() > 1 {
             let mut next = Vec::new();
             let mut i = 0;
-            
+
             while i < children.len() {
                 if i + 1 < children.len() {
                     // Pair two trees
@@ -725,4 +725,3 @@ mod tests {
         assert_eq!(min, Some((&0, &"item0".to_string())));
     }
 }
-

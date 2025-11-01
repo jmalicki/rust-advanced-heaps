@@ -129,7 +129,7 @@ impl<T, P: Ord> Heap<T, P> for BrodalHeap<T, P> {
             parent: None,
             child: None,
             sibling: None,
-            rank: 0, // Leaf nodes have rank 0
+            rank: 0,                  // Leaf nodes have rank 0
             in_violation_list: false, // New nodes are not in violation list
         }));
 
@@ -215,10 +215,7 @@ impl<T, P: Ord> Heap<T, P> for BrodalHeap<T, P> {
         unsafe {
             let node = root_ptr.as_ptr();
             // Read out item and priority before freeing the node
-            let (priority, item) = (
-                ptr::read(&(*node).priority),
-                ptr::read(&(*node).item),
-            );
+            let (priority, item) = (ptr::read(&(*node).priority), ptr::read(&(*node).item));
 
             // Collect all children of the root
             // Each child is a root of a subtree (parent links will be cleared)
@@ -303,7 +300,7 @@ impl<T, P: Ord> Heap<T, P> for BrodalHeap<T, P> {
                     // Heap property violated: cut node from parent
                     // This operation updates parent's rank and may create violations
                     self.cut_from_parent(node_ptr);
-                    
+
                     // Merge cut node with root
                     // If cut node has smaller priority, it becomes the new root
                     // Otherwise, it becomes a child of the current root
@@ -427,7 +424,7 @@ impl<T, P: Ord> BrodalHeap<T, P> {
         (*y.as_ptr()).parent = Some(x);
         (*y.as_ptr()).sibling = (*x.as_ptr()).child;
         (*x.as_ptr()).child = Some(y);
-        
+
         // Update rank and check for violations
         self.update_rank(x);
     }
@@ -443,7 +440,7 @@ impl<T, P: Ord> BrodalHeap<T, P> {
             (*x.as_ptr()).child = Some(y);
             (*y.as_ptr()).sibling = None;
         }
-        
+
         self.update_rank(x);
     }
 
@@ -481,14 +478,14 @@ impl<T, P: Ord> BrodalHeap<T, P> {
         let node_ptr = node.as_ptr();
         // Collect all children's ranks to compute the new rank
         let mut child_ranks = Vec::new();
-        
+
         // Traverse child list to collect all ranks
         let mut current = (*node_ptr).child;
         while let Some(child) = current {
             child_ranks.push((*child.as_ptr()).rank);
             current = (*child.as_ptr()).sibling;
         }
-        
+
         // Base case: no children, rank is 0
         if child_ranks.is_empty() {
             (*node_ptr).rank = 0;
@@ -497,7 +494,7 @@ impl<T, P: Ord> BrodalHeap<T, P> {
 
         // Sort ranks descending (for easier indexing)
         child_ranks.sort_by(|a, b| b.cmp(a));
-        
+
         // Compute new rank based on rank constraint
         // rank(v) = min(rank(w₁), rank(w₂)) + 1 where w₁, w₂ are children with smallest ranks
         let new_rank = if child_ranks.len() >= 2 {
@@ -518,7 +515,7 @@ impl<T, P: Ord> BrodalHeap<T, P> {
         if child_ranks.len() >= 2 {
             let r1 = child_ranks[child_ranks.len() - 1]; // Smallest
             let r2 = child_ranks[child_ranks.len() - 2]; // Second smallest
-            
+
             // Check if new rank violates constraints
             if new_rank > r1 + 1 || new_rank > r2 + 1 {
                 // Rank violation detected: add to violation queue
@@ -536,7 +533,7 @@ impl<T, P: Ord> BrodalHeap<T, P> {
     /// Adds a node to the violation list for its rank
     unsafe fn add_violation(&mut self, node: NonNull<Node<T, P>>) {
         let rank = (*node.as_ptr()).rank;
-        
+
         if (*node.as_ptr()).in_violation_list {
             return; // Already in violation list
         }
@@ -552,7 +549,7 @@ impl<T, P: Ord> BrodalHeap<T, P> {
     /// Removes a node from violation list
     unsafe fn remove_violation(&mut self, node: NonNull<Node<T, P>>) {
         let rank = (*node.as_ptr()).rank;
-        
+
         if !(*node.as_ptr()).in_violation_list {
             return;
         }
@@ -669,13 +666,13 @@ impl<T, P: Ord> BrodalHeap<T, P> {
     /// and will be fixed incrementally in future operations.
     unsafe fn repair_rank_violation(&mut self, node: NonNull<Node<T, P>>) {
         let node_ptr = node.as_ptr();
-        
+
         // Step 1: Disconnect all children from the violating node
         // We need to restructure them to fix the violation
         let mut children = Vec::new();
         let mut current = (*node_ptr).child;
         (*node_ptr).child = None; // Disconnect from parent
-        
+
         // Collect all children
         while let Some(child) = current {
             let next = (*child.as_ptr()).sibling;
@@ -697,9 +694,7 @@ impl<T, P: Ord> BrodalHeap<T, P> {
 
         // Step 2: Sort children by rank to find smallest ranks
         // We need to check if rank constraint is actually violated
-        children.sort_by(|a, b| {
-            (*a.as_ptr()).rank.cmp(&(*b.as_ptr()).rank)
-        });
+        children.sort_by(|a, b| (*a.as_ptr()).rank.cmp(&(*b.as_ptr()).rank));
 
         // Step 3: Check rank constraint
         // rank(v) must be ≤ rank(w₁) + 1 and ≤ rank(w₂) + 1
@@ -712,7 +707,7 @@ impl<T, P: Ord> BrodalHeap<T, P> {
         if (*node_ptr).rank > max_rank + 1 {
             // Rank violation confirmed: restructure children to fix it
             // Strategy: link children of similar rank to reduce number of children
-            
+
             // Step 4a: Group children by rank
             let mut by_rank: Vec<Vec<NonNull<Node<T, P>>>> = Vec::new();
             for child in children {
@@ -731,7 +726,7 @@ impl<T, P: Ord> BrodalHeap<T, P> {
                 while rank_group.len() >= 2 {
                     let a = rank_group.pop().unwrap();
                     let b = rank_group.pop().unwrap();
-                    
+
                     // Link: make one child of the other (both already disconnected)
                     if (*a.as_ptr()).priority < (*b.as_ptr()).priority {
                         // a becomes parent of b (heap property)
@@ -824,11 +819,14 @@ impl<T, P: Ord> BrodalHeap<T, P> {
     }
 
     /// Rebuilds heap from a list of children, maintaining rank constraints
-    unsafe fn rebuild_from_children(&mut self, mut children: Vec<NonNull<Node<T, P>>>) -> NonNull<Node<T, P>> {
+    unsafe fn rebuild_from_children(
+        &mut self,
+        mut children: Vec<NonNull<Node<T, P>>>,
+    ) -> NonNull<Node<T, P>> {
         if children.is_empty() {
             panic!("Cannot rebuild from empty children list");
         }
-        
+
         if children.len() == 1 {
             return children[0];
         }
@@ -836,15 +834,13 @@ impl<T, P: Ord> BrodalHeap<T, P> {
         // Group by rank and link pairs
         while children.len() > 1 {
             // Sort by priority for heap property
-            children.sort_by(|a, b| {
-                (*a.as_ptr()).priority.cmp(&(*b.as_ptr()).priority)
-            });
+            children.sort_by(|a, b| (*a.as_ptr()).priority.cmp(&(*b.as_ptr()).priority));
 
             // Take two with smallest priority and link
             // Make sure both are disconnected before linking
             let a = children.remove(0);
             let b = children.remove(0);
-            
+
             // Ensure both are disconnected
             (*a.as_ptr()).parent = None;
             (*b.as_ptr()).parent = None;
@@ -870,7 +866,7 @@ impl<T, P: Ord> BrodalHeap<T, P> {
     /// Recursively frees a tree starting from a node
     unsafe fn free_tree(node: NonNull<Node<T, P>>) {
         let node_ptr = node.as_ptr();
-        
+
         // Free children recursively
         let mut current = (*node_ptr).child;
         while let Some(child) = current {
@@ -878,7 +874,7 @@ impl<T, P: Ord> BrodalHeap<T, P> {
             Self::free_tree(child);
             current = next;
         }
-        
+
         drop(Box::from_raw(node_ptr));
     }
 }

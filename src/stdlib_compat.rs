@@ -114,4 +114,3 @@ impl<T: Ord + Clone, H: Heap<T, T>> Default for StdHeap<T, H> {
         Self::new()
     }
 }
-

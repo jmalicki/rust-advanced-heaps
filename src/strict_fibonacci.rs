@@ -45,7 +45,7 @@ struct Node<T, P> {
 /// assert_eq!(heap.peek(), Some((&1, &"item")));
 /// ```
 pub struct StrictFibonacciHeap<T, P: Ord> {
-    root: Option<NonNull<Node<T, P>>>, // Active root list
+    root: Option<NonNull<Node<T, P>>>,    // Active root list
     passive: Option<NonNull<Node<T, P>>>, // Passive root list
     min: Option<NonNull<Node<T, P>>>,
     len: usize,
@@ -118,9 +118,9 @@ impl<T, P: Ord> Heap<T, P> for StrictFibonacciHeap<T, P> {
             priority,
             parent: None,
             child: None,
-            degree: 0, // Single node has degree 0
-            active: false, // New nodes start as passive (will be activated if needed)
-            left: NonNull::dangling(), // Will be set immediately
+            degree: 0,                  // Single node has degree 0
+            active: false,              // New nodes start as passive (will be activated if needed)
+            left: NonNull::dangling(),  // Will be set immediately
             right: NonNull::dangling(), // Will be set immediately
         }));
 
@@ -206,10 +206,7 @@ impl<T, P: Ord> Heap<T, P> for StrictFibonacciHeap<T, P> {
         unsafe {
             let node = min_ptr.as_ptr();
             // Read out item and priority before freeing the node
-            let (priority, item) = (
-                ptr::read(&(*node).priority),
-                ptr::read(&(*node).item),
-            );
+            let (priority, item) = (ptr::read(&(*node).priority), ptr::read(&(*node).item));
 
             // Collect all children of the minimum root
             // Each child is a root of a subtree (parent links will be cleared)
@@ -302,7 +299,7 @@ impl<T, P: Ord> Heap<T, P> for StrictFibonacciHeap<T, P> {
             // Unlike standard Fibonacci heaps, we don't cascade!
             // Structure constraints prevent deep cascades
             self.cut(node_ptr);
-            
+
             // Update minimum pointer after cutting
             if let Some(min_ptr) = self.min {
                 if (*node).priority < (*min_ptr.as_ptr()).priority {
@@ -409,7 +406,7 @@ impl<T, P: Ord> Heap<T, P> for StrictFibonacciHeap<T, P> {
 
             // Update length
             self.len += other.len;
-            
+
             // Prevent double free: mark other as empty
             other.root = None;
             other.passive = None;
@@ -459,17 +456,17 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
     /// Collects all children of a node
     unsafe fn collect_children(&self, parent: NonNull<Node<T, P>>) -> Vec<NonNull<Node<T, P>>> {
         let mut children = Vec::new();
-        
+
         if let Some(first_child) = (*parent.as_ptr()).child {
             let mut current = Some(first_child);
             let stop = first_child;
-            
+
             loop {
                 if let Some(curr) = current {
                     let next = (*curr.as_ptr()).right;
                     (*curr.as_ptr()).parent = None;
                     children.push(curr);
-                    
+
                     if next == stop {
                         break;
                     }
@@ -479,24 +476,26 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
                 }
             }
         }
-        
+
         children
     }
 
     /// Finds the new minimum after deletion
     unsafe fn find_new_min(&mut self) {
         self.min = None;
-        
+
         if let Some(root) = self.root {
             let mut current = Some(root);
             let stop = root;
-            
+
             loop {
                 if let Some(curr) = current {
-                    if self.min.is_none() || (*curr.as_ptr()).priority < (*self.min.unwrap().as_ptr()).priority {
+                    if self.min.is_none()
+                        || (*curr.as_ptr()).priority < (*self.min.unwrap().as_ptr()).priority
+                    {
                         self.min = Some(curr);
                     }
-                    
+
                     let next = (*curr.as_ptr()).right;
                     if next == stop {
                         break;
@@ -552,7 +551,7 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
         if let Some(root) = self.root {
             let mut current = Some(root);
             let stop = root;
-            
+
             loop {
                 if let Some(curr) = current {
                     roots.push(curr);
@@ -575,7 +574,7 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
 
             while degree_table[d].is_some() {
                 let mut y = degree_table[d].unwrap();
-                
+
                 // Ensure x has smaller priority
                 if (*y.as_ptr()).priority < (*x.as_ptr()).priority {
                     std::mem::swap(&mut x, &mut y);
@@ -629,8 +628,8 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
     /// - This maintains worst-case bounds instead of amortized
     unsafe fn consolidate_if_needed(&mut self) {
         // In Strict Fibonacci, we consolidate only when necessary
-        // to maintain worst-case bounds. 
-        // 
+        // to maintain worst-case bounds.
+        //
         // This is a simplified version. A full implementation would:
         // - Track active/passive nodes more carefully
         // - Check for structure constraint violations
@@ -651,7 +650,7 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
 
         // Make y a child of x
         (*y.as_ptr()).parent = Some(x);
-        
+
         if let Some(x_child) = (*x.as_ptr()).child {
             // Add to x's child list
             let x_child_left = (*x_child.as_ptr()).left;
@@ -697,9 +696,9 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
             Some(p) => p,
             None => return, // Node is already root or orphaned
         };
-        
+
         let parent_ptr = parent_opt.as_ptr();
-        
+
         // Step 1: Remove node from parent's child list (circular list)
         let left = (*node.as_ptr()).left;
         let right = (*node.as_ptr()).right;
@@ -784,4 +783,3 @@ mod tests {
         assert_eq!(heap1.len(), 4);
     }
 }
-

@@ -23,15 +23,15 @@
 //! a new property test automatically applies to all heaps.
 
 use proptest::prelude::*;
-use rust_advanced_heaps::Heap;
+use rust_advanced_heaps::binomial::BinomialHeap;
+use rust_advanced_heaps::brodal::BrodalHeap;
 use rust_advanced_heaps::fibonacci::FibonacciHeap;
 use rust_advanced_heaps::pairing::PairingHeap;
 use rust_advanced_heaps::rank_pairing::RankPairingHeap;
-use rust_advanced_heaps::binomial::BinomialHeap;
-use rust_advanced_heaps::brodal::BrodalHeap;
+use rust_advanced_heaps::skew_binomial::SkewBinomialHeap;
 use rust_advanced_heaps::strict_fibonacci::StrictFibonacciHeap;
 use rust_advanced_heaps::twothree::TwoThreeHeap;
-use rust_advanced_heaps::skew_binomial::SkewBinomialHeap;
+use rust_advanced_heaps::Heap;
 
 use std::collections::HashMap;
 
@@ -47,7 +47,7 @@ use std::collections::HashMap;
 fn test_push_pop_invariant<H: Heap<i32, i32>>(ops: Vec<(bool, i32)>) -> Result<(), TestCaseError> {
     let mut heap = H::new();
     let mut inserted = Vec::new();
-    
+
     for (should_pop, value) in ops {
         if should_pop && !heap.is_empty() {
             let popped = heap.pop();
@@ -61,7 +61,7 @@ fn test_push_pop_invariant<H: Heap<i32, i32>>(ops: Vec<(bool, i32)>) -> Result<(
             heap.push(value, value);
             inserted.push(value);
         }
-        
+
         // Verify heap property: min should be in inserted
         if !heap.is_empty() {
             if let Some((min_priority, _)) = heap.peek() {
@@ -70,7 +70,7 @@ fn test_push_pop_invariant<H: Heap<i32, i32>>(ops: Vec<(bool, i32)>) -> Result<(
             }
         }
     }
-    
+
     Ok(())
 }
 
@@ -84,19 +84,19 @@ fn test_push_pop_invariant<H: Heap<i32, i32>>(ops: Vec<(bool, i32)>) -> Result<(
 /// that can alter the tree structure significantly. Bugs here can corrupt the entire heap.
 fn test_decrease_key_invariant<H: Heap<i32, i32>>(
     initial: Vec<i32>,
-    decreases: Vec<(usize, i32)>
+    decreases: Vec<(usize, i32)>,
 ) -> Result<(), TestCaseError> {
     let mut heap = H::new();
     let mut handles = Vec::new();
     let mut priorities: HashMap<usize, i32> = HashMap::new();
-    
+
     // Insert initial values
     for (i, priority) in initial.iter().enumerate() {
         let handle = heap.push(*priority, *priority);
         handles.push(handle);
         priorities.insert(i, *priority);
     }
-    
+
     // Apply decrease_key operations
     for (handle_idx, new_priority) in decreases {
         if handle_idx < handles.len() {
@@ -106,7 +106,7 @@ fn test_decrease_key_invariant<H: Heap<i32, i32>>(
                 priorities.insert(handle_idx, new_priority);
             }
         }
-        
+
         // Verify heap property maintained
         if !heap.is_empty() {
             let min_in_map = priorities.values().min().copied();
@@ -117,7 +117,7 @@ fn test_decrease_key_invariant<H: Heap<i32, i32>>(
             }
         }
     }
-    
+
     Ok(())
 }
 
@@ -131,22 +131,26 @@ fn test_decrease_key_invariant<H: Heap<i32, i32>>(
 /// heaps, or tree consolidation in fibonacci/binomial heaps).
 fn test_pop_order_invariant<H: Heap<i32, i32>>(values: Vec<i32>) -> Result<(), TestCaseError> {
     let mut heap = H::new();
-    
+
     // Insert all values
     for val in &values {
         heap.push(*val, *val);
     }
-    
+
     // Pop all and verify non-decreasing order
     let mut last_priority = i32::MIN;
     while !heap.is_empty() {
         if let Some((priority, _item)) = heap.pop() {
-            prop_assert!(priority >= last_priority, 
-                "Popped priority {} is less than previous {}", priority, last_priority);
+            prop_assert!(
+                priority >= last_priority,
+                "Popped priority {} is less than previous {}",
+                priority,
+                last_priority
+            );
             last_priority = priority;
         }
     }
-    
+
     Ok(())
 }
 
@@ -160,31 +164,31 @@ fn test_pop_order_invariant<H: Heap<i32, i32>>(values: Vec<i32>) -> Result<(), T
 /// lead to incorrect priorities being returned.
 fn test_merge_invariant<H: Heap<i32, i32>>(
     heap1_values: Vec<i32>,
-    heap2_values: Vec<i32>
+    heap2_values: Vec<i32>,
 ) -> Result<(), TestCaseError> {
     let mut heap1 = H::new();
     let mut heap2 = H::new();
-    
+
     for val in heap1_values {
         heap1.push(val, val);
     }
-    
+
     for val in heap2_values {
         heap2.push(val, val);
     }
-    
+
     let min1 = heap1.peek().map(|(p, _)| *p);
     let min2 = heap2.peek().map(|(p, _)| *p);
     let expected_min = [min1, min2].iter().flatten().min().copied();
-    
+
     heap1.merge(heap2);
-    
+
     if let Some(expected) = expected_min {
         prop_assert_eq!(heap1.peek().map(|(p, _)| *p), Some(expected));
     } else {
         prop_assert!(heap1.is_empty());
     }
-    
+
     Ok(())
 }
 
@@ -199,7 +203,7 @@ fn test_merge_invariant<H: Heap<i32, i32>>(
 fn test_len_invariant<H: Heap<i32, i32>>(ops: Vec<(bool, i32)>) -> Result<(), TestCaseError> {
     let mut heap = H::new();
     let mut expected_len = 0;
-    
+
     for (should_pop, value) in ops {
         if should_pop && !heap.is_empty() {
             heap.pop();
@@ -208,11 +212,11 @@ fn test_len_invariant<H: Heap<i32, i32>>(ops: Vec<(bool, i32)>) -> Result<(), Te
             heap.push(value, value);
             expected_len += 1;
         }
-        
+
         prop_assert_eq!(heap.len(), expected_len);
         prop_assert_eq!(heap.is_empty(), expected_len == 0);
     }
-    
+
     Ok(())
 }
 
@@ -225,22 +229,22 @@ fn test_len_invariant<H: Heap<i32, i32>>(ops: Vec<(bool, i32)>) -> Result<(), Te
 /// pointers, which could lead to subsequent operations returning incorrect results.
 fn test_peek_idempotent<H: Heap<i32, i32>>(values: Vec<i32>) -> Result<(), TestCaseError> {
     let mut heap = H::new();
-    
+
     for val in &values {
         heap.push(*val, *val);
     }
-    
+
     if !heap.is_empty() {
         let peek1 = heap.peek().map(|(p, _)| *p);
         let peek2 = heap.peek().map(|(p, _)| *p);
         prop_assert_eq!(peek1, peek2);
-        
+
         let len1 = heap.len();
         let _ = heap.peek();
         let len2 = heap.len();
         prop_assert_eq!(len1, len2);
     }
-    
+
     Ok(())
 }
 
@@ -255,19 +259,19 @@ fn test_peek_idempotent<H: Heap<i32, i32>>(values: Vec<i32>) -> Result<(), TestC
 /// restructuring operations.
 fn test_complex_operations<H: Heap<i32, i32>>(
     initial: Vec<i32>,
-    ops: Vec<(u8, i32)>
+    ops: Vec<(u8, i32)>,
 ) -> Result<(), TestCaseError> {
     let mut heap = H::new();
     let mut handles = Vec::new();
     let mut priorities: HashMap<usize, i32> = HashMap::new();
-    
+
     // Insert initial values
     for (i, priority) in initial.iter().enumerate() {
         let handle = heap.push(*priority, *priority);
         handles.push(handle);
         priorities.insert(i, *priority);
     }
-    
+
     // Apply operations: 0=push, 1=pop, 2=decrease_key, 3=peek
     for (op_type, value) in ops {
         match op_type % 4 {
@@ -298,7 +302,11 @@ fn test_complex_operations<H: Heap<i32, i32>>(
                     if !valid_indices.is_empty() {
                         let idx = valid_indices[(value as usize) % valid_indices.len()];
                         let old_priority = priorities[&idx];
-                        let new_priority = if value < old_priority { value } else { old_priority - 1 };
+                        let new_priority = if value < old_priority {
+                            value
+                        } else {
+                            old_priority - 1
+                        };
                         heap.decrease_key(&handles[idx], new_priority);
                         priorities.insert(idx, new_priority);
                     }
@@ -316,7 +324,7 @@ fn test_complex_operations<H: Heap<i32, i32>>(
             }
             _ => {}
         }
-        
+
         // Verify invariants after each operation
         if !heap.is_empty() && !priorities.is_empty() {
             let min_in_map = priorities.values().min().copied();
@@ -326,11 +334,11 @@ fn test_complex_operations<H: Heap<i32, i32>>(
                 }
             }
         }
-        
+
         prop_assert_eq!(heap.len(), priorities.len());
         prop_assert_eq!(heap.is_empty(), priorities.is_empty());
     }
-    
+
     Ok(())
 }
 
@@ -342,30 +350,28 @@ fn test_complex_operations<H: Heap<i32, i32>>(
 ///
 /// This is important for heaps used in parallel algorithms where multiple heaps need to
 /// be combined, or in applications that naturally use multiple priority queues.
-fn test_multiple_merges<H: Heap<i32, i32>>(
-    heaps: Vec<Vec<i32>>
-) -> Result<(), TestCaseError> {
+fn test_multiple_merges<H: Heap<i32, i32>>(heaps: Vec<Vec<i32>>) -> Result<(), TestCaseError> {
     if heaps.is_empty() {
         return Ok(());
     }
-    
+
     let mut result = H::new();
     let mut all_mins = Vec::new();
-    
+
     // Create and merge all heaps
     for heap_values in heaps {
         let mut heap = H::new();
         for val in heap_values {
             heap.push(val, val);
         }
-        
+
         if let Some((min, _)) = heap.peek() {
             all_mins.push(*min);
         }
-        
+
         result.merge(heap);
     }
-    
+
     // Verify result
     if !all_mins.is_empty() {
         let expected_min = all_mins.iter().min().copied();
@@ -375,7 +381,7 @@ fn test_multiple_merges<H: Heap<i32, i32>>(
             }
         }
     }
-    
+
     Ok(())
 }
 
@@ -391,30 +397,35 @@ fn test_completeness<H: Heap<i32, i32>>(values: Vec<i32>) -> Result<(), TestCase
     let mut heap = H::new();
     let mut popped_values = Vec::new();
     let insert_count = values.len();
-    
+
     // Insert all values (may include duplicates)
     for val in &values {
         heap.push(*val, *val);
     }
-    
+
     prop_assert_eq!(heap.len(), insert_count);
-    
+
     // Pop all and collect
     while !heap.is_empty() {
         if let Some((_priority, item)) = heap.pop() {
             popped_values.push(item);
         }
     }
-    
+
     // Verify we got exactly as many elements back as we inserted
-    prop_assert_eq!(popped_values.len(), insert_count, 
-        "Lost elements: inserted {}, popped {}", insert_count, popped_values.len());
-    
+    prop_assert_eq!(
+        popped_values.len(),
+        insert_count,
+        "Lost elements: inserted {}, popped {}",
+        insert_count,
+        popped_values.len()
+    );
+
     // Verify all unique values are present (for duplicates, we just check presence)
     let original_set: std::collections::HashSet<i32> = values.iter().copied().collect();
     let popped_set: std::collections::HashSet<i32> = popped_values.iter().copied().collect();
     prop_assert_eq!(popped_set, original_set, "Missing or extra unique values");
-    
+
     Ok(())
 }
 
@@ -426,33 +437,31 @@ fn test_completeness<H: Heap<i32, i32>>(values: Vec<i32>) -> Result<(), TestCase
 ///
 /// This is critical for verifying that decrease_key correctly handles cascading cuts
 /// or other restructuring operations without corrupting the heap structure.
-fn test_decrease_key_edge_cases<H: Heap<i32, i32>>(
-    values: Vec<i32>
-) -> Result<(), TestCaseError> {
+fn test_decrease_key_edge_cases<H: Heap<i32, i32>>(values: Vec<i32>) -> Result<(), TestCaseError> {
     if values.is_empty() {
         return Ok(());
     }
-    
+
     let mut heap = H::new();
     let mut handles = Vec::new();
-    
+
     // Insert values
     for val in &values {
         let handle = heap.push(*val, *val);
         handles.push(handle);
     }
-    
+
     // Try decreasing each key to various smaller values
     for (idx, &val) in values.iter().enumerate() {
         let new_priority = val - 100;
         heap.decrease_key(&handles[idx], new_priority);
-        
+
         // Verify min is now this value or something smaller
         if let Some((min, _)) = heap.peek() {
             prop_assert!(*min <= new_priority);
         }
     }
-    
+
     Ok(())
 }
 
@@ -465,23 +474,23 @@ fn test_decrease_key_edge_cases<H: Heap<i32, i32>>(
 /// issues with duplicate comparisons during consolidation/merging operations.
 fn test_duplicate_operations<H: Heap<i32, i32>>(
     value: i32,
-    count: usize
+    count: usize,
 ) -> Result<(), TestCaseError> {
     let mut heap = H::new();
-    
+
     for _ in 0..count {
         heap.push(value, value);
     }
-    
+
     prop_assert_eq!(heap.len(), count);
-    
+
     for i in 0..count {
         if let Some((priority, _)) = heap.pop() {
             prop_assert_eq!(priority, value);
             prop_assert_eq!(heap.len(), count - i - 1);
         }
     }
-    
+
     prop_assert!(heap.is_empty());
     Ok(())
 }
@@ -501,13 +510,13 @@ macro_rules! create_heap_tests {
     ($heap_name:ident => $heap_type:ty, $ops_size:expr, $initial_size:expr, $decreases_size:expr, $values_size:expr) => {
         mod $heap_name {
             use super::*;
-            
+
             proptest::proptest! {
                 #[test]
                 fn push_pop_invariant(ops in prop::collection::vec((prop::bool::ANY, -100i32..100), $ops_size)) {
                     test_push_pop_invariant::<$heap_type>(ops)?;
                 }
-                
+
                 #[test]
                 fn decrease_key_invariant(
                     initial in prop::collection::vec(-100i32..100, $initial_size),
@@ -515,12 +524,12 @@ macro_rules! create_heap_tests {
                 ) {
                     test_decrease_key_invariant::<$heap_type>(initial, decreases)?;
                 }
-                
+
                 #[test]
                 fn pop_order_invariant(values in prop::collection::vec(-100i32..100, $values_size)) {
                     test_pop_order_invariant::<$heap_type>(values)?;
                 }
-                
+
                 #[test]
                 fn merge_invariant(
                     heap1 in prop::collection::vec(-100i32..100, $values_size),
@@ -528,17 +537,17 @@ macro_rules! create_heap_tests {
                 ) {
                     test_merge_invariant::<$heap_type>(heap1, heap2)?;
                 }
-                
+
                 #[test]
                 fn len_invariant(ops in prop::collection::vec((prop::bool::ANY, -100i32..100), $ops_size)) {
                     test_len_invariant::<$heap_type>(ops)?;
                 }
-                
+
                 #[test]
                 fn peek_idempotent(values in prop::collection::vec(-100i32..100, $values_size)) {
                     test_peek_idempotent::<$heap_type>(values)?;
                 }
-                
+
                 #[test]
                 fn complex_operations(
                     initial in prop::collection::vec(-100i32..100, 1..20),
@@ -546,22 +555,22 @@ macro_rules! create_heap_tests {
                 ) {
                     test_complex_operations::<$heap_type>(initial, ops)?;
                 }
-                
+
                 #[test]
                 fn multiple_merges(heaps in prop::collection::vec(prop::collection::vec(-100i32..100, 0..20), 0..10)) {
                     test_multiple_merges::<$heap_type>(heaps)?;
                 }
-                
+
                 #[test]
                 fn completeness(values in prop::collection::vec(-100i32..100, 1..100)) {
                     test_completeness::<$heap_type>(values)?;
                 }
-                
+
                 #[test]
                 fn decrease_key_edge_cases(values in prop::collection::vec(-100i32..100, 1..30)) {
                     test_decrease_key_edge_cases::<$heap_type>(values)?;
                 }
-                
+
                 #[test]
                 fn duplicate_operations(value in -100i32..100, count in 1..20usize) {
                     test_duplicate_operations::<$heap_type>(value, count)?;
@@ -611,4 +620,3 @@ create_heap_tests!(
     brodal_tests => BrodalHeap<i32, i32>,
     0..50, 1..30, 0..10, 1..50
 );
-

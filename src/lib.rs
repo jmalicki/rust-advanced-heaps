@@ -27,16 +27,16 @@
 //! assert_eq!(heap.find_min(), Some((&1, &"item1")));
 //! ```
 
-pub mod traits;
+pub mod binomial;
+pub mod brodal;
 pub mod fibonacci;
 pub mod pairing;
-pub mod binomial;
 pub mod rank_pairing;
-pub mod brodal;
-pub mod strict_fibonacci;
-pub mod twothree;
 pub mod skew_binomial;
 pub mod stdlib_compat;
+pub mod strict_fibonacci;
+pub mod traits;
+pub mod twothree;
 
 // Re-export the main trait for convenience
 pub use traits::Heap;

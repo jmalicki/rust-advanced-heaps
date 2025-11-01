@@ -138,7 +138,7 @@ impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
     ///    - If slot[degree] has a tree, link them (produces degree+1 tree)
     ///    - Continue with carry propagation (like binary addition)
     ///
-    /// **Why O(log n)?** 
+    /// **Why O(log n)?**
     /// - At most log₂(n) slots in the trees array (since degrees are 0..log n)
     /// - Each link operation is O(1)
     /// - Carry propagation may occur up to log n times
@@ -253,10 +253,7 @@ impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
         unsafe {
             let node = min_ptr.as_ptr();
             // Read out item and priority before freeing the node
-            let (priority, item) = (
-                ptr::read(&(*node).priority),
-                ptr::read(&(*node).item),
-            );
+            let (priority, item) = (ptr::read(&(*node).priority), ptr::read(&(*node).item));
 
             // Remove minimum tree from trees array
             // The minimum root is at trees[degree]
@@ -290,17 +287,17 @@ impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
                 while let Some(curr) = current {
                     let next = (*curr.as_ptr()).sibling;
                     let child_degree = (*curr.as_ptr()).degree;
-                    
+
                     // Reset sibling to break link (each child becomes independent)
                     (*curr.as_ptr()).sibling = None;
-                    
+
                     // Ensure child_heap.trees array is large enough
                     while child_heap.trees.len() <= child_degree {
                         child_heap.trees.push(None);
                     }
                     // Place child tree at its degree slot
                     child_heap.trees[child_degree] = Some(curr);
-                    
+
                     current = next;
                 }
             }
@@ -339,7 +336,7 @@ impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
     /// - We may need to traverse from leaf to root
     /// - Each swap is O(1), but there may be O(log n) swaps
     ///
-    /// **Difference from Fibonacci/Pairing heaps**: 
+    /// **Difference from Fibonacci/Pairing heaps**:
     /// - Binomial heaps use **bubble up** instead of **cutting**
     /// - No cascading cuts or marking needed
     /// - Simpler but slower: O(log n) vs O(1) amortized
@@ -518,7 +515,7 @@ impl<T, P: Ord> BinomialHeap<T, P> {
                     let b = trees.pop().unwrap();
                     // Link two trees of same degree to produce tree of degree+1
                     let linked = self.link_trees(a, b);
-                    
+
                     // Check if linked tree has correct degree for this slot
                     if (*linked.as_ptr()).degree == degree + 1 {
                         // Linked tree has degree+1: it becomes carry for next degree
@@ -693,4 +690,3 @@ mod tests {
         assert_eq!(heap1.find_min(), Some((&3, &"c")));
     }
 }
-
