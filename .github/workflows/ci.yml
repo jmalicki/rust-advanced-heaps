@@ -24,6 +24,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - name: Set up sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -58,6 +60,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - name: Set up sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -85,6 +89,8 @@ jobs:
             ${{ runner.os }}-cargo-build-
       - name: Clippy check
         run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Show sccache stats
+        run: sccache --show-stats
 
   test:
     name: Rust Tests
@@ -92,6 +98,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Set up sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Cache Cargo registry
@@ -119,6 +127,8 @@ jobs:
         run: cargo build --verbose
       - name: Run tests
         run: cargo test --verbose
+      - name: Show sccache stats
+        run: sccache --show-stats
 
   markdownlint:
     name: Markdown Linting
@@ -130,7 +140,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
       - name: Install markdownlint-cli
         run: npm install -g markdownlint-cli
       - name: Run markdownlint
@@ -142,6 +151,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - name: Set up sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -171,9 +182,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: 'pip'
       - name: Install pre-commit
         run: pip install pre-commit
       - name: Run pre-commit hooks
         run: pre-commit run --all-files
+      - name: Show sccache stats
+        run: sccache --show-stats
 
