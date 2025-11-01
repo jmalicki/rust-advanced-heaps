@@ -1,6 +1,7 @@
 # Proof System Setup Summary
 
-This document summarizes the proof systems that have been set up for finding bugs in the heap implementations.
+This document summarizes the proof systems that have been set up for
+finding bugs in the heap implementations.
 
 ## Structure
 
@@ -24,21 +25,25 @@ These proofs verify that **ALL** heap implementations satisfy the `Heap` trait c
 These proofs verify the specific invariants of each heap implementation:
 
 #### Binomial Heap
+
 - Degree invariant: At most one tree of each degree
 - Heap property after `decrease_key`
 - Merge maintains degree invariant
 
 #### Fibonacci Heap
+
 - Heap property after `decrease_key` (with cascading cuts)
 - Structure maintained after consolidation
 - Merge maintains heap property
 
 #### Pairing Heap
+
 - Heap property after `decrease_key`
 - Structure maintained after `delete_min`
 - Merge maintains heap property
 
 #### Cross-Implementation Consistency
+
 - All heaps produce same results for same operations
 
 ## Running Proofs
@@ -88,6 +93,7 @@ cargo kani --tests trait_level_proofs -- verify_push_increments_len_binomial
 ## Finding Bugs
 
 The proofs are designed to find:
+
 - Length accounting errors
 - Minimum tracking bugs
 - Heap property violations
@@ -95,7 +101,7 @@ The proofs are designed to find:
 - Cross-implementation inconsistencies
 
 If a proof fails, Kani will provide:
+
 - Counterexample input values
 - Execution trace showing where the assertion fails
 - Suggestions for fixing the bug
-
