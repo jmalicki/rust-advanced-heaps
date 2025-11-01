@@ -1,12 +1,14 @@
 # Proof Systems Setup Guide
 
-This project integrates multiple proof/verification systems to help find bugs in the advanced heap implementations.
+This project integrates multiple proof/verification systems to help find bugs
+in the advanced heap implementations.
 
 ## Available Proof Systems
 
 ### 1. Kani (Recommended for Getting Started)
 
-**Kani** is AWS's open-source model checker for Rust. It does NOT require an AWS account - it runs entirely locally.
+**Kani** is AWS's open-source model checker for Rust. It does NOT require an
+AWS account - it runs entirely locally.
 
 - ✅ **No AWS account needed** - completely free and local
 - ✅ **Easy to set up** - just install via cargo
@@ -34,6 +36,7 @@ cargo kani
 #### Example Proofs
 
 See `tests/kani_proofs.rs` for examples including:
+
 - `verify_insert_increments_len` - ensures insert always increments length
 - `verify_pop_decrements_len` - ensures pop decrements length
 - `verify_find_min_correct` - verifies find_min returns minimum
@@ -48,13 +51,13 @@ See `tests/kani_proofs.rs` for examples including:
 - ⚠️ Requires `#[requires]` and `#[ensures]` annotations
 - ⚠️ May need code refactoring for unsafe code
 
-#### Installation
+#### Prusti Installation
 
 ```bash
 cargo install prusti
 ```
 
-#### Usage
+#### Prusti Usage
 
 ```bash
 # Enable prusti feature
@@ -72,11 +75,11 @@ cargo prusti
 - ⚠️ Requires significant code annotations
 - ⚠️ May need refactoring for unsafe pointer code
 
-#### Installation
+#### Creusot Installation
 
 See [Creusot documentation](https://github.com/creusot-rs/creusot) for setup.
 
-#### Usage
+#### Creusot Usage
 
 ```bash
 cargo creusot
@@ -90,7 +93,7 @@ cargo creusot
 - ⚠️ Requires rewriting code in Verus dialect
 - ⚠️ Best for new implementations or verified wrappers
 
-#### Installation
+#### Verus Installation
 
 See [Verus documentation](https://github.com/verus-lang/verus) for setup.
 
@@ -135,7 +138,8 @@ cargo kani --tests trait_level_proofs -- --unwind 20
 
 1. **Trait-Level Proofs** (`tests/trait_level_proofs.rs`):
    - Verify that ALL heap implementations satisfy the Heap trait contract
-   - Properties like: push increments length, pop decrements length, find_min is correct
+   - Properties like: push increments length, pop decrements length,
+     find_min is correct
    - Tests BinomialHeap, FibonacciHeap, and PairingHeap
 
 2. **Implementation-Specific Proofs** (`tests/implementation_proofs.rs`):
@@ -187,9 +191,13 @@ jobs:
 
 ## Notes
 
-- **Unsafe Code**: The heap implementations use unsafe Rust for pointer manipulation. Some proof systems may require additional work to verify unsafe code safely.
+- **Unsafe Code**: The heap implementations use unsafe Rust for pointer
+  manipulation. Some proof systems may require additional work to verify unsafe
+  code safely.
 
-- **Unwind Limits**: Model checkers like Kani are bounded - they only check executions up to a certain depth. Increase unwind limits for complex operations.
+- **Unwind Limits**: Model checkers like Kani are bounded - they only check
+  executions up to a certain depth. Increase unwind limits for complex
+  operations.
 
-- **Performance**: Verification can be slow for complex invariants. Start with simple properties and build up.
-
+- **Performance**: Verification can be slow for complex invariants. Start with
+  simple properties and build up.
