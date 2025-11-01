@@ -2,20 +2,30 @@
 
 ## Overview
 
-The **Rank-Pairing Heap** is a heap data structure designed to achieve the same optimal amortized bounds as Fibonacci heaps (O(1) insert, decrease_key, merge; O(log n) delete_min) while being simpler to implement. It uses rank-based restructuring instead of the cascading cuts used in Fibonacci heaps.
+The **Rank-Pairing Heap** is a heap data structure designed to achieve the
+same optimal amortized bounds as Fibonacci heaps (O(1) insert, decrease_key,
+merge; O(log n) delete_min) while being simpler to implement. It uses
+rank-based restructuring instead of the cascading cuts used in Fibonacci
+heaps.
 
 ## Historical Context and Papers
 
 ### Original Paper
 
-- **Haeupler, Bernhard; Sen, Siddhartha; Tarjan, Robert E.** (2011). "Rank-pairing heaps". *SIAM Journal on Computing*. 40 (6): 1463–1485. doi:10.1137/100789351.
+- **Haeupler, Bernhard; Sen, Siddhartha; Tarjan, Robert E.** (2011).
+  "Rank-pairing heaps". *SIAM Journal on Computing*. 40 (6): 1463–1485.
+  doi:10.1137/100789351.
 
 ### Key Follow-up Work
 
-1. **Haeupler, Bernhard; Sen, Siddhartha; Tarjan, Robert E.** (2009). "Rank-pairing heaps". *Proceedings of the 17th Annual European Symposium on Algorithms (ESA)*. pp. 659–670. doi:10.1007/978-3-642-04128-0_59.
+1. **Haeupler, Bernhard; Sen, Siddhartha; Tarjan, Robert E.** (2009).
+   "Rank-pairing heaps". *Proceedings of the 17th Annual European Symposium
+   on Algorithms (ESA)*. pp. 659–670. doi:10.1007/978-3-642-04128-0_59.
    - Earlier conference version
 
-2. **Cho, Sungjin; Sahni, Sartaj** (2000). "Mergeable heaps with decrease key". *Operations Research Letters*. 26 (3): 169–174. doi:10.1016/S0167-6377(00)00030-1.
+2. **Cho, Sungjin; Sahni, Sartaj** (2000). "Mergeable heaps with decrease
+   key". *Operations Research Letters*. 26 (3): 169–174.
+   doi:10.1016/S0167-6377(00)00030-1.
    - Related work on mergeable heaps
 
 ## Asymptotic Complexity
@@ -127,7 +137,8 @@ The rank-based analysis shows:
 - Each operation affects O(1) nodes amortized
 - Rank updates maintain structure efficiently
 
-The key insight is that rank constraints bound the tree height while allowing efficient updates.
+The key insight is that rank constraints bound the tree height while
+allowing efficient updates.
 
 ## Type-A vs Type-B
 
@@ -156,8 +167,11 @@ The Rust implementation:
 
 ## References
 
-1. Haeupler, B., Sen, S., & Tarjan, R. E. (2011). Rank-pairing heaps. *SIAM Journal on Computing*, 40(6), 1463-1485.
+1. Haeupler, B., Sen, S., & Tarjan, R. E. (2011). Rank-pairing heaps.
+   *SIAM Journal on Computing*, 40(6), 1463-1485.
 
-2. Haeupler, B., Sen, S., & Tarjan, R. E. (2009). Rank-pairing heaps. *Proceedings of ESA* 2009, 659-670.
+2. Haeupler, B., Sen, S., & Tarjan, R. E. (2009). Rank-pairing heaps.
+   *Proceedings of ESA* 2009, 659-670.
 
-3. Cho, S., & Sahni, S. (2000). Mergeable heaps with decrease key. *Operations Research Letters*, 26(3), 169-174.
+3. Cho, S., & Sahni, S. (2000). Mergeable heaps with decrease key.
+   *Operations Research Letters*, 26(3), 169-174.

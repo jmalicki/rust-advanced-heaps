@@ -2,7 +2,9 @@
 
 ## Overview
 
-This document investigates whether the heap implementations in this codebase can be parametrized to use k-ary trees instead of binary trees (where applicable).
+This document investigates whether the heap implementations in this
+codebase can be parametrized to use k-ary trees instead of binary trees
+(where applicable).
 
 ## Current Tree Structures
 
@@ -64,7 +66,8 @@ This document investigates whether the heap implementations in this codebase can
 - **Node Structure**: child/sibling like pairing heap
 - **K-Ary Feasibility**: ✅ **HIGHLY FEASIBLE**
   - Rank-based operations should work with k-ary constraint
-  - Rank updates consider "two children with smallest ranks" - could generalize to k children
+  - Rank updates consider "two children with smallest ranks" - could
+    generalize to k children
 
 ### 6. Strict Fibonacci Heap (`src/strict_fibonacci.rs`)
 

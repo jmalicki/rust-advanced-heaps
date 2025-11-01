@@ -2,13 +2,18 @@
 
 ## Overview
 
-The **Strict Fibonacci Heap** is a refinement of Fibonacci heaps that achieves **worst-case** bounds instead of amortized ones. Like Brodal heaps, it achieves O(1) worst-case insert, decrease_key, and merge; O(log n) worst-case delete_min.
+The **Strict Fibonacci Heap** is a refinement of Fibonacci heaps that
+achieves **worst-case** bounds instead of amortized ones. Like Brodal heaps,
+it achieves O(1) worst-case insert, decrease_key, and merge; O(log n)
+worst-case delete_min.
 
 ## Historical Context and Papers
 
 ### Original Paper
 
-- **Brodal, Gerth Stølting; Lagogiannis, George; Tarjan, Robert E.** (2012). "Strict Fibonacci heaps". *Proceedings of the 44th Annual ACM Symposium on Theory of Computing (STOC)*. pp. 1177–1184. doi:10.1145/2213977.2214080.
+- **Brodal, Gerth Stølting; Lagogiannis, George; Tarjan, Robert E.** (2012).
+  "Strict Fibonacci heaps". *Proceedings of the 44th Annual ACM Symposium on
+  Theory of Computing (STOC)*. pp. 1177–1184. doi:10.1145/2213977.2214080.
 
 ### Key Follow-up Work
 
@@ -28,7 +33,8 @@ The **Strict Fibonacci Heap** is a refinement of Fibonacci heaps that achieves *
 | `decrease_key` | **O(1)** worst-case | Constant time guaranteed |
 | `merge` | **O(1)** worst-case | Constant time guaranteed |
 
-**Key Achievement**: These are **worst-case** bounds, matching the **amortized** bounds of standard Fibonacci heaps!
+**Key Achievement**: These are **worst-case** bounds, matching the
+**amortized** bounds of standard Fibonacci heaps!
 
 ## How It Works
 
@@ -70,7 +76,8 @@ The active/passive distinction allows us to:
 3. Update minimum pointer
 4. **Consolidate if needed**: Only if active roots violate degree constraints
 
-The key is that consolidation is **conditional** - we only consolidate when needed, and it's worst-case O(1) per violation.
+The key is that consolidation is **conditional** - we only consolidate when
+needed, and it's worst-case O(1) per violation.
 
 #### Consolidate (Conditional, O(1) per violation)
 
@@ -105,7 +112,8 @@ The insight is that we only consolidate **when necessary**, not on every operati
    - Update parent's degree
 3. **Consolidate if needed**: Only if constraints violated
 
-**Key difference**: No cascading cuts! We cut only the immediate parent, and the structure constraints prevent deep cascades.
+**Key difference**: No cascading cuts! We cut only the immediate parent, and
+the structure constraints prevent deep cascades.
 
 #### Merge (O(1) worst-case)
 
@@ -117,9 +125,11 @@ Simple structure merge, with conditional consolidation.
 
 ### Why No Cascading Cuts?
 
-In standard Fibonacci heaps, cascading cuts ensure amortized bounds. In Strict Fibonacci heaps:
+In standard Fibonacci heaps, cascading cuts ensure amortized bounds. In
+Strict Fibonacci heaps:
 
-- **Structure constraints prevent deep violations**: The stricter invariants mean violations don't cascade deep
+- **Structure constraints prevent deep violations**: The stricter invariants
+  mean violations don't cascade deep
 - **Immediate consolidation**: We fix violations when they occur, not later
 - **Worst-case bounds**: Immediate repair ensures worst-case O(1)
 
@@ -168,8 +178,12 @@ The Rust implementation:
 
 ## References
 
-1. Brodal, G. S., Lagogiannis, G., & Tarjan, R. E. (2012). Strict Fibonacci heaps. *Proceedings of STOC* 2012, 1177-1184.
+1. Brodal, G. S., Lagogiannis, G., & Tarjan, R. E. (2012). Strict Fibonacci
+   heaps. *Proceedings of STOC* 2012, 1177-1184.
 
-2. Brodal, G. S. (1996). Worst-case efficient priority queues. *Proceedings of SODA* 1996, 52-58.
+2. Brodal, G. S. (1996). Worst-case efficient priority queues. *Proceedings
+   of SODA* 1996, 52-58.
 
-3. Fredman, M. L., & Tarjan, R. E. (1987). Fibonacci heaps and their uses in improved network optimization algorithms. *Journal of the ACM*, 34(3), 596-615.
+3. Fredman, M. L., & Tarjan, R. E. (1987). Fibonacci heaps and their uses
+   in improved network optimization algorithms. *Journal of the ACM*,
+   34(3), 596-615.

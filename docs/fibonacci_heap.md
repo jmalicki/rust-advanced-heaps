@@ -206,10 +206,12 @@ The Rust implementation:
    improved network optimization algorithms. *Journal of the ACM*, 34(3),
    596-615.
 
-2. Fredman, M. L. (1997). A priority queue transformation. *Theory of Computing Systems*, 30(2), 155-167.
+2. Fredman, M. L. (1997). A priority queue transformation. *Theory of
+   Computing Systems*, 30(2), 155-167.
 
 3. Driscoll, J. R., Gabow, H. N., Shrairman, R., & Tarjan, R. E. (1988).
    Relaxed heaps: An alternative to Fibonacci heaps with applications to
    parallel computation. *Communications of the ACM*, 31(11), 1343-1354.
 
-4. Brodal, G. S. (1996). Worst-case efficient priority queues. *Proceedings of SODA* 1996, 52-58.
+4. Brodal, G. S. (1996). Worst-case efficient priority queues. *Proceedings
+   of SODA* 1996, 52-58.
