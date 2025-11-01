@@ -138,7 +138,9 @@ impl<T, P: Ord> Heap<T, P> for TwoThreeHeap<T, P> {
                     // Heap property maintained: new node >= root
                     self.insert_as_child(root_ptr, node_ptr);
                     // Update min if necessary (new node might be smaller than tracked min)
-                    if self.min.is_none() || (*node_ptr.as_ptr()).priority < (*self.min.unwrap().as_ptr()).priority {
+                    if self.min.is_none()
+                        || (*node_ptr.as_ptr()).priority < (*self.min.unwrap().as_ptr()).priority
+                    {
                         self.min = Some(node_ptr);
                     }
                 }
@@ -206,14 +208,13 @@ impl<T, P: Ord> Heap<T, P> for TwoThreeHeap<T, P> {
         unsafe {
             let node = root_ptr.as_ptr();
             // Read out item and priority before freeing the node
-            let (priority, item) = (
-                ptr::read(&(*node).priority),
-                ptr::read(&(*node).item),
-            );
+            let (priority, item) = (ptr::read(&(*node).priority), ptr::read(&(*node).item));
 
             // Collect all children of the root
             // Each child is a root of a subtree (parent links will be cleared)
-            let children: Vec<_> = (*node).children.iter()
+            let children: Vec<_> = (*node)
+                .children
+                .iter()
                 .filter_map(|&child_opt| child_opt)
                 .collect();
 
@@ -343,7 +344,7 @@ impl<T, P: Ord> Heap<T, P> for TwoThreeHeap<T, P> {
 
             // Update length and mark other as empty (prevent double-free)
             self.len += other.len;
-            
+
             other.root = None;
             other.len = 0;
         }
@@ -405,24 +406,26 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
             // Split: take last children and create new node (simplified 2-3 maintenance)
             // Full 2-3 heap would maintain more complex structure
             // For now, we just ensure we don't have more than 3 children
-            
+
             // If we have 4 children, split into two nodes with 2 children each
             if num_children == 4 {
-                let mut children_vec: Vec<_> = (*node_ptr).children.iter()
+                let mut children_vec: Vec<_> = (*node_ptr)
+                    .children
+                    .iter()
                     .filter_map(|c| c.as_ref())
                     .copied()
                     .collect();
-                
+
                 // Split children: keep first 2, move last 2 to new node
                 // This maintains 2-3 property: both nodes have 2 children
                 if children_vec.len() >= 4 {
                     let new_children = children_vec.split_off(2); // Split off last 2
-                    
+
                     // Clone item and priority for new node (simplified)
                     // In a full 2-3 heap, this would be handled differently
                     let new_item = ptr::read(&(*node_ptr).item);
                     let new_priority = ptr::read(&(*node_ptr).priority);
-                    
+
                     // Create new node with last 2 children
                     let new_node = Box::into_raw(Box::new(Node {
                         item: new_item,
@@ -430,19 +433,18 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
                         parent: (*node_ptr).parent, // Same parent initially
                         children: new_children.into_iter().map(Some).collect::<SmallVec<[Option<NonNull<Node<T, P>>>; 4]>>(),
                     }));
-                    
+
                     let new_node_ptr = NonNull::new_unchecked(new_node);
-                    
+
                     // Update parent links for new children (they now belong to new node)
                     for child_opt in (*new_node_ptr.as_ptr()).children.iter() {
                         if let Some(child) = child_opt {
                             (*child.as_ptr()).parent = Some(new_node_ptr);
                         }
                     }
-                    
+
                     // Update original node to have 2 children (first 2)
                     (*node_ptr).children = children_vec.into_iter().map(Some).collect::<SmallVec<[Option<NonNull<Node<T, P>>>; 4]>>();
-                    
                     // Add new node as sibling (child of original node's parent)
                     // This may cause parent to have 4 children, triggering cascade
                     if let Some(parent) = (*node_ptr).parent {
@@ -570,7 +572,10 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
     }
 
     /// Rebuilds heap from children
-    unsafe fn rebuild_from_children(&mut self, children: Vec<NonNull<Node<T, P>>>) -> NonNull<Node<T, P>> {
+    unsafe fn rebuild_from_children(
+        &mut self,
+        children: Vec<NonNull<Node<T, P>>>,
+    ) -> NonNull<Node<T, P>> {
         if children.len() == 1 {
             (*children[0].as_ptr()).parent = None;
             return children[0];
@@ -650,4 +655,3 @@ mod tests {
         assert_eq!(heap1.peek(), Some((&3, &"b")));
     }
 }
-

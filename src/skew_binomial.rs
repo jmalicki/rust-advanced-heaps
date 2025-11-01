@@ -129,7 +129,7 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
             parent: None,
             child: None,
             sibling: None,
-            rank: 0, // Single node has rank 0
+            rank: 0,    // Single node has rank 0
             skew: true, // New single-node tree is always skew
         }));
 
@@ -152,26 +152,26 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
             while self.trees.len() <= 0 {
                 self.trees.push(None);
             }
-            
+
             if self.trees[0].is_some() {
                 // Rank-0 slot is full: link two rank-0 trees (binary addition carry)
                 // This produces a rank-1 tree
                 let existing = self.trees[0].unwrap();
                 let merged = unsafe { self.link_trees(existing, node_ptr) };
                 self.trees[0] = None; // Clear rank-0 slot
-                
+
                 // Try to insert merged tree at rank 1
                 while self.trees.len() <= 1 {
                     self.trees.push(None);
                 }
-                
+
                 // Check if rank-1 slot is also full (cascade)
                 if self.trees[1].is_some() {
                     // Rank-1 slot is full: link two rank-1 trees → rank-2 tree
                     let existing_rank1 = self.trees[1].unwrap();
                     let merged_rank1 = unsafe { self.link_trees(existing_rank1, merged) };
                     self.trees[1] = None; // Clear rank-1 slot
-                    
+
                     // Continue cascade to rank 2
                     while self.trees.len() <= 2 {
                         self.trees.push(None);
@@ -243,10 +243,7 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
         unsafe {
             let node = min_ptr.as_ptr();
             // Read out item and priority before freeing the node
-            let (priority, item) = (
-                ptr::read(&(*node).priority),
-                ptr::read(&(*node).item),
-            );
+            let (priority, item) = (ptr::read(&(*node).priority), ptr::read(&(*node).item));
 
             // Remove minimum root from tree list
             // The tree at this rank will be replaced by its children
@@ -277,15 +274,15 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
                 while let Some(curr) = current {
                     let next = (*curr.as_ptr()).sibling;
                     let child_rank = (*curr.as_ptr()).rank;
-                    
+
                     (*curr.as_ptr()).sibling = None; // Clear sibling link (children will be reorganized)
-                    
+
                     // Store child at its rank position
                     while children.len() <= child_rank {
                         children.push(None);
                     }
                     children[child_rank] = Some(curr);
-                    
+
                     current = next;
                 }
             }
@@ -301,13 +298,13 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
                     while self.trees.len() <= rank {
                         self.trees.push(None);
                     }
-                    
+
                     if self.trees[rank].is_some() {
                         // Slot at this rank is full: merge two trees (binary addition carry)
                         let existing = self.trees[rank].unwrap();
                         let merged = self.link_trees(existing, child);
                         self.trees[rank] = None; // Clear this rank
-                        
+
                         // Place merged tree at rank+1 (carry propagation)
                         while self.trees.len() <= rank + 1 {
                             self.trees.push(None);
@@ -456,7 +453,7 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
                     let a = trees_to_merge.pop().unwrap();
                     let b = trees_to_merge.pop().unwrap();
                     let merged = self.link_trees(a, b); // Link two trees of same rank
-                    
+
                     let merged_rank = (*merged.as_ptr()).rank;
                     if merged_rank == rank + 1 {
                         // Merged tree is of rank+1: carry to next rank
@@ -487,7 +484,7 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
 
         // Update length and minimum
         self.len += other.len;
-        
+
         // Find new minimum after merge
         self.find_and_update_min();
 
@@ -689,4 +686,3 @@ mod tests {
         assert_eq!(heap1.len(), 4);
     }
 }
-

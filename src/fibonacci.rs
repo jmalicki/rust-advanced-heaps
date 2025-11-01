@@ -143,12 +143,12 @@ impl<T, P: Ord> Heap<T, P> for FibonacciHeap<T, P> {
             child: None,
             degree: 0,
             marked: false,
-            left: NonNull::dangling(), // Will be set immediately
+            left: NonNull::dangling(),  // Will be set immediately
             right: NonNull::dangling(), // Will be set immediately
         }));
 
         let node_ptr = unsafe { NonNull::new_unchecked(node) };
-        
+
         // Initialize circular list - node points to itself
         unsafe {
             (*node).left = node_ptr;
@@ -197,13 +197,10 @@ impl<T, P: Ord> Heap<T, P> for FibonacciHeap<T, P> {
 
     fn delete_min(&mut self) -> Option<(P, T)> {
         let min_ptr = self.min?;
-        
+
         unsafe {
             let node = min_ptr.as_ptr();
-            let (priority, item) = (
-                ptr::read(&(*node).priority),
-                ptr::read(&(*node).item),
-            );
+            let (priority, item) = (ptr::read(&(*node).priority), ptr::read(&(*node).item));
 
             // Add children to root list
             if let Some(child) = (*node).child {
@@ -230,21 +227,21 @@ impl<T, P: Ord> Heap<T, P> for FibonacciHeap<T, P> {
             // Remove min from root list
             let left = (*node).left;
             let right = (*node).right;
-            
+
             if left == min_ptr {
                 // Only one root, and it's being deleted
                 self.min = None;
             } else {
                 (*left.as_ptr()).right = right;
                 (*right.as_ptr()).left = left;
-                
+
                 // Consolate the heap
                 self.consolidate(right);
             }
 
             // Deallocate the node
             drop(Box::from_raw(node));
-            
+
             self.len -= 1;
             Some((priority, item))
         }
@@ -252,10 +249,10 @@ impl<T, P: Ord> Heap<T, P> for FibonacciHeap<T, P> {
 
     fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) {
         let node_ptr = unsafe { NonNull::new_unchecked(handle.node as *mut Node<T, P>) };
-        
+
         unsafe {
             let node = node_ptr.as_ptr();
-            
+
             // Verify that new priority is actually less
             if new_priority >= (*node).priority {
                 return; // Or panic/error
@@ -291,7 +288,7 @@ impl<T, P: Ord> Heap<T, P> for FibonacciHeap<T, P> {
         if other.is_empty() {
             return;
         }
-        
+
         if self.is_empty() {
             *self = other;
             return;
@@ -300,7 +297,7 @@ impl<T, P: Ord> Heap<T, P> for FibonacciHeap<T, P> {
         unsafe {
             let self_min = self.min.unwrap();
             let other_min = other.min.unwrap();
-            
+
             let self_left = (*self_min.as_ptr()).left;
             let other_left = (*other_min.as_ptr()).left;
 
@@ -316,7 +313,7 @@ impl<T, P: Ord> Heap<T, P> for FibonacciHeap<T, P> {
             }
 
             self.len += other.len;
-            
+
             // Prevent double free
             other.min = None;
             other.len = 0;
@@ -371,7 +368,7 @@ impl<T, P: Ord> FibonacciHeap<T, P> {
                 // Link with existing trees of the same degree
                 while degree_table[d].is_some() {
                     let mut y = degree_table[d].unwrap();
-                    
+
                     // Ensure x has smaller priority
                     if (*y.as_ptr()).priority < (*x.as_ptr()).priority {
                         std::mem::swap(&mut x, &mut y);
@@ -399,7 +396,7 @@ impl<T, P: Ord> FibonacciHeap<T, P> {
                     // Add to root list
                     let min_ptr = self.min.unwrap();
                     let min_left = (*min_ptr.as_ptr()).left;
-                    
+
                     (*root_opt.as_ptr()).right = min_ptr;
                     (*root_opt.as_ptr()).left = min_left;
                     (*min_left.as_ptr()).right = root_opt;
@@ -449,7 +446,7 @@ impl<T, P: Ord> FibonacciHeap<T, P> {
             Some(p) => p,
             None => return,
         };
-        
+
         // Remove from parent's child list
         let node_left = (*node.as_ptr()).left;
         let node_right = (*node.as_ptr()).right;
@@ -489,12 +486,12 @@ impl<T, P: Ord> FibonacciHeap<T, P> {
     ///
     /// **Time Complexity**: O(1) amortized (cascade depth is bounded)
     ///
-    /// **Cascading Cut Rule**: 
+    /// **Cascading Cut Rule**:
     /// - When a child is cut from its parent, mark the parent
     /// - If a marked parent loses another child, cut it too (cascade upward)
     /// - This ensures no node loses more than one child before being cut
     ///
-    /// **Why O(1) amortized?** 
+    /// **Why O(1) amortized?**
     /// - Each cascade operation marks or cuts one node
     /// - A node can be marked at most once before being cut
     /// - The total number of cascades is bounded by the number of decrease_key operations
@@ -505,7 +502,7 @@ impl<T, P: Ord> FibonacciHeap<T, P> {
     unsafe fn cascading_cut(&mut self, parent_opt: Option<NonNull<Node<T, P>>>) {
         if let Some(parent_ptr) = parent_opt {
             let parent = parent_ptr.as_ptr();
-            
+
             if (*parent).parent.is_some() {
                 // Parent is not a root (only non-roots can be marked)
                 if !(*parent).marked {
@@ -579,4 +576,3 @@ mod tests {
         assert_eq!(heap1.len(), 4);
     }
 }
-
