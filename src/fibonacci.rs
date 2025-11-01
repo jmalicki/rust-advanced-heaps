@@ -38,7 +38,7 @@
 //! - This ensures no node loses more than one child before being cut
 //! - This maintains the Fibonacci property
 
-use crate::traits::{Handle, Heap, HeapError};
+use crate::traits::{Handle, Heap};
 use std::ptr::{self, NonNull};
 
 /// Handle to an element in a Fibonacci heap
@@ -247,7 +247,7 @@ impl<T, P: Ord> Heap<T, P> for FibonacciHeap<T, P> {
         }
     }
 
-    fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) -> Result<(), HeapError> {
+    fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) {
         let node_ptr = unsafe { NonNull::new_unchecked(handle.node as *mut Node<T, P>) };
 
         unsafe {
@@ -255,7 +255,7 @@ impl<T, P: Ord> Heap<T, P> for FibonacciHeap<T, P> {
 
             // Verify that new priority is actually less
             if new_priority >= (*node).priority {
-                return Err(HeapError::PriorityNotDecreased);
+                return; // Or panic/error
             }
 
             (*node).priority = new_priority;
@@ -268,13 +268,13 @@ impl<T, P: Ord> Heap<T, P> for FibonacciHeap<T, P> {
                         self.min = Some(node_ptr);
                     }
                 }
-                return Ok(());
+                return;
             }
 
             // Check if heap property is violated
             if let Some(parent_ptr) = (*node).parent {
                 if (*node).priority >= (*parent_ptr.as_ptr()).priority {
-                    return Ok(()); // Heap property still satisfied
+                    return; // Heap property still satisfied
                 }
             }
 
@@ -282,7 +282,6 @@ impl<T, P: Ord> Heap<T, P> for FibonacciHeap<T, P> {
             self.cut(node_ptr);
             self.cascading_cut((*node).parent);
         }
-        Ok(())
     }
 
     fn merge(&mut self, mut other: Self) {
@@ -524,5 +523,56 @@ impl<T, P: Ord> FibonacciHeap<T, P> {
     }
 }
 
-// Note: Most tests are in tests/generic_heap_tests.rs which provides comprehensive
-// test coverage for all heap implementations.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_basic_operations() {
+        let mut heap = FibonacciHeap::new();
+        assert!(heap.is_empty());
+        assert_eq!(heap.len(), 0);
+
+        let _h1 = heap.insert(5, "a");
+        let _h2 = heap.insert(3, "b");
+        let _h3 = heap.insert(7, "c");
+
+        assert_eq!(heap.len(), 3);
+        assert_eq!(heap.find_min(), Some((&3, &"b")));
+
+        let min = heap.delete_min();
+        assert_eq!(min, Some((3, "b")));
+        assert_eq!(heap.find_min(), Some((&5, &"a")));
+    }
+
+    #[test]
+    fn test_decrease_key() {
+        let mut heap = FibonacciHeap::new();
+        let _h1 = heap.insert(10, "a");
+        let h2 = heap.insert(20, "b");
+        let h3 = heap.insert(30, "c");
+
+        assert_eq!(heap.find_min(), Some((&10, &"a")));
+
+        heap.decrease_key(&h2, 5);
+        assert_eq!(heap.find_min(), Some((&5, &"b")));
+
+        heap.decrease_key(&h3, 1);
+        assert_eq!(heap.find_min(), Some((&1, &"c")));
+    }
+
+    #[test]
+    fn test_merge() {
+        let mut heap1 = FibonacciHeap::new();
+        heap1.insert(5, "a");
+        heap1.insert(10, "b");
+
+        let mut heap2 = FibonacciHeap::new();
+        heap2.insert(3, "c");
+        heap2.insert(7, "d");
+
+        heap1.merge(heap2);
+        assert_eq!(heap1.find_min(), Some((&3, &"c")));
+        assert_eq!(heap1.len(), 4);
+    }
+}
