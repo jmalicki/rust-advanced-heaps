@@ -132,7 +132,7 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
     /// This operation is O(1) because we only compare with the root and perform
     /// a constant amount of pointer manipulation. No restructuring needed!
     ///
-    /// **Invariant Maintenance**: 
+    /// **Invariant Maintenance**:
     /// - Heap property maintained: smaller priority becomes parent
     /// - Tree structure preserved: parent-child relationships correctly linked
     /// - Root always points to minimum: updated if new element is smaller
@@ -227,10 +227,7 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
         unsafe {
             let node = root_ptr.as_ptr();
             // Read out the item and priority before freeing the node
-            let (priority, item) = (
-                ptr::read(&(*node).priority),
-                ptr::read(&(*node).item),
-            );
+            let (priority, item) = (ptr::read(&(*node).priority), ptr::read(&(*node).item));
 
             // The root has been deleted, so we need to rebuild from its children
             // If there are no children, the heap becomes empty
@@ -269,7 +266,7 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
     /// The notation o(log n) means "strictly better than O(log n)" in the amortized sense.
     /// This means that while individual operations might take O(log n), over a sequence
     /// of operations, the average cost is provably less than any constant times log n.
-    /// 
+    ///
     /// This sub-logarithmic bound comes from the amortized analysis showing that
     /// the pairing heap structure allows most decrease_key operations to be cheap
     /// (cutting near the root), while expensive ones (deep cuts) are rare.
@@ -302,14 +299,14 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
             // The node is not the root, so it has a parent
             // If the new priority is less than the parent's priority, we violate
             // the heap property and must restructure
-            // 
+            //
             // Strategy: Cut the node from its parent and merge it with the root
             // This is the standard decrease_key operation for pairing heaps
-            
+
             // Step 1: Cut the node from its parent's child list
             // This removes all parent-child links between parent and this node
             self.cut_node(node_ptr);
-            
+
             // Step 2: Merge the cut node with the root
             // If the cut node has smaller priority, it becomes the new root
             // Otherwise, it becomes a child of the current root
@@ -442,7 +439,7 @@ impl<T, P: Ord> PairingHeap<T, P> {
 
         while let Some(node) = current {
             let sibling = (*node.as_ptr()).sibling;
-            
+
             // Disconnect node from sibling list (we're reorganizing)
             (*node.as_ptr()).sibling = None;
             (*node.as_ptr()).prev = None;
@@ -648,4 +645,3 @@ mod tests {
         assert_eq!(heap1.find_min(), Some((&3, &"c")));
     }
 }
-
