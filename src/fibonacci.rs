@@ -6,6 +6,37 @@
 //!
 //! The structure consists of a collection of heap-ordered trees. Roots are linked
 //! in a circular doubly linked list. The heap maintains the minimum node pointer.
+//!
+//! # Algorithm Overview
+//!
+//! Fibonacci heaps maintain a collection of heap-ordered trees (not a single tree).
+//! This allows O(1) insertion and merging by simply adding trees to the root list.
+//! The key operations are:
+//!
+//! - **Insert**: O(1) - add single-node tree to root list
+//! - **Delete-min**: O(log n) amortized - consolidate trees by degree (similar to binary addition)
+//! - **Decrease-key**: O(1) amortized - use cascading cuts to maintain structure
+//! - **Merge**: O(1) - concatenate root lists
+//!
+//! # Key Invariants
+//!
+//! 1. **Heap property**: All trees are heap-ordered (parent <= child)
+//! 2. **Degree invariant**: After consolidation, at most one tree of each degree
+//! 3. **Marking rule**: A node can lose at most one child before being cut
+//! 4. **Fibonacci property**: Tree with root degree k has at least F_{k+2} nodes
+//!
+//! The Fibonacci property gives the data structure its name: after k children are
+//! removed, a node is cut. This means a tree of degree k must have at least F_{k+2}
+//! nodes, where F_k is the k-th Fibonacci number. This exponential growth bounds
+//! the maximum degree by log_φ(n) ≈ 1.44·log₂(n), where φ is the golden ratio.
+//!
+//! # Cascading Cuts
+//!
+//! The `marked` flag is used in cascading cuts:
+//! - When a child is cut from its parent, mark the parent
+//! - If a marked parent loses another child, cut it too (cascade upward)
+//! - This ensures no node loses more than one child before being cut
+//! - This maintains the Fibonacci property
 
 use crate::traits::{Handle, Heap};
 use std::ptr::{self, NonNull};
@@ -21,14 +52,36 @@ pub struct FibonacciHandle {
 
 impl Handle for FibonacciHandle {}
 
+/// Internal node structure for Fibonacci heap
+///
+/// Each node maintains:
+/// - `item` and `priority`: The data stored in the heap
+/// - `parent`: Pointer to parent node (None if root)
+/// - `child`: Pointer to first child (None if leaf)
+/// - `left`, `right`: Circular doubly-linked list for root list or child list
+/// - `degree`: Number of children (critical for consolidation)
+/// - `marked`: Flag used in cascading cuts (see decrease_key)
+///
+/// **Circular Lists**: Fibonacci heaps use circular doubly-linked lists for:
+/// - Root list: All roots are linked in a circle
+/// - Child lists: All children of a node are linked in a circle
+///
+/// This allows O(1) insertion and deletion from these lists.
 struct Node<T, P> {
     item: T,
     priority: P,
+    /// Parent node (None if this is a root)
     parent: Option<NonNull<Node<T, P>>>,
+    /// First child in the circular child list (None if leaf)
     child: Option<NonNull<Node<T, P>>>,
+    /// Previous node in circular list (root list or child list)
     left: NonNull<Node<T, P>>,
+    /// Next node in circular list (root list or child list)
     right: NonNull<Node<T, P>>,
+    /// Number of children (degree). Used in consolidation to link trees of same degree
     degree: usize,
+    /// Marked flag: true if this node has lost a child (used in cascading cuts)
+    /// A marked node that loses another child is cut itself (cascading)
     marked: bool,
 }
 
@@ -273,8 +326,26 @@ impl<T, P: Ord> Heap<T, P> for FibonacciHeap<T, P> {
 
 impl<T, P: Ord> FibonacciHeap<T, P> {
     /// Consolidates the heap by linking trees of the same degree
+    ///
+    /// **Time Complexity**: O(log n) worst-case, but O(1) amortized per insert
+    ///
+    /// **Algorithm**: This is similar to binary addition with carry propagation
+    /// 1. Create a degree table indexed by degree (0, 1, 2, ..., log n)
+    /// 2. For each root tree:
+    ///    - If table[degree] is empty, store tree there
+    ///    - If table[degree] has a tree, link them (smaller priority becomes parent)
+    ///    - This produces a tree of degree+1, which may link again (carry propagation)
+    /// 3. After processing, at most one tree of each degree (invariant maintained)
+    /// 4. Rebuild root list from degree table
+    ///
+    /// **Why O(log n)?** The Fibonacci property ensures max degree is O(log n),
+    /// so the degree table has O(log n) entries, and we process O(log n) roots.
+    ///
+    /// **Amortized Analysis**: The cost of consolidation is charged to insert
+    /// operations. Over a sequence of operations, amortized cost is O(1) per insert.
     fn consolidate(&mut self, start: NonNull<Node<T, P>>) {
-        // Array to track trees by degree (log n max)
+        // Array to track trees by degree (max degree is O(log n) due to Fibonacci property)
+        // We allocate log₂(n) + 2 slots to be safe (Fibonacci property bounds degree)
         let max_degree = (self.len as f64).log2() as usize + 2;
         let mut degree_table: Vec<Option<NonNull<Node<T, P>>>> = vec![None; max_degree + 1];
 
@@ -415,19 +486,42 @@ impl<T, P: Ord> FibonacciHeap<T, P> {
     }
 
     /// Performs cascading cut on parent if it's marked
+    ///
+    /// **Time Complexity**: O(1) amortized (cascade depth is bounded)
+    ///
+    /// **Cascading Cut Rule**: 
+    /// - When a child is cut from its parent, mark the parent
+    /// - If a marked parent loses another child, cut it too (cascade upward)
+    /// - This ensures no node loses more than one child before being cut
+    ///
+    /// **Why O(1) amortized?** 
+    /// - Each cascade operation marks or cuts one node
+    /// - A node can be marked at most once before being cut
+    /// - The total number of cascades is bounded by the number of decrease_key operations
+    /// - Amortized analysis shows average cascade depth is O(1)
+    ///
+    /// **Fibonacci Property**: This maintains the property that a tree with root
+    /// degree k has at least F_{k+2} nodes, which bounds the maximum degree.
     unsafe fn cascading_cut(&mut self, parent_opt: Option<NonNull<Node<T, P>>>) {
         if let Some(parent_ptr) = parent_opt {
             let parent = parent_ptr.as_ptr();
             
             if (*parent).parent.is_some() {
-                // Parent is not a root
+                // Parent is not a root (only non-roots can be marked)
                 if !(*parent).marked {
+                    // Parent hasn't lost a child yet: mark it
+                    // Next time it loses a child, it will be cut (cascade)
                     (*parent).marked = true;
                 } else {
+                    // Parent already marked (has lost a child): cut it now (cascade)
+                    // This prevents nodes from losing too many children
                     self.cut(parent_ptr);
+                    // Continue cascading upward (recursive)
+                    // The cascade stops at roots (they can't be marked)
                     self.cascading_cut((*parent).parent);
                 }
             }
+            // If parent is root, no cascading needed (roots can't be marked)
         }
     }
 }
