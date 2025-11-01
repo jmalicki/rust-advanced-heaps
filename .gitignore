@@ -1,0 +1,20 @@
+# Rust build artifacts
+/target/
+**/*.rs.bak
+Cargo.lock
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test output
+solver_output.log
+tmp_*.csv
+
