@@ -7,6 +7,7 @@ The **Pairing Heap** is a type of heap-ordered tree that provides excellent amor
 ## Historical Context and Papers
 
 ### Original Paper
+
 - **Fredman, Michael L.; Sedgewick, Robert; Sleator, Daniel D.; Tarjan, Robert E.** (1986). "The pairing heap: A new form of self-adjusting heap". *Algorithmica*. 1 (1): 111–129. doi:10.1007/BF01840439.
 
 ### Key Follow-up Work
@@ -40,6 +41,7 @@ The notation **o(log n)** means "strictly better than O(log n)" - there exists n
 ### Data Structure
 
 A pairing heap is a heap-ordered tree where:
+
 - Each node contains an item and a priority
 - The tree satisfies the **heap property**: parent priority ≤ child priority
 - Unlike binary heaps, nodes can have **any number of children**
@@ -64,12 +66,14 @@ This is O(1) because we only compare with the root and potentially add one link.
 The delete-min operation uses a clever **two-pass pairing** strategy:
 
 **First Pass (Pairing):**
+
 1. When the root is deleted, collect all its children
 2. Pair adjacent children: first with second, third with fourth, etc.
 3. Merge each pair: the node with smaller priority becomes parent
 4. Result: approximately n/2 merged trees
 
 **Second Pass (Right-to-left merge):**
+
 1. Start with the last merged tree
 2. Repeatedly merge it with the next tree from right to left
 3. Each merge makes the smaller-priority tree the root
@@ -105,6 +109,7 @@ The amortized analysis of pairing heaps relies on a potential function argument.
 3. **Pairing strategy**: The two-pass pairing ensures that the "work debt" is distributed across operations
 
 The potential function typically charges:
+
 - Credits for each node's position in the tree (deeper = more credit)
 - When expensive operations occur, they consume credits from many cheap operations
 
@@ -119,6 +124,7 @@ The potential function typically charges:
 | Practical | Often faster | High overhead | Fast for small n |
 
 **When to use Pairing Heaps:**
+
 - Need better than O(log n) decrease-key but want simpler code than Fibonacci heaps
 - Many decrease-key operations relative to other operations
 - Want simplicity without sacrificing too much performance
@@ -126,6 +132,7 @@ The potential function typically charges:
 ## Implementation Details
 
 The Rust implementation uses:
+
 - Unsafe pointers (`NonNull`) for efficient tree manipulation
 - Type-erased handles to allow handles to be passed without generic type parameters
 - Recursive tree structure with parent/child/sibling pointers
@@ -140,4 +147,3 @@ The Rust implementation uses:
 3. Iacono, J., & Özkan, Ö. (2014). A tight lower bound for decreasing the key of an element in a pairing heap. *Proceedings of SODA* 2014, 1108-1116.
 
 4. Elmasry, A., Jensen, C., & Katajainen, J. (2009). Two-tier relaxed heaps. *Acta Informatica*, 46(7), 489-504.
-

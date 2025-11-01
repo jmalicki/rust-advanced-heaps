@@ -7,7 +7,7 @@ A comprehensive collection of advanced heap/priority queue data structures for R
 Rust's standard library provides `BinaryHeap`, but it doesn't support `decrease_key` operations efficiently. Many third-party libraries use hash maps paired with binary heaps, which only achieve O(log n) `decrease_key` operations. This crate implements advanced heap structures from computer science literature that provide better amortized bounds:
 
 - **Fibonacci Heap**: O(1) amortized `decrease_key`
-- **Pairing Heap**: o(log n) amortized `decrease_key` 
+- **Pairing Heap**: o(log n) amortized `decrease_key`
 - **Rank-Pairing Heap**: O(1) amortized `decrease_key`
 - **Binomial Heap**: O(log n) `decrease_key` (but simpler implementation)
 
@@ -101,6 +101,7 @@ While these heaps provide excellent theoretical bounds, constant factors matter 
 - **Binomial heaps** provide a good balance between simplicity and performance
 
 Choose based on your workload:
+
 - Many `decrease_key` operations: Fibonacci or Pairing heap
 - Mostly inserts/deletes: Binomial heap may be sufficient
 - Small heaps: Binary heap is often faster due to lower constant factors
@@ -124,4 +125,3 @@ MIT OR Apache-2.0
 - [Pairing Heap - Wikipedia](https://en.wikipedia.org/wiki/Pairing_heap)
 - [Binomial Heap - Wikipedia](https://en.wikipedia.org/wiki/Binomial_heap)
 - Fredman, M. L., & Tarjan, R. E. (1987). Fibonacci heaps and their uses in improved network optimization algorithms. Journal of the ACM, 34(3), 596-615.
-

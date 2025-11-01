@@ -7,6 +7,7 @@ The **Rank-Pairing Heap** is a heap data structure designed to achieve the same 
 ## Historical Context and Papers
 
 ### Original Paper
+
 - **Haeupler, Bernhard; Sen, Siddhartha; Tarjan, Robert E.** (2011). "Rank-pairing heaps". *SIAM Journal on Computing*. 40 (6): 1463–1485. doi:10.1137/100789351.
 
 ### Key Follow-up Work
@@ -43,6 +44,7 @@ A rank-pairing heap is similar to a pairing heap but maintains **rank** informat
 ### Rank Constraints (Type-A)
 
 The implementation uses **type-A rank-pairing heaps**, which maintain:
+
 1. **Rank constraint**: For any node v with children w₁, w₂ (two smallest ranks):
    - rank(v) ≤ rank(w₁) + 1
    - rank(v) ≤ rank(w₂) + 1
@@ -52,6 +54,7 @@ The implementation uses **type-A rank-pairing heaps**, which maintain:
    - Marked: one child lost (after another loss, node is cut)
 
 This is simpler than Fibonacci heaps because:
+
 - Rank constraints are explicit
 - No complex cascading cuts
 - Rank updates are localized
@@ -71,6 +74,7 @@ The rank update ensures constraints are maintained.
 #### Update Rank
 
 The rank of a node is computed from its children:
+
 - Find two children with **smallest ranks** (r₁, r₂)
 - New rank = min(r₁, r₂) + 1
 - This ensures the rank constraint is satisfied
@@ -101,6 +105,7 @@ The marking rule ensures that at most one cut per parent is needed (amortized).
 #### Merge (O(1) amortized)
 
 Simple root comparison:
+
 1. Compare roots
 2. Make larger priority a child of smaller
 3. Update rank
@@ -117,6 +122,7 @@ This is clearly O(1).
 ## Rank-Based Analysis
 
 The rank-based analysis shows:
+
 - Maximum rank is O(log n)
 - Each operation affects O(1) nodes amortized
 - Rank updates maintain structure efficiently
@@ -128,11 +134,13 @@ The key insight is that rank constraints bound the tree height while allowing ef
 There are two variants of rank-pairing heaps:
 
 **Type-A** (implemented here):
+
 - Node can lose at most one child before being cut
 - Simpler implementation
 - Same bounds
 
 **Type-B**:
+
 - More permissive marking rules
 - Slightly more complex but may have better constants
 - Same asymptotic bounds
@@ -140,6 +148,7 @@ There are two variants of rank-pairing heaps:
 ## Implementation Details
 
 The Rust implementation:
+
 - Uses explicit rank fields
 - Updates ranks locally after operations
 - Maintains mark flags for cut tracking
@@ -152,4 +161,3 @@ The Rust implementation:
 2. Haeupler, B., Sen, S., & Tarjan, R. E. (2009). Rank-pairing heaps. *Proceedings of ESA* 2009, 659-670.
 
 3. Cho, S., & Sahni, S. (2000). Mergeable heaps with decrease key. *Operations Research Letters*, 26(3), 169-174.
-

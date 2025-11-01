@@ -7,8 +7,9 @@ The **Skew Binomial Heap** is an extension of binomial heaps that allows **skew 
 ## Historical Context and Papers
 
 ### Original Paper
+
 - **Brodal, Gerth Stølting; Okasaki, Chris** (1996). "Optimal purely functional priority queues". *Journal of Functional Programming*. 6 (6): 839–857. doi:10.1017/S095679680000201X.
-   - Introduced skew binomial heaps in the context of functional programming
+  - Introduced skew binomial heaps in the context of functional programming
 
 ### Key Follow-up Work
 
@@ -44,6 +45,7 @@ A **skew binomial tree** is similar to a binomial tree but with additional flexi
 ### Data Structure
 
 A skew binomial heap is a collection of skew binomial trees where:
+
 - Each tree satisfies the min-heap property
 - Trees are stored in a list (similar to binomial heaps)
 - **Skew flag**: Each tree has a flag indicating if it's "skew"
@@ -66,6 +68,7 @@ This is the key improvement over standard binomial heaps:
 #### Skew Link
 
 A skew link is a special type of tree linking:
+
 - Two rank-k skew trees can be linked in O(1) time
 - Result is a rank-(k+1) tree (may or may not be skew)
 - Preserves heap property and tree structure
@@ -89,7 +92,8 @@ The key insight is that skew links prevent the O(log n) cost of standard binomia
 3. Add children to heap
 4. Merge children back into heap
 
-**Why O(log n)?** 
+**Why O(log n)?**
+
 - At most O(log n) children (rank bound)
 - Merging children uses skew links (O(1) each)
 - Total: O(log n)
@@ -119,11 +123,13 @@ This is the same as binomial heaps - no improvement here.
 ## Why Skew Links Work
 
 The skew link operation is designed to:
+
 1. **Preserve structure**: Result is still a valid skew binomial tree
 2. **Be constant time**: No recursive restructuring needed
 3. **Allow cascading**: Multiple skew links can cascade efficiently
 
 The mathematical properties of skew binomial trees ensure that:
+
 - Skew links can be applied in O(1) time
 - Cascading is bounded (like binary addition)
 - Structure is maintained
@@ -131,6 +137,7 @@ The mathematical properties of skew binomial trees ensure that:
 ## Functional Programming Context
 
 Skew binomial heaps were originally developed for **purely functional programming**:
+
 - **Persistent**: Operations don't mutate existing structure
 - **Purely functional**: No side effects
 - **Efficient**: Still achieve good bounds
@@ -140,6 +147,7 @@ The Rust implementation uses mutable pointers (not purely functional), but the a
 ## Implementation Details
 
 The Rust implementation:
+
 - Tracks skew flag on each node
 - Implements skew link operation (O(1))
 - Uses special handling for rank-0 trees
@@ -149,6 +157,7 @@ The Rust implementation:
 ## Applications
 
 Skew binomial heaps are useful when:
+
 1. **Many insertions**: O(1) insert is better than O(log n)
 2. **Frequent merging**: O(1) merge is beneficial
 3. **Functional programming**: Purely functional implementations
@@ -161,4 +170,3 @@ Skew binomial heaps are useful when:
 2. Okasaki, C. (1999). *Purely Functional Data Structures*. Cambridge University Press.
 
 3. Hinze, R. (2000). A simple implementation technique for priority search queues. *Proceedings of ICFP* 2000, 110-121.
-

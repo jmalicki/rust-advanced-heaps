@@ -2,23 +2,37 @@
 
 ## Overview
 
-The **Brodal Heap** achieves the same asymptotic bounds as Fibonacci heaps, but with **worst-case** guarantees instead of amortized ones. This is a remarkable achievement: O(1) worst-case insert, decrease_key, and merge; O(log n) worst-case delete_min.
+The **Brodal Heap** achieves the same asymptotic bounds as Fibonacci heaps,
+but with **worst-case** guarantees instead of amortized ones. This is a
+remarkable achievement: O(1) worst-case insert, decrease_key, and merge; O(log
+n) worst-case delete_min.
 
 ## Historical Context and Papers
 
 ### Original Paper
-- **Brodal, Gerth Stølting** (1996). "Worst-case efficient priority queues". *Proceedings of the 7th Annual ACM-SIAM Symposium on Discrete Algorithms*. pp. 52–58.
-   - Introduced the Brodal heap and showed that worst-case bounds matching Fibonacci heaps are possible
+
+- **Brodal, Gerth Stølting** (1996). "Worst-case efficient priority queues".
+  *Proceedings of the 7th Annual ACM-SIAM Symposium on Discrete Algorithms*.
+  pp. 52–58.
+  - Introduced the Brodal heap and showed that worst-case bounds matching
+    Fibonacci heaps are possible
 
 ### Key Follow-up Work
 
-1. **Brodal, Gerth Stølting** (1996). "Priority queues on a fixed number of heaps". *Proceedings of the 3rd Annual European Symposium on Algorithms (ESA)*. pp. 209–223. doi:10.1007/3-540-61581-5_66.
+1. **Brodal, Gerth Stølting** (1996). "Priority queues on a fixed number of
+   heaps". *Proceedings of the 3rd Annual European Symposium on Algorithms
+   (ESA)*. pp. 209–223. doi:10.1007/3-540-61581-5_66.
    - Further analysis and variants
 
-2. **Elmasry, Amr** (2004). "Pairing heaps with O(log log n) decrease cost". *Proceedings of the 15th Annual European Symposium on Algorithms (ESA)*. pp. 183–194. doi:10.1007/978-3-540-39658-1_19.
+2. **Elmasry, Amr** (2004). "Pairing heaps with O(log log n) decrease cost".
+   *Proceedings of the 15th Annual European Symposium on Algorithms (ESA)*.
+   pp. 183–194. doi:10.1007/978-3-540-39658-1_19.
    - Related work on pairing heaps
 
-3. **Brodal, Gerth Stølting; Lagogiannis, George; Tarjan, Robert E.** (2012). "Strict Fibonacci heaps". *Proceedings of the 44th Annual ACM Symposium on Theory of Computing (STOC)*. pp. 1177–1184. doi:10.1145/2213977.2214080.
+3. **Brodal, Gerth Stølting; Lagogiannis, George; Tarjan, Robert E.** (2012).
+   "Strict Fibonacci heaps". *Proceedings of the 44th Annual ACM Symposium on
+   Theory of Computing (STOC)*. pp. 1177–1184.
+   doi:10.1145/2213977.2214080.
    - Strict Fibonacci heaps also achieve worst-case bounds
 
 ## Asymptotic Complexity
@@ -31,17 +45,20 @@ The **Brodal Heap** achieves the same asymptotic bounds as Fibonacci heaps, but 
 | `decrease_key` | **O(1)** worst-case | Constant time guaranteed |
 | `merge` | **O(1)** worst-case | Constant time guaranteed |
 
-**Key Achievement**: These are **worst-case** bounds, matching the **amortized** bounds of Fibonacci heaps!
+**Key Achievement**: These are **worst-case** bounds, matching the
+**amortized** bounds of Fibonacci heaps!
 
 ## How It Works
 
 ### The Challenge
 
 Fibonacci heaps achieve O(1) amortized bounds using:
+
 - **Lazy evaluation**: Defer work until necessary
 - **Potential functions**: Charge cheap operations to pay for expensive ones
 
 To achieve **worst-case** bounds, we need to:
+
 - Do work immediately instead of deferring
 - Maintain stricter structural invariants
 - Use violation tracking and repair
@@ -49,6 +66,7 @@ To achieve **worst-case** bounds, we need to:
 ### Data Structure
 
 A Brodal heap maintains:
+
 - A heap-ordered tree structure
 - **Rank constraints** (similar to rank-pairing heaps)
 - **Violation queues**: Per-rank lists of nodes violating constraints
@@ -57,6 +75,7 @@ A Brodal heap maintains:
 ### Rank Constraints
 
 Each node has a **rank** that must satisfy:
+
 - For node v with children w₁, w₂ (two smallest ranks):
   - rank(v) ≤ rank(w₁) + 1
   - rank(v) ≤ rank(w₂) + 1
@@ -67,11 +86,14 @@ This bounds the tree height while allowing efficient updates.
 
 The key innovation is the **violation tracking system**:
 
-1. **Per-rank violation queues**: For each rank r, maintain a queue of nodes with rank r that violate constraints
+1. **Per-rank violation queues**: For each rank r, maintain a queue of nodes
+   with rank r that violate constraints
 2. **Immediate repair**: After each operation, repair at most O(1) violations
-3. **Repair during delete_min**: Process all violations during delete_min (amortized over the operation)
+3. **Repair during delete_min**: Process all violations during delete_min
+   (amortized over the operation)
 
 **Why this works:**
+
 - Each operation creates at most O(1) new violations
 - Repairing one violation is O(1) (local restructuring)
 - Over a sequence of operations, violations are repaired as they accumulate
@@ -84,8 +106,10 @@ The key innovation is the **violation tracking system**:
 1. Create new node with rank 0
 2. Merge with root (make it child or new root)
 3. Update rank of parent
-4. **Check for rank violations**: If violation created, add to violation queue
-5. **Repair one violation**: Process one violation from current rank (worst-case O(1))
+4. **Check for rank violations**: If violation created, add to violation
+   queue
+5. **Repair one violation**: Process one violation from current rank
+   (worst-case O(1))
 
 The repair is O(1) because it only affects nodes locally.
 
@@ -110,9 +134,11 @@ The key is that we only repair one violation per operation, ensuring O(1) worst-
 5. Find new minimum
 
 **Why O(log n)?**
+
 - At most O(log n) children (rank bound)
 - Rebuilding maintains structure
-- Violation processing: we've been repairing violations along the way, so only O(log n) remain
+- Violation processing: we've been repairing violations along the way, so
+  only O(log n) remain
 
 #### Merge (O(1) worst-case)
 
@@ -127,7 +153,7 @@ The key is that we only repair one violation per operation, ensuring O(1) worst-
 When a violation is detected:
 
 1. **Identify violation**: Node's rank exceeds children's rank constraints
-2. **Restructure locally**: 
+2. **Restructure locally**:
    - Disconnect children
    - Group children by rank
    - Link children to reduce rank
@@ -149,6 +175,7 @@ The repair is **local** - only affects the violating node and its children.
 | Guarantees | **Worst-case** | **Amortized** |
 
 **Trade-offs:**
+
 - **Pro**: Worst-case guarantees (real-time systems, hard deadlines)
 - **Con**: Much more complex implementation
 - **Con**: Higher constant factors due to violation tracking
@@ -156,11 +183,13 @@ The repair is **local** - only affects the violating node and its children.
 ## Practical Considerations
 
 **When to use:**
+
 - Real-time systems requiring worst-case guarantees
 - When amortized bounds aren't sufficient
 - When constant factors matter less than guarantees
 
 **When not to use:**
+
 - Simple applications (binary heap often faster)
 - When amortized bounds are acceptable
 - When implementation complexity is a concern
@@ -168,6 +197,7 @@ The repair is **local** - only affects the violating node and its children.
 ## Implementation Details
 
 The Rust implementation includes:
+
 - Per-rank violation queues
 - Rank constraint checking after operations
 - Violation repair with local restructuring
@@ -176,11 +206,14 @@ The Rust implementation includes:
 
 ## References
 
-1. Brodal, G. S. (1996). Worst-case efficient priority queues. *Proceedings of SODA* 1996, 52-58.
+1. Brodal, G. S. (1996). Worst-case efficient priority queues. *Proceedings
+   of SODA* 1996, 52-58.
 
-2. Brodal, G. S. (1996). Priority queues on a fixed number of heaps. *Proceedings of ESA* 1996, 209-223.
+2. Brodal, G. S. (1996). Priority queues on a fixed number of heaps.
+   *Proceedings of ESA* 1996, 209-223.
 
-3. Elmasry, A. (2004). Pairing heaps with O(log log n) decrease cost. *Proceedings of ESA* 2004, 183-194.
+3. Elmasry, A. (2004). Pairing heaps with O(log log n) decrease cost.
+   *Proceedings of ESA* 2004, 183-194.
 
-4. Brodal, G. S., Lagogiannis, G., & Tarjan, R. E. (2012). Strict Fibonacci heaps. *Proceedings of STOC* 2012, 1177-1184.
-
+4. Brodal, G. S., Lagogiannis, G., & Tarjan, R. E. (2012). Strict Fibonacci
+   heaps. *Proceedings of STOC* 2012, 1177-1184.

@@ -7,6 +7,7 @@ The **Strict Fibonacci Heap** is a refinement of Fibonacci heaps that achieves *
 ## Historical Context and Papers
 
 ### Original Paper
+
 - **Brodal, Gerth Stølting; Lagogiannis, George; Tarjan, Robert E.** (2012). "Strict Fibonacci heaps". *Proceedings of the 44th Annual ACM Symposium on Theory of Computing (STOC)*. pp. 1177–1184. doi:10.1145/2213977.2214080.
 
 ### Key Follow-up Work
@@ -34,11 +35,13 @@ The **Strict Fibonacci Heap** is a refinement of Fibonacci heaps that achieves *
 ### Differences from Fibonacci Heaps
 
 Standard Fibonacci heaps achieve **amortized** O(1) bounds using:
+
 - **Lazy consolidation**: Defer work until delete_min
 - **Cascading cuts**: Cut parents only when already marked
 - **Potential function**: Charge cheap operations to pay for expensive ones
 
 Strict Fibonacci heaps achieve **worst-case** bounds using:
+
 - **Active consolidation**: Fix structure immediately after operations
 - **Stricter invariants**: Maintain structure constraints at all times
 - **Violation prevention**: Prevent violations rather than deferring repair
@@ -46,12 +49,14 @@ Strict Fibonacci heaps achieve **worst-case** bounds using:
 ### Data Structure
 
 A Strict Fibonacci heap maintains:
+
 - **Active root list**: Roots that are "active" (recently modified)
 - **Passive root list**: Roots that are "stable" (haven't been modified recently)
 - **Consolidation tracking**: Know when consolidation is needed
 - **Stricter degree constraints**: Maintain degree invariants more carefully
 
 The active/passive distinction allows us to:
+
 - Defer consolidation of stable structures
 - Immediately fix recently modified structures
 - Balance work across operations
@@ -85,6 +90,7 @@ The insight is that we only consolidate **when necessary**, not on every operati
 5. Move roots to passive list (they're now stable)
 
 **Why O(log n)?**
+
 - At most O(log n) roots after consolidation
 - Consolidation links O(log n) trees
 - Each link is O(1)
@@ -112,6 +118,7 @@ Simple structure merge, with conditional consolidation.
 ### Why No Cascading Cuts?
 
 In standard Fibonacci heaps, cascading cuts ensure amortized bounds. In Strict Fibonacci heaps:
+
 - **Structure constraints prevent deep violations**: The stricter invariants mean violations don't cascade deep
 - **Immediate consolidation**: We fix violations when they occur, not later
 - **Worst-case bounds**: Immediate repair ensures worst-case O(1)
@@ -132,16 +139,19 @@ This is the key insight: by maintaining stricter structure, we prevent cascades.
 ## Practical Considerations
 
 **Pros:**
+
 - Worst-case guarantees (real-time systems)
 - Same asymptotic bounds as Fibonacci heaps
 - Prevents pathological worst-case behavior
 
 **Cons:**
+
 - More complex than standard Fibonacci heaps
 - Higher constant overhead
 - Active/passive tracking adds complexity
 
 **When to use:**
+
 - Real-time systems requiring worst-case guarantees
 - When amortized bounds aren't acceptable
 - When worst-case behavior must be bounded
@@ -149,6 +159,7 @@ This is the key insight: by maintaining stricter structure, we prevent cascades.
 ## Implementation Details
 
 The Rust implementation:
+
 - Maintains active and passive root lists
 - Uses conditional consolidation
 - Tracks structure constraints carefully
@@ -162,4 +173,3 @@ The Rust implementation:
 2. Brodal, G. S. (1996). Worst-case efficient priority queues. *Proceedings of SODA* 1996, 52-58.
 
 3. Fredman, M. L., & Tarjan, R. E. (1987). Fibonacci heaps and their uses in improved network optimization algorithms. *Journal of the ACM*, 34(3), 596-615.
-
