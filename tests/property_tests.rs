@@ -1,7 +1,26 @@
 //! Property-based tests using proptest
 //!
-//! These tests generate random sequences of operations and verify
-//! that the heap invariants are always maintained.
+//! These tests generate random sequences of operations and verify that heap
+//! invariants are always maintained across all implementations. The approach uses
+//! a cartesian product pattern: we define generic test functions once, then generate
+//! test suites for each heap implementation automatically.
+//!
+//! ## Testing Strategy
+//!
+//! 1. **Generic test functions**: Each test function is parameterized over heap type
+//!    and verifies a specific invariant (heap property, length, completeness, etc.)
+//!
+//! 2. **Automatic generation**: A macro creates test modules for each heap, applying
+//!    all test functions to each implementation
+//!
+//! 3. **Comprehensive coverage**: We test all major operations (push, pop, merge,
+//!    decrease_key, peek) and their interactions
+//!
+//! 4. **Edge cases**: Special attention to duplicates, complex sequences, and
+//!    idempotency properties
+//!
+//! This approach scales well: adding a new heap type requires one line, and adding
+//! a new property test automatically applies to all heaps.
 
 use proptest::prelude::*;
 use rust_advanced_heaps::Heap;
@@ -10,10 +29,21 @@ use rust_advanced_heaps::pairing::PairingHeap;
 use rust_advanced_heaps::rank_pairing::RankPairingHeap;
 use rust_advanced_heaps::binomial::BinomialHeap;
 use rust_advanced_heaps::brodal::BrodalHeap;
+use rust_advanced_heaps::strict_fibonacci::StrictFibonacciHeap;
+use rust_advanced_heaps::twothree::TwoThreeHeap;
+use rust_advanced_heaps::skew_binomial::SkewBinomialHeap;
 
 use std::collections::HashMap;
 
 /// Test that push and pop maintain heap property
+///
+/// This is the fundamental heap invariant: after any sequence of pushes and pops,
+/// the minimum element should always be at the top. We generate random sequences
+/// of push/pop operations and verify that `peek()` always returns the global minimum
+/// among all currently inserted elements.
+///
+/// This catches bugs where the heap structure becomes corrupted or the minimum
+/// pointer is not properly maintained during operations.
 fn test_push_pop_invariant<H: Heap<i32, i32>>(ops: Vec<(bool, i32)>) -> Result<(), TestCaseError> {
     let mut heap = H::new();
     let mut inserted = Vec::new();
@@ -44,7 +74,14 @@ fn test_push_pop_invariant<H: Heap<i32, i32>>(ops: Vec<(bool, i32)>) -> Result<(
     Ok(())
 }
 
-/// Test decrease_key maintains heap property
+/// Test that decrease_key maintains heap property
+///
+/// Decrease_key is the most complex operation in many heap implementations. This test
+/// verifies that after decreasing a key, the heap property is maintained and the minimum
+/// is correctly updated if we decreased the minimum element.
+///
+/// This is particularly important for fibonacci/pairing heaps which use cut operations
+/// that can alter the tree structure significantly. Bugs here can corrupt the entire heap.
 fn test_decrease_key_invariant<H: Heap<i32, i32>>(
     initial: Vec<i32>,
     decreases: Vec<(usize, i32)>
@@ -85,6 +122,13 @@ fn test_decrease_key_invariant<H: Heap<i32, i32>>(
 }
 
 /// Test that all popped elements are in non-decreasing order
+///
+/// This verifies the heap property by popping all elements and checking they come out
+/// in sorted order. This is a stronger test than just checking peek() because it exercises
+/// the pop operation fully and verifies the entire heap structure maintains ordering.
+///
+/// This catches bugs in the restructuring that happens during pop (like pairing in pairing
+/// heaps, or tree consolidation in fibonacci/binomial heaps).
 fn test_pop_order_invariant<H: Heap<i32, i32>>(values: Vec<i32>) -> Result<(), TestCaseError> {
     let mut heap = H::new();
     
@@ -106,7 +150,14 @@ fn test_pop_order_invariant<H: Heap<i32, i32>>(values: Vec<i32>) -> Result<(), T
     Ok(())
 }
 
-/// Test merge maintains heap property
+/// Test that merge maintains heap property
+///
+/// Merge combines two heaps into one. This test verifies that after merging, the
+/// minimum element of the merged heap is the global minimum of both original heaps.
+/// This is important for algorithms like Prim's MST that use multiple heaps.
+///
+/// Many heap implementations have merge as a fundamental operation, and bugs here can
+/// lead to incorrect priorities being returned.
 fn test_merge_invariant<H: Heap<i32, i32>>(
     heap1_values: Vec<i32>,
     heap2_values: Vec<i32>
@@ -137,7 +188,14 @@ fn test_merge_invariant<H: Heap<i32, i32>>(
     Ok(())
 }
 
-/// Test len() is always correct
+/// Test that len() is always correct
+///
+/// Length tracking can be tricky in complex heap implementations, especially with
+/// restructuring operations. This test ensures the reported length matches the actual
+/// number of elements in the heap.
+///
+/// This catches off-by-one errors, double-counting in tree consolidation, or lost
+/// elements during merge/delete operations.
 fn test_len_invariant<H: Heap<i32, i32>>(ops: Vec<(bool, i32)>) -> Result<(), TestCaseError> {
     let mut heap = H::new();
     let mut expected_len = 0;
@@ -158,166 +216,399 @@ fn test_len_invariant<H: Heap<i32, i32>>(ops: Vec<(bool, i32)>) -> Result<(), Te
     Ok(())
 }
 
-// Generate test cases for each heap implementation
-
-proptest! {
-    #[test]
-    fn test_fibonacci_push_pop_invariant(ops in prop::collection::vec((prop::bool::any(), -100i32..100), 0..100)) {
-        test_push_pop_invariant::<FibonacciHeap<i32, i32>>(ops)?;
+/// Test that peek() doesn't modify the heap
+///
+/// Peek should be a read-only operation. This test verifies that calling peek multiple
+/// times returns the same value and doesn't alter the heap's length or structure.
+///
+/// This catches implementations where peek inadvertently modifies internal state or
+/// pointers, which could lead to subsequent operations returning incorrect results.
+fn test_peek_idempotent<H: Heap<i32, i32>>(values: Vec<i32>) -> Result<(), TestCaseError> {
+    let mut heap = H::new();
+    
+    for val in &values {
+        heap.push(*val, *val);
     }
     
-    #[test]
-    fn test_fibonacci_decrease_key_invariant(
-        initial in prop::collection::vec(-100i32..100, 1..50),
-        decreases in prop::collection::vec((0usize..50, -100i32..100), 0..20)
-    ) {
-        test_decrease_key_invariant::<FibonacciHeap<i32, i32>>(initial, decreases)?;
+    if !heap.is_empty() {
+        let peek1 = heap.peek().map(|(p, _)| *p);
+        let peek2 = heap.peek().map(|(p, _)| *p);
+        prop_assert_eq!(peek1, peek2);
+        
+        let len1 = heap.len();
+        let _ = heap.peek();
+        let len2 = heap.len();
+        prop_assert_eq!(len1, len2);
     }
     
-    #[test]
-    fn test_fibonacci_pop_order_invariant(values in prop::collection::vec(-100i32..100, 1..100)) {
-        test_pop_order_invariant::<FibonacciHeap<i32, i32>>(values)?;
-    }
-    
-    #[test]
-    fn test_fibonacci_merge_invariant(
-        heap1 in prop::collection::vec(-100i32..100, 0..50),
-        heap2 in prop::collection::vec(-100i32..100, 0..50)
-    ) {
-        test_merge_invariant::<FibonacciHeap<i32, i32>>(heap1, heap2)?;
-    }
-    
-    #[test]
-    fn test_fibonacci_len_invariant(ops in prop::collection::vec((prop::bool::any(), -100i32..100), 0..100)) {
-        test_len_invariant::<FibonacciHeap<i32, i32>>(ops)?;
-    }
-    
-    // Pairing heap tests
-    #[test]
-    fn test_pairing_push_pop_invariant(ops in prop::collection::vec((prop::bool::any(), -100i32..100), 0..100)) {
-        test_push_pop_invariant::<PairingHeap<i32, i32>>(ops)?;
-    }
-    
-    #[test]
-    fn test_pairing_decrease_key_invariant(
-        initial in prop::collection::vec(-100i32..100, 1..50),
-        decreases in prop::collection::vec((0usize..50, -100i32..100), 0..20)
-    ) {
-        test_decrease_key_invariant::<PairingHeap<i32, i32>>(initial, decreases)?;
-    }
-    
-    #[test]
-    fn test_pairing_pop_order_invariant(values in prop::collection::vec(-100i32..100, 1..100)) {
-        test_pop_order_invariant::<PairingHeap<i32, i32>>(values)?;
-    }
-    
-    #[test]
-    fn test_pairing_merge_invariant(
-        heap1 in prop::collection::vec(-100i32..100, 0..50),
-        heap2 in prop::collection::vec(-100i32..100, 0..50)
-    ) {
-        test_merge_invariant::<PairingHeap<i32, i32>>(heap1, heap2)?;
-    }
-    
-    #[test]
-    fn test_pairing_len_invariant(ops in prop::collection::vec((prop::bool::any(), -100i32..100), 0..100)) {
-        test_len_invariant::<PairingHeap<i32, i32>>(ops)?;
-    }
-    
-    // Rank-pairing heap tests
-    #[test]
-    fn test_rank_pairing_push_pop_invariant(ops in prop::collection::vec((prop::bool::any(), -100i32..100), 0..100)) {
-        test_push_pop_invariant::<RankPairingHeap<i32, i32>>(ops)?;
-    }
-    
-    #[test]
-    fn test_rank_pairing_decrease_key_invariant(
-        initial in prop::collection::vec(-100i32..100, 1..50),
-        decreases in prop::collection::vec((0usize..50, -100i32..100), 0..20)
-    ) {
-        test_decrease_key_invariant::<RankPairingHeap<i32, i32>>(initial, decreases)?;
-    }
-    
-    #[test]
-    fn test_rank_pairing_pop_order_invariant(values in prop::collection::vec(-100i32..100, 1..100)) {
-        test_pop_order_invariant::<RankPairingHeap<i32, i32>>(values)?;
-    }
-    
-    #[test]
-    fn test_rank_pairing_merge_invariant(
-        heap1 in prop::collection::vec(-100i32..100, 0..50),
-        heap2 in prop::collection::vec(-100i32..100, 0..50)
-    ) {
-        test_merge_invariant::<RankPairingHeap<i32, i32>>(heap1, heap2)?;
-    }
-    
-    #[test]
-    fn test_rank_pairing_len_invariant(ops in prop::collection::vec((prop::bool::any(), -100i32..100), 0..100)) {
-        test_len_invariant::<RankPairingHeap<i32, i32>>(ops)?;
-    }
-    
-    // Binomial heap tests
-    #[test]
-    fn test_binomial_push_pop_invariant(ops in prop::collection::vec((prop::bool::any(), -100i32..100), 0..100)) {
-        test_push_pop_invariant::<BinomialHeap<i32, i32>>(ops)?;
-    }
-    
-    #[test]
-    fn test_binomial_decrease_key_invariant(
-        initial in prop::collection::vec(-100i32..100, 1..50),
-        decreases in prop::collection::vec((0usize..50, -100i32..100), 0..20)
-    ) {
-        test_decrease_key_invariant::<BinomialHeap<i32, i32>>(initial, decreases)?;
-    }
-    
-    #[test]
-    fn test_binomial_pop_order_invariant(values in prop::collection::vec(-100i32..100, 1..100)) {
-        test_pop_order_invariant::<BinomialHeap<i32, i32>>(values)?;
-    }
-    
-    #[test]
-    fn test_binomial_merge_invariant(
-        heap1 in prop::collection::vec(-100i32..100, 0..50),
-        heap2 in prop::collection::vec(-100i32..100, 0..50)
-    ) {
-        test_merge_invariant::<BinomialHeap<i32, i32>>(heap1, heap2)?;
-    }
-    
-    #[test]
-    fn test_binomial_len_invariant(ops in prop::collection::vec((prop::bool::any(), -100i32..100), 0..100)) {
-        test_len_invariant::<BinomialHeap<i32, i32>>(ops)?;
-    }
-    
-    // Brodal heap tests (fewer due to complexity)
-    #[test]
-    fn test_brodal_push_pop_invariant(ops in prop::collection::vec((prop::bool::any(), -100i32..100), 0..50)) {
-        test_push_pop_invariant::<BrodalHeap<i32, i32>>(ops)?;
-    }
-    
-    #[test]
-    fn test_brodal_decrease_key_invariant(
-        initial in prop::collection::vec(-100i32..100, 1..30),
-        decreases in prop::collection::vec((0usize..30, -100i32..100), 0..10)
-    ) {
-        test_decrease_key_invariant::<BrodalHeap<i32, i32>>(initial, decreases)?;
-    }
-    
-    #[test]
-    fn test_brodal_pop_order_invariant(values in prop::collection::vec(-100i32..100, 1..50)) {
-        test_pop_order_invariant::<BrodalHeap<i32, i32>>(values)?;
-    }
-    
-    #[test]
-    fn test_brodal_merge_invariant(
-        heap1 in prop::collection::vec(-100i32..100, 0..30),
-        heap2 in prop::collection::vec(-100i32..100, 0..30)
-    ) {
-        test_merge_invariant::<BrodalHeap<i32, i32>>(heap1, heap2)?;
-    }
-    
-    #[test]
-    fn test_brodal_len_invariant(ops in prop::collection::vec((prop::bool::any(), -100i32..100), 0..50)) {
-        test_len_invariant::<BrodalHeap<i32, i32>>(ops)?;
-    }
+    Ok(())
 }
+
+/// Test complex sequences with mixed operations
+///
+/// Real-world usage involves interleaved push/pop/decrease_key/peek operations. This test
+/// generates random sequences of these operations to find bugs that only appear when
+/// operations are combined in specific ways.
+///
+/// This is particularly important for finding state management bugs where operations
+/// interfere with each other, or when temporary invariants are broken during complex
+/// restructuring operations.
+fn test_complex_operations<H: Heap<i32, i32>>(
+    initial: Vec<i32>,
+    ops: Vec<(u8, i32)>
+) -> Result<(), TestCaseError> {
+    let mut heap = H::new();
+    let mut handles = Vec::new();
+    let mut priorities: HashMap<usize, i32> = HashMap::new();
+    
+    // Insert initial values
+    for (i, priority) in initial.iter().enumerate() {
+        let handle = heap.push(*priority, *priority);
+        handles.push(handle);
+        priorities.insert(i, *priority);
+    }
+    
+    // Apply operations: 0=push, 1=pop, 2=decrease_key, 3=peek
+    for (op_type, value) in ops {
+        match op_type % 4 {
+            0 => {
+                // Push
+                let idx = handles.len();
+                let handle = heap.push(value, value);
+                handles.push(handle);
+                priorities.insert(idx, value);
+            }
+            1 => {
+                // Pop
+                if !heap.is_empty() {
+                    let popped = heap.pop();
+                    if let Some((priority, _item)) = popped {
+                        // Find and remove from priorities map
+                        if let Some((&idx, _)) = priorities.iter().find(|(_, &p)| p == priority) {
+                            priorities.remove(&idx);
+                        }
+                    }
+                }
+            }
+            2 => {
+                // Decrease_key - only if we have valid handles and priorities
+                if !handles.is_empty() && !priorities.is_empty() {
+                    // Pick from valid indices only
+                    let valid_indices: Vec<usize> = priorities.keys().copied().collect();
+                    if !valid_indices.is_empty() {
+                        let idx = valid_indices[(value as usize) % valid_indices.len()];
+                        let old_priority = priorities[&idx];
+                        let new_priority = if value < old_priority { value } else { old_priority - 1 };
+                        heap.decrease_key(&handles[idx], new_priority);
+                        priorities.insert(idx, new_priority);
+                    }
+                }
+            }
+            3 => {
+                // Peek (should not modify)
+                let peeked = heap.peek();
+                if let Some((priority, _item)) = peeked {
+                    if !priorities.is_empty() {
+                        let min_priority = priorities.values().min().copied();
+                        prop_assert_eq!(*priority, min_priority.unwrap());
+                    }
+                }
+            }
+            _ => {}
+        }
+        
+        // Verify invariants after each operation
+        if !heap.is_empty() && !priorities.is_empty() {
+            let min_in_map = priorities.values().min().copied();
+            if let Some(expected_min) = min_in_map {
+                if let Some((actual_min, _)) = heap.peek() {
+                    prop_assert_eq!(*actual_min, expected_min);
+                }
+            }
+        }
+        
+        prop_assert_eq!(heap.len(), priorities.len());
+        prop_assert_eq!(heap.is_empty(), priorities.is_empty());
+    }
+    
+    Ok(())
+}
+
+/// Test that multiple merges preserve heap property
+///
+/// This tests merging many heaps together in sequence, which exercises the merge operation
+/// more thoroughly than a single merge. Complex restructuring can compound errors across
+/// multiple merges.
+///
+/// This is important for heaps used in parallel algorithms where multiple heaps need to
+/// be combined, or in applications that naturally use multiple priority queues.
+fn test_multiple_merges<H: Heap<i32, i32>>(
+    heaps: Vec<Vec<i32>>
+) -> Result<(), TestCaseError> {
+    if heaps.is_empty() {
+        return Ok(());
+    }
+    
+    let mut result = H::new();
+    let mut all_mins = Vec::new();
+    
+    // Create and merge all heaps
+    for heap_values in heaps {
+        let mut heap = H::new();
+        for val in heap_values {
+            heap.push(val, val);
+        }
+        
+        if let Some((min, _)) = heap.peek() {
+            all_mins.push(*min);
+        }
+        
+        result.merge(heap);
+    }
+    
+    // Verify result
+    if !all_mins.is_empty() {
+        let expected_min = all_mins.iter().min().copied();
+        if let Some(expected) = expected_min {
+            if let Some((actual, _)) = result.peek() {
+                prop_assert_eq!(*actual, expected);
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+/// Test completeness: all inserted elements are eventually retrievable
+///
+/// This verifies that no elements are lost during heap operations. We insert
+/// all values, pop them all, and verify that:
+/// 1. The total count of popped elements matches the number inserted
+/// 2. Each unique value that was inserted appears in the popped results
+///
+/// This is critical for correctness - losing elements would corrupt the heap.
+fn test_completeness<H: Heap<i32, i32>>(values: Vec<i32>) -> Result<(), TestCaseError> {
+    let mut heap = H::new();
+    let mut popped_values = Vec::new();
+    let insert_count = values.len();
+    
+    // Insert all values (may include duplicates)
+    for val in &values {
+        heap.push(*val, *val);
+    }
+    
+    prop_assert_eq!(heap.len(), insert_count);
+    
+    // Pop all and collect
+    while !heap.is_empty() {
+        if let Some((_priority, item)) = heap.pop() {
+            popped_values.push(item);
+        }
+    }
+    
+    // Verify we got exactly as many elements back as we inserted
+    prop_assert_eq!(popped_values.len(), insert_count, 
+        "Lost elements: inserted {}, popped {}", insert_count, popped_values.len());
+    
+    // Verify all unique values are present (for duplicates, we just check presence)
+    let original_set: std::collections::HashSet<i32> = values.iter().copied().collect();
+    let popped_set: std::collections::HashSet<i32> = popped_values.iter().copied().collect();
+    prop_assert_eq!(popped_set, original_set, "Missing or extra unique values");
+    
+    Ok(())
+}
+
+/// Test decrease_key with edge cases
+///
+/// This test decreases every key in the heap to very small values, which often triggers
+/// cut operations in fibonacci/pairing heaps. When many keys are decreased at once,
+/// restructuring bugs become more apparent.
+///
+/// This is critical for verifying that decrease_key correctly handles cascading cuts
+/// or other restructuring operations without corrupting the heap structure.
+fn test_decrease_key_edge_cases<H: Heap<i32, i32>>(
+    values: Vec<i32>
+) -> Result<(), TestCaseError> {
+    if values.is_empty() {
+        return Ok(());
+    }
+    
+    let mut heap = H::new();
+    let mut handles = Vec::new();
+    
+    // Insert values
+    for val in &values {
+        let handle = heap.push(*val, *val);
+        handles.push(handle);
+    }
+    
+    // Try decreasing each key to various smaller values
+    for (idx, &val) in values.iter().enumerate() {
+        let new_priority = val - 100;
+        heap.decrease_key(&handles[idx], new_priority);
+        
+        // Verify min is now this value or something smaller
+        if let Some((min, _)) = heap.peek() {
+            prop_assert!(*min <= new_priority);
+        }
+    }
+    
+    Ok(())
+}
+
+/// Test behavior when repeatedly pushing and popping the same element
+///
+/// Duplicate priorities are a common edge case in heap implementations. This test verifies
+/// that inserting the same priority multiple times and popping them all works correctly.
+///
+/// Some heap implementations might mishandle duplicates during restructuring, or have
+/// issues with duplicate comparisons during consolidation/merging operations.
+fn test_duplicate_operations<H: Heap<i32, i32>>(
+    value: i32,
+    count: usize
+) -> Result<(), TestCaseError> {
+    let mut heap = H::new();
+    
+    for _ in 0..count {
+        heap.push(value, value);
+    }
+    
+    prop_assert_eq!(heap.len(), count);
+    
+    for i in 0..count {
+        if let Some((priority, _)) = heap.pop() {
+            prop_assert_eq!(priority, value);
+            prop_assert_eq!(heap.len(), count - i - 1);
+        }
+    }
+    
+    prop_assert!(heap.is_empty());
+    Ok(())
+}
+
+/// Macro to generate property tests for each heap implementation
+///
+/// This macro creates a cartesian product of all test functions across all heap types.
+/// It generates a separate module for each heap with all the property tests, allowing
+/// us to test all 8 heap implementations with all 11 test types efficiently.
+///
+/// Benefits:
+/// - DRY: Define test logic once, reuse for all implementations
+/// - Easy to add new heaps: just add one macro invocation
+/// - Easy to add new tests: they automatically apply to all heaps
+/// - Clear test organization: each heap has its own module
+macro_rules! create_heap_tests {
+    ($heap_name:ident => $heap_type:ty, $ops_size:expr, $initial_size:expr, $decreases_size:expr, $values_size:expr) => {
+        mod $heap_name {
+            use super::*;
+            
+            proptest::proptest! {
+                #[test]
+                fn push_pop_invariant(ops in prop::collection::vec((prop::bool::ANY, -100i32..100), $ops_size)) {
+                    test_push_pop_invariant::<$heap_type>(ops)?;
+                }
+                
+                #[test]
+                fn decrease_key_invariant(
+                    initial in prop::collection::vec(-100i32..100, $initial_size),
+                    decreases in prop::collection::vec((0usize..50, -100i32..100), $decreases_size)
+                ) {
+                    test_decrease_key_invariant::<$heap_type>(initial, decreases)?;
+                }
+                
+                #[test]
+                fn pop_order_invariant(values in prop::collection::vec(-100i32..100, $values_size)) {
+                    test_pop_order_invariant::<$heap_type>(values)?;
+                }
+                
+                #[test]
+                fn merge_invariant(
+                    heap1 in prop::collection::vec(-100i32..100, $values_size),
+                    heap2 in prop::collection::vec(-100i32..100, $values_size)
+                ) {
+                    test_merge_invariant::<$heap_type>(heap1, heap2)?;
+                }
+                
+                #[test]
+                fn len_invariant(ops in prop::collection::vec((prop::bool::ANY, -100i32..100), $ops_size)) {
+                    test_len_invariant::<$heap_type>(ops)?;
+                }
+                
+                #[test]
+                fn peek_idempotent(values in prop::collection::vec(-100i32..100, $values_size)) {
+                    test_peek_idempotent::<$heap_type>(values)?;
+                }
+                
+                #[test]
+                fn complex_operations(
+                    initial in prop::collection::vec(-100i32..100, 1..20),
+                    ops in prop::collection::vec((0u8..4, -100i32..100), 0..50)
+                ) {
+                    test_complex_operations::<$heap_type>(initial, ops)?;
+                }
+                
+                #[test]
+                fn multiple_merges(heaps in prop::collection::vec(prop::collection::vec(-100i32..100, 0..20), 0..10)) {
+                    test_multiple_merges::<$heap_type>(heaps)?;
+                }
+                
+                #[test]
+                fn completeness(values in prop::collection::vec(-100i32..100, 1..100)) {
+                    test_completeness::<$heap_type>(values)?;
+                }
+                
+                #[test]
+                fn decrease_key_edge_cases(values in prop::collection::vec(-100i32..100, 1..30)) {
+                    test_decrease_key_edge_cases::<$heap_type>(values)?;
+                }
+                
+                #[test]
+                fn duplicate_operations(value in -100i32..100, count in 1..20usize) {
+                    test_duplicate_operations::<$heap_type>(value, count)?;
+                }
+            }
+        }
+    };
+}
+
+// Generate tests for all heap implementations
+create_heap_tests!(
+    fibonacci_tests => FibonacciHeap<i32, i32>,
+    0..100, 1..50, 0..20, 1..100
+);
+
+create_heap_tests!(
+    pairing_tests => PairingHeap<i32, i32>,
+    0..100, 1..50, 0..20, 1..100
+);
+
+create_heap_tests!(
+    rank_pairing_tests => RankPairingHeap<i32, i32>,
+    0..100, 1..50, 0..20, 1..100
+);
+
+create_heap_tests!(
+    binomial_tests => BinomialHeap<i32, i32>,
+    0..100, 1..50, 0..20, 1..100
+);
+
+create_heap_tests!(
+    strict_fibonacci_tests => StrictFibonacciHeap<i32, i32>,
+    0..100, 1..50, 0..20, 1..100
+);
+
+create_heap_tests!(
+    twothree_tests => TwoThreeHeap<i32, i32>,
+    0..100, 1..50, 0..20, 1..100
+);
+
+create_heap_tests!(
+    skew_binomial_tests => SkewBinomialHeap<i32, i32>,
+    0..100, 1..50, 0..20, 1..100
+);
+
+create_heap_tests!(
+    brodal_tests => BrodalHeap<i32, i32>,
+    0..50, 1..30, 0..10, 1..50
+);
 
