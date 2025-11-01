@@ -1,0 +1,14 @@
+# Kani configuration for proof checking
+# Kani is AWS's model checker for Rust
+
+[harness]
+# Maximum number of loop unwindings
+# Increase this for more complex heap operations
+unwind = 10
+
+# Timeout for verification (in seconds)
+verification-timeout = 300
+
+# Enable function contract checking
+check-function-contracts = true
+

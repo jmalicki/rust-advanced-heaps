@@ -1,0 +1,19 @@
+# Prusti configuration for static verification
+# Prusti is a static verifier for Rust inspired by Dafny
+
+# Verification timeout (seconds)
+timeout = 300
+
+# Maximum number of loop iterations to check
+verify_only_preserved = false
+
+# Enable overflow checking
+check_overflows = true
+
+# Check for panics
+check_panics = true
+
+# Enable termination checking
+# Note: termination checking can be slow
+check_termination = false
+
