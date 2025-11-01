@@ -91,6 +91,7 @@ When Kani finds a bug, it will provide:
 ## What These Proofs Will Find
 
 The proofs are designed to find:
+
 - ❌ Length accounting errors (push/pop don't update length correctly)
 - ❌ Minimum tracking bugs (find_min returns wrong value)
 - ❌ Heap property violations (parent > child in heap-ordered trees)
