@@ -2,13 +2,16 @@
 
 ## Overview
 
-This document investigates whether the heap implementations in this codebase can be parametrized to use k-ary trees instead of binary trees (where applicable).
+This document investigates whether the heap implementations in this
+codebase can be parametrized to use k-ary trees instead of binary trees
+(where applicable).
 
 ## Current Tree Structures
 
 ### 1. Binomial Heap (`src/binomial.rs`)
+
 - **Tree Structure**: Binomial trees (binary trees)
-- **Node Structure**: 
+- **Node Structure**:
   - `child: Option<NonNull<Node<T, P>>>` - single child pointer
   - `sibling: Option<NonNull<Node<T, P>>>` - linked list of siblings
   - `degree: usize` - number of children
@@ -22,6 +25,7 @@ This document investigates whether the heap implementations in this codebase can
   - Linking algorithm would need to accept up to k children instead of exactly 2
 
 ### 2. Skew Binomial Heap (`src/skew_binomial.rs`)
+
 - **Tree Structure**: Skew binomial trees (binary with skew flags)
 - **Node Structure**: Similar to binomial (child/sibling)
 - **K-Ary Feasibility**: ⚠️ **MODERATE**
@@ -29,6 +33,7 @@ This document investigates whether the heap implementations in this codebase can
   - Skew operations might be more complex with k-ary structure
 
 ### 3. Fibonacci Heap (`src/fibonacci.rs`)
+
 - **Tree Structure**: Arbitrary trees with circular doubly-linked child lists
 - **Node Structure**:
   - `child: Option<NonNull<Node<T, P>>>` - pointer to first child
@@ -44,6 +49,7 @@ This document investigates whether the heap implementations in this codebase can
   - Circular list structure could be replaced with array or kept as-is
 
 ### 4. Pairing Heap (`src/pairing.rs`)
+
 - **Tree Structure**: General tree with child/sibling pointers
 - **Node Structure**:
   - `child: Option<NonNull<Node<T, P>>>` - first child
@@ -55,19 +61,23 @@ This document investigates whether the heap implementations in this codebase can
   - Need to cap children at k and split when needed
 
 ### 5. Rank Pairing Heap (`src/rank_pairing.rs`)
+
 - **Tree Structure**: General tree with rank constraints
 - **Node Structure**: child/sibling like pairing heap
 - **K-Ary Feasibility**: ✅ **HIGHLY FEASIBLE**
   - Rank-based operations should work with k-ary constraint
-  - Rank updates consider "two children with smallest ranks" - could generalize to k children
+  - Rank updates consider "two children with smallest ranks" - could
+    generalize to k children
 
 ### 6. Strict Fibonacci Heap (`src/strict_fibonacci.rs`)
+
 - **Tree Structure**: Similar to Fibonacci heap
 - **K-Ary Feasibility**: ✅ **FEASIBLE**
   - Similar considerations as Fibonacci heap
   - Active/passive lists might need adjustment
 
 ### 7. Brodal Heap (`src/brodal.rs`)
+
 - **Tree Structure**: General tree with rank constraints
 - **Node Structure**: child/sibling with rank tracking
 - **K-Ary Feasibility**: ✅ **FEASIBLE**
@@ -75,6 +85,7 @@ This document investigates whether the heap implementations in this codebase can
   - Rank constraints should generalize
 
 ### 8. Two-Three Heap (`src/twothree.rs`)
+
 - **Tree Structure**: **Already k-ary!** (2-3 children per node)
 - **Node Structure**:
   - `children: Vec<Option<NonNull<Node<T, P>>>>` - array of children
@@ -86,6 +97,7 @@ This document investigates whether the heap implementations in this codebase can
 ## Design Patterns for K-Ary Parametrization
 
 ### Pattern 1: Array-Based Children (Like Two-Three Heap)
+
 ```rust
 struct Node<T, P, const K: usize> {
     item: T,
@@ -95,10 +107,12 @@ struct Node<T, P, const K: usize> {
     // ... other fields
 }
 ```
+
 **Pros**: Type-safe at compile time, fixed size
 **Cons**: Requires const generics (Rust 1.51+), less flexible
 
 ### Pattern 2: Vector-Based Children
+
 ```rust
 struct Node<T, P> {
     // ...
@@ -106,10 +120,12 @@ struct Node<T, P> {
     max_children: usize, // k value
 }
 ```
+
 **Pros**: Flexible, can change k at runtime
 **Cons**: Less type-safe, dynamic allocation
 
 ### Pattern 3: Hybrid (Keep Sibling List, Track Count)
+
 ```rust
 struct Node<T, P> {
     // ...
@@ -119,31 +135,35 @@ struct Node<T, P> {
     max_children: usize, // k value
 }
 ```
+
 **Pros**: Minimal changes to existing code
 **Cons**: Need to maintain counts, potential for inconsistency
 
 ## Implementation Strategy
 
 ### Phase 1: Choose Common Pattern
+
 - Decide on array vs vector vs hybrid approach
 - Consider const generics for compile-time k vs runtime k
 
 ### Phase 2: Start with Simplest Heap
+
 - **Recommendation**: Start with Pairing Heap
   - Already has simple tree structure
   - Fewer invariants to maintain
   - Good testbed for k-ary operations
 
 ### Phase 3: Modify Operations
+
 For each heap, key operations that need modification:
 
 1. **Insert/Link Operations**:
    - Check if parent already has k children
    - If yes, need to split or promote node
-   
+
 2. **Merge Operations**:
    - Ensure result tree respects k-ary constraint
-   
+
 3. **Delete Operations**:
    - When removing min, children may need reorganization
    - Ensure all nodes have ≤ k children
@@ -155,49 +175,59 @@ For each heap, key operations that need modification:
 ### Phase 4: Mathematical Considerations
 
 #### Binomial Heaps
+
 - Binomial trees have specific structure: tree of degree d has 2^d nodes
 - For k-ary: tree of degree d could have k^d nodes
 - Would need "k-ary binomial tree" definition
 
 #### Fibonacci Heaps
+
 - Current structure already flexible
 - K-ary constraint: `degree <= k`
 - Consolidation: need to handle when degree would exceed k
 
 #### Rank-Pairing Heaps
+
 - Rank constraints: `r(v) <= r(w1) + 1, r(v) <= r(w2) + 1`
 - K-ary generalization: `r(v) <= min(r(w_i)) + 1` for k children
 
 ## Challenges
 
 ### 1. Splitting Nodes
+
 When a node would have k+1 children, need splitting strategy:
+
 - Create new sibling node?
 - Promote to parent?
 - Rebalance subtree?
 
 ### 2. Complexity Analysis
+
 - K-ary trees typically have height O(log_k n) instead of O(log_2 n)
 - Operations might become faster (fewer levels)
 - But more work per level (more children to check)
 
 ### 3. Memory Overhead
+
 - Array-based: Allocated space even for unused children
 - Vector-based: Dynamic allocation overhead
 
 ### 4. Existing Algorithms
+
 - Many heap algorithms assume binary trees
 - Need to verify k-ary generalizations preserve invariants
 
 ## Recommendations
 
 ### Immediate Actions
+
 1. **Create generic parameter**: Add `K: usize` const parameter or runtime `k` field
 2. **Start with Pairing Heap**: Simplest to modify
 3. **Use Two-Three Heap as reference**: Already has k-ary structure
 4. **Add splitting logic**: When children exceed k, split or promote
 
 ### Testing Strategy
+
 1. Test with k=2 (should behave like binary)
 2. Test with k=3 (compare with Two-Three heap)
 3. Test with k=4, 5, etc.
@@ -205,6 +235,7 @@ When a node would have k+1 children, need splitting strategy:
 5. Property-based tests for all k values
 
 ### Documentation Needs
+
 1. Define "k-ary binomial tree", "k-ary Fibonacci heap", etc.
 2. Document complexity changes
 3. Explain splitting strategies
@@ -214,6 +245,7 @@ When a node would have k+1 children, need splitting strategy:
 ### Example 1: Binomial Heap with K-Ary Trees (Const Generic)
 
 **Current Binary Structure:**
+
 ```rust
 struct Node<T, P> {
     child: Option<NonNull<Node<T, P>>>,
@@ -232,6 +264,7 @@ unsafe fn link_trees(&self, a: NonNull<Node<T, P>>, b: NonNull<Node<T, P>>) {
 ```
 
 **Proposed K-Ary Structure (Array-Based):**
+
 ```rust
 struct Node<T, P, const K: usize> {
     parent: Option<NonNull<Node<T, P, K>>>,
@@ -266,6 +299,7 @@ unsafe fn link_trees(
 ```
 
 **K-Ary Structure (Vector-Based):**
+
 ```rust
 struct Node<T, P> {
     parent: Option<NonNull<Node<T, P>>>,
@@ -297,6 +331,7 @@ unsafe fn link_trees(
 ### Example 2: Fibonacci Heap with K-Ary Constraint
 
 **Current Structure (Unbounded):**
+
 ```rust
 unsafe fn link(&mut self, y: NonNull<Node<T, P>>, x: NonNull<Node<T, P>>) {
     // Add y to x's child list (circular doubly linked)
@@ -320,6 +355,7 @@ unsafe fn link(&mut self, y: NonNull<Node<T, P>>, x: NonNull<Node<T, P>>) {
 ```
 
 **K-Ary Modification:**
+
 ```rust
 unsafe fn link(&mut self, y: NonNull<Node<T, P>>, x: NonNull<Node<T, P>>) {
     let x_ptr = x.as_ptr();
@@ -354,6 +390,7 @@ unsafe fn link(&mut self, y: NonNull<Node<T, P>>, x: NonNull<Node<T, P>>) {
 ### Example 3: Pairing Heap with K-Ary Constraint
 
 **Current Structure:**
+
 ```rust
 struct Node<T, P> {
     child: Option<NonNull<Node<T, P>>>,
@@ -375,6 +412,7 @@ unsafe fn merge_nodes(&self, a: NonNull<Node<T, P>>, b: NonNull<Node<T, P>>) -> 
 ```
 
 **K-Ary Modification (Hybrid Approach):**
+
 ```rust
 struct Node<T, P> {
     child: Option<NonNull<Node<T, P>>>,
@@ -433,6 +471,7 @@ unsafe fn maintain_structure(&mut self, node: NonNull<Node<T, P>>) {
 ```
 
 **Generalization to K-Ary:**
+
 ```rust
 struct Node<T, P> {
     children: Vec<Option<NonNull<Node<T, P>>>>,
@@ -462,4 +501,3 @@ unsafe fn maintain_structure(&mut self, node: NonNull<Node<T, P>>) {
 3. ⏳ Implement prototype with Pairing Heap
 4. ⏳ Compare performance with binary version
 5. ⏳ Extend to other heaps if successful
-
