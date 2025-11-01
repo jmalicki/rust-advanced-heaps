@@ -1,0 +1,18 @@
+[package]
+name = "rust-advanced-heaps"
+version = "0.1.0"
+edition = "2021"
+authors = ["Your Name <you@example.com>"]
+description = "Comprehensive collection of advanced heap data structures with efficient decrease_key support"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/yourusername/rust-advanced-heaps"
+keywords = ["heap", "priority-queue", "data-structure", "fibonacci-heap", "pairing-heap"]
+categories = ["data-structures", "algorithms"]
+
+[dependencies]
+# For benchmarking
+criterion = "0.5"
+
+[dev-dependencies]
+proptest = "1.4"
+criterion = "0.5"
