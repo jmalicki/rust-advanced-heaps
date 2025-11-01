@@ -31,6 +31,7 @@
 
 use crate::traits::{Handle, Heap};
 use std::ptr::{self, NonNull};
+use smallvec::{SmallVec, smallvec};
 
 /// Handle to an element in a Binomial heap
 ///
@@ -82,7 +83,7 @@ struct Node<T, P> {
 /// assert_eq!(heap.find_min(), Some((&1, &"item")));
 /// ```
 pub struct BinomialHeap<T, P: Ord> {
-    trees: Vec<Option<NonNull<Node<T, P>>>>, // Array indexed by degree
+    trees: SmallVec<[Option<NonNull<Node<T, P>>>; 32]>, // Array indexed by degree, stack-allocated for small heaps
     min: Option<NonNull<Node<T, P>>>,
     len: usize,
     _phantom: std::marker::PhantomData<T>,
@@ -106,7 +107,7 @@ impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
 
     fn new() -> Self {
         Self {
-            trees: Vec::new(),
+            trees: SmallVec::new(),
             min: None,
             len: 0,
             _phantom: std::marker::PhantomData,

@@ -37,11 +37,10 @@ This document investigates whether the heap implementations in this codebase can
 - **Key Operations**:
   - `link()`: Links y as child of x (no limit on children)
   - Consolidation links trees of the same degree
-- **K-Ary Feasibility**: ✅ **HIGHLY FEASIBLE**
-  - Already supports arbitrary number of children
-  - To make it k-ary, need to cap `degree` at k
-  - Would need splitting when adding child would exceed k
-  - Circular list structure could be replaced with array or kept as-is
+- **K-Ary Feasibility**: ❌ **NOT RECOMMENDED**
+  - Already supports unbounded multi-way trees
+  - Adding arbitrary k limit would degrade performance
+  - Unbounded degree is key to amortized O(1) operations
 
 ### 4. Pairing Heap (`src/pairing.rs`)
 - **Tree Structure**: General tree with child/sibling pointers
@@ -49,30 +48,31 @@ This document investigates whether the heap implementations in this codebase can
   - `child: Option<NonNull<Node<T, P>>>` - first child
   - `sibling: Option<NonNull<Node<T, P>>>` - next sibling
   - Unbounded children
-- **K-Ary Feasibility**: ✅ **HIGHLY FEASIBLE**
-  - Similar to Fibonacci heap
-  - Pairing operations work with arbitrary k
-  - Need to cap children at k and split when needed
+- **K-Ary Feasibility**: ❌ **NOT RECOMMENDED**
+  - Already supports unbounded multi-way trees
+  - Unbounded children enable O(1) amortized insert/merge
+  - Adding k limit would defeat the purpose
 
 ### 5. Rank Pairing Heap (`src/rank_pairing.rs`)
 - **Tree Structure**: General tree with rank constraints
 - **Node Structure**: child/sibling like pairing heap
-- **K-Ary Feasibility**: ✅ **HIGHLY FEASIBLE**
-  - Rank-based operations should work with k-ary constraint
-  - Rank updates consider "two children with smallest ranks" - could generalize to k children
+- **K-Ary Feasibility**: ❌ **NOT RECOMMENDED**
+  - Already supports unbounded multi-way trees
+  - Rank constraints work naturally with unbounded degree
+  - No benefit to arbitrary k limit
 
 ### 6. Strict Fibonacci Heap (`src/strict_fibonacci.rs`)
 - **Tree Structure**: Similar to Fibonacci heap
-- **K-Ary Feasibility**: ✅ **FEASIBLE**
+- **K-Ary Feasibility**: ❌ **NOT RECOMMENDED**
   - Similar considerations as Fibonacci heap
-  - Active/passive lists might need adjustment
+  - Unbounded degree is critical for worst-case bounds
 
 ### 7. Brodal Heap (`src/brodal.rs`)
 - **Tree Structure**: General tree with rank constraints
 - **Node Structure**: child/sibling with rank tracking
-- **K-Ary Feasibility**: ✅ **FEASIBLE**
-  - Violation system might need adjustment
-  - Rank constraints should generalize
+- **K-Ary Feasibility**: ❌ **NOT RECOMMENDED**
+  - Unbounded degree enables worst-case O(1) operations
+  - Violation system designed for multi-way trees
 
 ### 8. Two-Three Heap (`src/twothree.rs`)
 - **Tree Structure**: **Already k-ary!** (2-3 children per node)
@@ -196,6 +196,13 @@ When a node would have k+1 children, need splitting strategy:
 2. **Start with Pairing Heap**: Simplest to modify
 3. **Use Two-Three Heap as reference**: Already has k-ary structure
 4. **Add splitting logic**: When children exceed k, split or promote
+
+### Performance Optimization Opportunity
+- **SmallVec consideration**: TwoThreeHeap uses `Vec<Option<NonNull<...>>>` for children (2-3 typical)
+- Nodes usually have 2-3 children, rarely more
+- `SmallVec<[Option<NonNull<Node>>; 3]>` could eliminate allocations for typical nodes
+- Trade-off: larger node size vs. allocation overhead
+- Recommendation: Benchmark both approaches before optimizing
 
 ### Testing Strategy
 1. Test with k=2 (should behave like binary)
@@ -455,11 +462,89 @@ unsafe fn maintain_structure(&mut self, node: NonNull<Node<T, P>>) {
 }
 ```
 
+## Findings from Investigation
+
+### Key Discovery: Most Heaps are Already Multi-Way Trees
+
+After analyzing all heap implementations, we found:
+- **PairingHeap, FibonacciHeap, RankPairingHeap**: Already use unbounded multi-way trees with child/sibling pointers
+- **BinomialHeap, SkewBinomialHeap**: Use child/sibling linked lists (effectively multi-way, not binary)
+- **TwoThreeHeap**: The ONLY heap with fixed arity (2-3 children per node)
+
+### K-Ary Parametrization Assessment
+
+**Reality Check**: The investigation document's assumption that heaps are "binary" is **incorrect**. Most heaps are already multi-way trees. The relevant question is whether to constrain them with a maximum degree K.
+
+#### Option 1: Const Generics for Two-Three Heap
+- **Feasibility**: ✅ Highly feasible
+- **Why**: Two-Three heap already uses `Vec<Option<NonNull<Node>>>` for children
+- **Implementation**: Add `const K: usize` parameter, constrain `children` vector length
+- **Impact on Original Binary**: N/A (it's not binary)
+- **Recommendation**: **Best candidate for k-ary generalization**
+
+#### Option 2: Add Runtime K Constraint to Multi-Way Heaps
+- **Feasibility**: ⚠️ Complex, questionable benefit
+- **Why**: Would require adding splitting logic to heaps that deliberately allow unbounded children
+- **Trade-off**: Randomly constraining multi-way heaps goes against their design philosophy
+- **Impact**: Would degrade original implementations
+- **Recommendation**: **Not recommended**
+
+### Conclusion
+
+The investigation reveals that **most heaps are already "k-ary" with k=∞**. The real opportunity is:
+1. **Generalize TwoThreeHeap** to support arbitrary k (not just 2-3)
+2. **Document** that other heaps are multi-way, not binary
+3. **Compare performance** of different k values for the generalized Two-Three structure
+4. **Consider SmallVec** for fixed-arity heaps to avoid allocations for typical nodes
+
+## Additional Optimization Consideration
+
+### SmallVec for Fixed-Arity Heaps
+
+For heaps with fixed arity like TwoThreeHeap:
+- Currently uses `Vec<Option<NonNull<Node>>>` which allocates on heap for every node
+- Typical nodes have 2-3 children (very predictable)
+- `SmallVec<[Option<NonNull<Node>>; 3]>` could eliminate allocations in 99%+ of cases
+- Trade-offs:
+  - **Pros**: No allocations for typical nodes, better cache locality for small heaps
+  - **Cons**: Larger node size (24 bytes overhead vs ~24 bytes for Vec capacity), dependency on `smallvec` crate
+- **Recommendation**: Only worth pursuing if benchmarks show allocation overhead is significant
+
 ## Next Steps
 
 1. ✅ Create investigation branch and worktree
-2. 🔄 Choose parametrization approach (const generic vs runtime)
-3. ⏳ Implement prototype with Pairing Heap
-4. ⏳ Compare performance with binary version
-5. ⏳ Extend to other heaps if successful
+2. ✅ Analyze all heap structures and identify k-ary opportunities
+3. 🔄 **IMPORTANT**: Choose approach - generalize TwoThreeHeap vs new implementation
+4. ⏳ Implement generalized TwoThreeHeap with configurable k
+5. ⏳ Compare performance with different k values (2, 3, 4, 5, etc.)
+6. ⏳ Consider renaming TwoThreeHeap to KAryHeap or similar
+7. ⏳ Benchmark SmallVec vs Vec for TwoThreeHeap children storage
+
+**Revised Recommendation**: Start with **TwoThreeHeap generalization** using const generics
+
+**UPDATE**: SmallVec has been integrated into multiple heaps:
+- **TwoThreeHeap**: `SmallVec<[Option<NonNull<Node>>; 4]>` for children storage
+- **BinomialHeap**: `SmallVec<[Option<NonNull<Node>>; 32]>` for trees array
+- **SkewBinomialHeap**: `SmallVec<[Option<NonNull<Node>>; 32]>` for trees array
+
+All implementations eliminate heap allocations for typical small heaps while maintaining the same API and functionality. All tests pass.
+
+### Additional SmallVec Candidates
+
+Beyond TwoThreeHeap, other heaps have small predictable Vec sizes:
+
+1. **BinomialHeap & SkewBinomialHeap**: ✅ **IMPLEMENTED** 
+   - Size: log₂(n) entries typically (0..30 entries for n < 1 billion)
+   - Now use `SmallVec<[Option<NonNull<Node>>; 32]>` to cover heaps up to 2³² elements
+   - **Benefits**: Eliminates allocations for heaps up to 4 billion elements
+   - All tests pass
+
+2. **BrodalHeap**: `violations: Vec<Vec<NonNull<>>>` 
+   - Outer Vec: log₂(n) entries (one per rank)
+   - Inner Vecs: Small violation lists per rank (typically <10)
+   - Could use `SmallVec<[SmallVec<[NonNull<Node>; 8]>; 32]>` (nested)
+   - **Complexity**: Nested SmallVec might be overkill
+   - **Recommendation**: Maybe just outer Vec, or skip entirely given complexity
+
+3. **General Recommendation**: ✅ All promising candidates now implemented. Skip Brodal unless benchmarks show significant impact. The smallvec dependency is already added for all heaps.
 
