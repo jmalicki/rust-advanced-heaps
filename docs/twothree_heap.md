@@ -2,21 +2,31 @@
 
 ## Overview
 
-The **2-3 Heap** is a balanced heap data structure where each internal node has exactly 2 or 3 children. This balanced structure allows efficient operations while maintaining good performance for decrease_key operations.
+The **2-3 Heap** is a balanced heap data structure where each internal node
+has exactly 2 or 3 children. This balanced structure allows efficient
+operations while maintaining good performance for decrease_key operations.
 
 ## Historical Context and Papers
 
 ### Original Paper
 
-- **Carlsson, Svante** (1987). "A variant of heapsort with almost optimal number of comparisons". *Information Processing Letters*. 24 (4): 247–250. doi:10.1016/0020-0190(87)90142-6.
+- **Carlsson, Svante** (1987). "A variant of heapsort with almost optimal
+  number of comparisons". *Information Processing Letters*. 24 (4):
+  247–250. doi:10.1016/0020-0190(87)90142-6.
   - Introduced 2-3 heaps as a variant of heapsort
 
 ### Key Follow-up Work
 
-1. **Carlsson, Svante; Chen, Jingsen; Mattsson, Christer** (1991). "An implicit binomial queue with constant insertion time". *Proceedings of the 1st Annual Scandinavian Workshop on Algorithm Theory (SWAT)*. pp. 1–13. doi:10.1007/3-540-52846-8_49.
+1. **Carlsson, Svante; Chen, Jingsen; Mattsson, Christer** (1991). "An
+   implicit binomial queue with constant insertion time". *Proceedings of
+   the 1st Annual Scandinavian Workshop on Algorithm Theory (SWAT)*. pp.
+   1–13. doi:10.1007/3-540-52846-8_49.
    - Related work on implicit heaps
 
-2. **Driscoll, James R.; Gabow, Harold N.; Shrairman, Ruth; Tarjan, Robert E.** (1988). "Relaxed heaps: An alternative to Fibonacci heaps with applications to parallel computation". *Communications of the ACM*, 31(11), 1343-1354.
+2. **Driscoll, James R.; Gabow, Harold N.; Shrairman, Ruth; Tarjan, Robert
+   E.** (1988). "Relaxed heaps: An alternative to Fibonacci heaps with
+   applications to parallel computation". *Communications of the ACM*,
+   31(11), 1343-1354.
    - Related relaxed heap structures
 
 ## Asymptotic Complexity
@@ -182,8 +192,12 @@ The Rust implementation:
 
 ## References
 
-1. Carlsson, S. (1987). A variant of heapsort with almost optimal number of comparisons. *Information Processing Letters*, 24(4), 247-250.
+1. Carlsson, S. (1987). A variant of heapsort with almost optimal number of
+   comparisons. *Information Processing Letters*, 24(4), 247-250.
 
-2. Carlsson, S., Chen, J., & Mattsson, C. (1991). An implicit binomial queue with constant insertion time. *Proceedings of SWAT* 1991, 1-13.
+2. Carlsson, S., Chen, J., & Mattsson, C. (1991). An implicit binomial queue
+   with constant insertion time. *Proceedings of SWAT* 1991, 1-13.
 
-3. Driscoll, J. R., Gabow, H. N., Shrairman, R., & Tarjan, R. E. (1988). Relaxed heaps: An alternative to Fibonacci heaps with applications to parallel computation. *Communications of the ACM*, 31(11), 1343-1354.
+3. Driscoll, J. R., Gabow, H. N., Shrairman, R., & Tarjan, R. E. (1988).
+   Relaxed heaps: An alternative to Fibonacci heaps with applications to
+   parallel computation. *Communications of the ACM*, 31(11), 1343-1354.

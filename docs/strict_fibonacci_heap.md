@@ -17,10 +17,13 @@ worst-case delete_min.
 
 ### Key Follow-up Work
 
-1. **Brodal, Gerth Stølting** (1996). "Worst-case efficient priority queues". *Proceedings of SODA* 1996, 52-58.
+1. **Brodal, Gerth Stølting** (1996). "Worst-case efficient priority
+   queues". *Proceedings of SODA* 1996, 52-58.
    - Brodal heaps also achieve worst-case bounds
 
-2. **Fredman, Michael L.; Tarjan, Robert E.** (1987). "Fibonacci heaps and their uses in improved network optimization algorithms". *Journal of the ACM*, 34(3), 596-615.
+2. **Fredman, Michael L.; Tarjan, Robert E.** (1987). "Fibonacci heaps and
+   their uses in improved network optimization algorithms". *Journal of the
+   ACM*, 34(3), 596-615.
    - Original Fibonacci heap paper
 
 ## Asymptotic Complexity

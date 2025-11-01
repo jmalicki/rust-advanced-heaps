@@ -1,10 +1,15 @@
 # Rust Advanced Heaps
 
-A comprehensive collection of advanced heap/priority queue data structures for Rust with efficient `decrease_key` support.
+A comprehensive collection of advanced heap/priority queue data structures
+for Rust with efficient `decrease_key` support.
 
 ## Motivation
 
-Rust's standard library provides `BinaryHeap`, but it doesn't support `decrease_key` operations efficiently. Many third-party libraries use hash maps paired with binary heaps, which only achieve O(log n) `decrease_key` operations. This crate implements advanced heap structures from computer science literature that provide better amortized bounds:
+Rust's standard library provides `BinaryHeap`, but it doesn't support
+`decrease_key` operations efficiently. Many third-party libraries use hash
+maps paired with binary heaps, which only achieve O(log n) `decrease_key`
+operations. This crate implements advanced heap structures from computer
+science literature that provide better amortized bounds:
 
 - **Fibonacci Heap**: O(1) amortized `decrease_key`
 - **Pairing Heap**: o(log n) amortized `decrease_key`
@@ -23,7 +28,9 @@ Rust's standard library provides `BinaryHeap`, but it doesn't support `decrease_
 | **Binomial** | O(log n) | O(log n) | O(log n) | O(log n) | Simple, well-understood |
 | **Brodal** | O(1) worst | O(log n) worst | **O(1) worst** | O(1) worst | Optimal worst-case, high constants |
 
-All times are amortized (am.) where applicable. See the [Wikipedia comparison table](https://en.wikipedia.org/wiki/Fibonacci_heap#Summary_of_running_times) for full details.
+All times are amortized (am.) where applicable. See the [Wikipedia
+comparison table](https://en.wikipedia.org/wiki/Fibonacci_heap#Summary_of_running_times)
+for full details.
 
 ## Usage
 
@@ -80,8 +87,11 @@ pub trait Heap<T, P: Ord> {
 
 ## Safety Notes
 
-- **Handles are tied to specific heap instances**. Using a handle from one heap with another heap, or after the heap is dropped, is undefined behavior.
-- `decrease_key` expects the new priority to be **less than** the current priority. Behavior is undefined if this is not true.
+- **Handles are tied to specific heap instances**. Using a handle from one
+  heap with another heap, or after the heap is dropped, is undefined
+  behavior.
+- `decrease_key` expects the new priority to be **less than** the current
+  priority. Behavior is undefined if this is not true.
 
 ## Implementation Status
 
@@ -94,11 +104,15 @@ pub trait Heap<T, P: Ord> {
 
 ## Performance Considerations
 
-While these heaps provide excellent theoretical bounds, constant factors matter in practice:
+While these heaps provide excellent theoretical bounds, constant factors
+matter in practice:
 
-- **Fibonacci heaps** have significant constant overhead and are often slower than binary heaps for small inputs
-- **Pairing heaps** are simpler than Fibonacci heaps and often perform better in practice
-- **Binomial heaps** provide a good balance between simplicity and performance
+- **Fibonacci heaps** have significant constant overhead and are often
+  slower than binary heaps for small inputs
+- **Pairing heaps** are simpler than Fibonacci heaps and often perform
+  better in practice
+- **Binomial heaps** provide a good balance between simplicity and
+  performance
 
 Choose based on your workload:
 
@@ -124,4 +138,6 @@ MIT OR Apache-2.0
 - [Fibonacci Heap - Wikipedia](https://en.wikipedia.org/wiki/Fibonacci_heap)
 - [Pairing Heap - Wikipedia](https://en.wikipedia.org/wiki/Pairing_heap)
 - [Binomial Heap - Wikipedia](https://en.wikipedia.org/wiki/Binomial_heap)
-- Fredman, M. L., & Tarjan, R. E. (1987). Fibonacci heaps and their uses in improved network optimization algorithms. Journal of the ACM, 34(3), 596-615.
+- Fredman, M. L., & Tarjan, R. E. (1987). Fibonacci heaps and their uses in
+  improved network optimization algorithms. Journal of the ACM, 34(3),
+  596-615.
