@@ -1,0 +1,15 @@
+# Creusot configuration
+# Creusot uses Why3 for verification of Rust programs
+
+# Path to Why3 (if not in PATH)
+why3_path = "why3"
+
+# Timeout for Why3 provers (in seconds)
+timeout = 30
+
+# Provers to use (can be multiple)
+provers = ["cvc5", "z3", "alt-ergo"]
+
+# Maximum number of iterations for loops
+loop_max_iterations = 10
+
