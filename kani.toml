@@ -11,4 +11,3 @@ verification-timeout = 300
 
 # Enable function contract checking
 check-function-contracts = true
-

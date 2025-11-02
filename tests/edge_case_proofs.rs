@@ -28,26 +28,33 @@ use rust_advanced_heaps::Heap;
 fn verify_handle_remains_valid_after_operations_binomial() {
     let mut heap: BinomialHeap<u32, u32> = BinomialHeap::new();
 
-    let handle1 = heap.push(kani::any(), kani::any());
-    let handle2 = heap.push(kani::any(), kani::any());
-    let handle3 = heap.push(kani::any(), kani::any());
+    let p1 = kani::any();
+    let p2 = kani::any();
+    let p3 = kani::any();
+    kani::assume(p1 > p2);
+    kani::assume(p1 > p3);
 
-    // Operate on other elements
+    let handle1 = heap.push(p1, kani::any());
+    let _handle2 = heap.push(p2, kani::any());
+    let _handle3 = heap.push(p3, kani::any());
+
+    // Operate on other elements (p2 or p3 will be popped, not p1)
     let _ = heap.pop();
     heap.push(kani::any(), kani::any());
 
     // Original handles should still work
     let new_priority = kani::any();
-    let old_min = heap.find_min().map(|(p, _)| *p);
-    kani::assume(new_priority < old_min.unwrap_or(u32::MAX));
+    kani::assume(new_priority < p1);
 
+    let old_min = heap.find_min().map(|(p, _)| *p);
     if let Some(old_min_val) = old_min {
         if new_priority < old_min_val {
             heap.decrease_key(&handle1, new_priority);
             // After decrease_key, handle1's element should be minimum or less
-            if let Some((&min, _)) = heap.find_min() {
-                assert!(min <= new_priority);
-            }
+            let (min_priority, _) = heap
+                .find_min()
+                .expect("find_min() must return the minimum after pushing elements");
+            assert!(*min_priority <= new_priority);
         }
     }
 }
@@ -356,13 +363,17 @@ fn verify_length_after_complex_ops_binomial() {
 
     assert!(heap.len() == 0);
 
-    let handle1 = heap.push(kani::any(), kani::any());
+    let p_handle1 = kani::any();
+    let p_other = kani::any();
+    kani::assume(p_other < p_handle1);
+
+    let handle1 = heap.push(p_handle1, kani::any());
     assert!(heap.len() == 1);
 
-    heap.push(kani::any(), kani::any());
+    heap.push(p_other, kani::any());
     assert!(heap.len() == 2);
 
-    let _ = heap.pop();
+    let _ = heap.pop(); // Will pop p_other, not handle1
     assert!(heap.len() == 1);
 
     heap.push(kani::any(), kani::any());
@@ -373,6 +384,7 @@ fn verify_length_after_complex_ops_binomial() {
     let current_min = heap.find_min().map(|(p, _)| *p);
     if let Some(min_val) = current_min {
         if new_priority < min_val {
+            kani::assume(new_priority < p_handle1);
             heap.decrease_key(&handle1, new_priority);
             assert!(heap.len() == 2); // Length unchanged
         }
