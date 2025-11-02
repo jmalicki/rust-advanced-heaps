@@ -120,6 +120,31 @@ Choose based on your workload:
 - Mostly inserts/deletes: Binomial heap may be sufficient
 - Small heaps: Binary heap is often faster due to lower constant factors
 
+## Development Setup
+
+This project uses pre-commit hooks for code quality checks. After cloning or
+initializing a new worktree, install the hooks:
+
+```bash
+# Option 1: Use the setup script
+./setup.sh
+
+# Option 2: Manual setup
+# Install pre-commit (if not already installed)
+pip install pre-commit
+
+# Install git hooks
+pre-commit install
+```
+
+The hooks will automatically run `cargo fmt`, `cargo clippy`, and markdownlint
+on every commit.
+
+**Note for worktrees**: When using git worktrees (including Cursor's "new
+worktree init"), you must run `pre-commit install` in each worktree after it's
+created. Pre-commit hooks are installed per repository, but each worktree needs
+to be set up individually.
+
 ## Contributing
 
 Contributions welcome! Areas of focus:
