@@ -9,12 +9,12 @@
 //! Prusti annotations are ignored by rustc but processed by Prusti when running:
 //!   cargo prusti
 
-use rust_advanced_heaps::binomial::BinomialHeap;
-use rust_advanced_heaps::Heap;
-
 // Prusti contracts are always available
 // They compile normally but are processed by Prusti when running: cargo prusti
 use prusti_contracts::*;
+
+use rust_advanced_heaps::binomial::BinomialHeap;
+use rust_advanced_heaps::Heap;
 
 /// Verified implementation showing that insert increments length
 ///
@@ -22,8 +22,8 @@ use prusti_contracts::*;
 /// They compile normally with rustc but are ignored.
 #[requires(true)]
 #[ensures(heap.len() == old(heap.len()) + 1)]
-#[allow(dead_code)]
-fn verified_insert(heap: &mut BinomialHeap<u32, u32>, priority: u32, item: u32) -> () {
+#[allow(dead_code, unused_imports)]
+fn verified_insert(heap: &mut BinomialHeap<u32, u32>, priority: u32, item: u32) {
     heap.push(priority, item);
     // Postcondition: length increased by 1 is verified by Prusti
 }
@@ -34,7 +34,7 @@ fn verified_insert(heap: &mut BinomialHeap<u32, u32>, priority: u32, item: u32) 
 /// They compile normally with rustc but are ignored.
 #[requires(true)]
 #[ensures(result == (heap.len() == 0))]
-#[allow(dead_code)]
+#[allow(dead_code, unused_imports)]
 fn verified_is_empty(heap: &BinomialHeap<u32, u32>) -> bool {
     heap.is_empty()
 }

@@ -179,9 +179,10 @@ fn test_duplicate_priorities<H: Heap<&'static str, i32>>() {
 }
 
 /// Test decrease_key after pop (should panic or handle gracefully)
+#[allow(dead_code)]
 fn test_decrease_key_after_pop<H: Heap<i32, i32>>() {
     let mut heap = H::new();
-    let handle = heap.push(10, 1);
+    let _handle = heap.push(10, 1);
 
     // Pop the element
     heap.pop();
@@ -373,7 +374,7 @@ fn test_complex_sequence<H: Heap<String, i32>>() {
 
     // Pop all remaining (carefully)
     let mut count = 0;
-    while let Some(_) = heap.pop() {
+    while heap.pop().is_some() {
         count += 1;
         if count > 50 {
             // Safety limit
