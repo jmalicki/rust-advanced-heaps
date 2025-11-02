@@ -48,9 +48,12 @@ fn verify_pop_decrements_len<H: Heap<u32, u32>>() {
 
     let initial_len = heap.len();
 
-    if let Some(_) = heap.pop() {
-        assert!(heap.len() == initial_len - 1);
-    }
+    let popped = heap.pop();
+    assert!(
+        popped.is_some(),
+        "pop() must succeed after pushing elements"
+    );
+    assert!(heap.len() == initial_len - 1);
 }
 
 /// Generic proof: find_min returns the actual minimum priority in the heap
@@ -66,17 +69,16 @@ fn verify_find_min_correct<H: Heap<u32, u32>>() {
     heap.push(priority2, kani::any());
     heap.push(priority3, kani::any());
 
-    if let Some((&min_priority, _)) = heap.find_min() {
-        // The minimum must be <= all priorities in the heap
-        assert!(min_priority <= priority1);
-        assert!(min_priority <= priority2);
-        assert!(min_priority <= priority3);
+    let (min_priority, _) = heap
+        .find_min()
+        .expect("find_min() must return the minimum after pushing elements");
+    // The minimum must be <= all priorities in the heap
+    assert!(*min_priority <= priority1);
+    assert!(*min_priority <= priority2);
+    assert!(*min_priority <= priority3);
 
-        // The minimum must equal one of the inserted priorities
-        assert!(
-            min_priority == priority1 || min_priority == priority2 || min_priority == priority3
-        );
-    }
+    // The minimum must equal one of the inserted priorities
+    assert!(*min_priority == priority1 || *min_priority == priority2 || *min_priority == priority3);
 }
 
 /// Generic proof: pop returns the same element that find_min would return
@@ -89,13 +91,15 @@ fn verify_pop_returns_find_min<H: Heap<u32, u32>>() {
     heap.push(priority1, kani::any());
     heap.push(priority2, kani::any());
 
-    let min_before = heap.find_min().map(|(p, _)| *p);
+    let min_before = heap
+        .find_min()
+        .expect("find_min() must return the minimum after pushing elements")
+        .0;
 
-    if let Some((popped_priority, _)) = heap.pop() {
-        if let Some(expected_min) = min_before {
-            assert!(popped_priority == expected_min);
-        }
-    }
+    let (popped_priority, _) = heap
+        .pop()
+        .expect("pop() must succeed after pushing elements");
+    assert!(popped_priority == *min_before);
 }
 
 /// Generic proof: decrease_key actually decreases the priority
@@ -112,15 +116,16 @@ fn verify_decrease_key_decreases<H: Heap<u32, u32>>() {
     let item = kani::any();
     let handle = heap.push(initial_priority, item);
 
-    // Store the minimum before decrease_key
-    let min_before = heap.find_min().map(|(p, _)| *p);
+    // Add another element to ensure heap is not empty
+    heap.push(kani::any(), kani::any());
 
     heap.decrease_key(&handle, new_priority);
 
     // After decrease_key, the minimum should be <= new_priority
-    if let Some((&current_min, _)) = heap.find_min() {
-        assert!(current_min <= new_priority);
-    }
+    let (current_min, _) = heap
+        .find_min()
+        .expect("find_min() must return the minimum after pushing elements");
+    assert!(*current_min <= new_priority);
 }
 
 /// Generic proof: merge combines lengths correctly
