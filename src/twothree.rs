@@ -9,6 +9,7 @@
 
 use crate::traits::{Handle, Heap};
 use std::ptr::{self, NonNull};
+use smallvec::{SmallVec, smallvec};
 
 /// Handle to an element in a 2-3 heap
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -22,7 +23,7 @@ struct Node<T, P> {
     item: T,
     priority: P,
     parent: Option<NonNull<Node<T, P>>>,
-    children: Vec<Option<NonNull<Node<T, P>>>>, // 2 or 3 children
+    children: SmallVec<[Option<NonNull<Node<T, P>>>; 4]>, // 2 or 3 children typically, capacity 4 for splits
 }
 
 /// 2-3 Heap
@@ -114,7 +115,7 @@ impl<T, P: Ord> Heap<T, P> for TwoThreeHeap<T, P> {
             item,
             priority,
             parent: None,
-            children: Vec::new(), // Leaf node has no children
+            children: SmallVec::new(), // Leaf node has no children
         }));
 
         let node_ptr = unsafe { NonNull::new_unchecked(node) };
@@ -430,7 +431,7 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
                         item: new_item,
                         priority: new_priority,
                         parent: (*node_ptr).parent, // Same parent initially
-                        children: new_children.into_iter().map(Some).collect(),
+                        children: new_children.into_iter().map(Some).collect::<SmallVec<[Option<NonNull<Node<T, P>>>; 4]>>(),
                     }));
 
                     let new_node_ptr = NonNull::new_unchecked(new_node);
@@ -441,8 +442,7 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
                     }
 
                     // Update original node to have 2 children (first 2)
-                    (*node_ptr).children = children_vec.into_iter().map(Some).collect();
-
+                    (*node_ptr).children = children_vec.into_iter().map(Some).collect::<SmallVec<[Option<NonNull<Node<T, P>>>; 4]>>();
                     // Add new node as sibling (child of original node's parent)
                     // This may cause parent to have 4 children, triggering cascade
                     if let Some(parent) = (*node_ptr).parent {
@@ -459,7 +459,7 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
                             item: root_item,
                             priority: root_priority,
                             parent: None,
-                            children: vec![Some(node), Some(new_node_ptr)], // Both nodes as children
+                            children: smallvec![Some(node), Some(new_node_ptr)], // Both nodes as children
                         }));
                         let new_root_ptr = NonNull::new_unchecked(new_root);
                         (*node_ptr).parent = Some(new_root_ptr);

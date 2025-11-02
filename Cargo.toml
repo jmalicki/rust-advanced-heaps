@@ -12,6 +12,8 @@ categories = ["data-structures", "algorithms"]
 [dependencies]
 # For benchmarking
 criterion = "0.5"
+# For stack-allocated vectors in fixed-arity heaps
+smallvec = "1.13"
 
 [dev-dependencies]
 proptest = "1.4"
