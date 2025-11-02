@@ -6,12 +6,17 @@
 //! To run these proofs:
 //!   cargo prusti
 
-use rust_advanced_heaps::binomial::BinomialHeap;
-use rust_advanced_heaps::Heap;
-
 // Enable Prusti verification
+// Note: Prusti feature is not currently enabled, so these proofs are not active
+// To enable: add `features = ["prusti"]` to Cargo.toml [dev-dependencies]
 #[cfg(feature = "prusti")]
 use prusti_contracts::*;
+
+#[cfg(feature = "prusti")]
+use rust_advanced_heaps::binomial::BinomialHeap;
+
+#[cfg(feature = "prusti")]
+use rust_advanced_heaps::Heap;
 
 /// Verified implementation showing that insert increments length
 #[cfg(feature = "prusti")]

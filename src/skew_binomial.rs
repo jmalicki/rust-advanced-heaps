@@ -289,6 +289,7 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
 
             // Merge children back into heap using binary addition analogy
             // This is like adding the children's "binary numbers" to the heap
+            // Use carry propagation similar to insert() to handle cascading merges
             for (rank, child_opt) in children.into_iter().enumerate() {
                 if let Some(child) = child_opt {
                     // Ensure tree list is large enough
@@ -296,22 +297,30 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
                         self.trees.push(None);
                     }
 
-                    if self.trees[rank].is_some() {
-                        // Slot at this rank is full: merge two trees (binary addition carry)
-                        let existing = self.trees[rank].unwrap();
-                        let merged = self.link_trees(existing, child);
-                        self.trees[rank] = None; // Clear this rank
+                    // Use carry propagation to handle cascading merges
+                    let mut carry = Some(child);
+                    let mut current_rank = rank;
 
-                        // Place merged tree at rank+1 (carry propagation)
-                        while self.trees.len() <= rank + 1 {
+                    while let Some(tree_to_insert) = carry {
+                        // Ensure tree list is large enough for current rank
+                        while self.trees.len() <= current_rank {
                             self.trees.push(None);
                         }
-                        // This may trigger another merge if rank+1 is also full (cascade)
-                        // But we handle it in the next iteration or separately
-                        self.trees[rank + 1] = Some(merged);
-                    } else {
-                        // Slot at this rank is empty: insert child tree there (done)
-                        self.trees[rank] = Some(child);
+
+                        if self.trees[current_rank].is_some() {
+                            // Slot at this rank is full: merge two trees (binary addition carry)
+                            let existing = self.trees[current_rank].unwrap();
+                            let merged = self.link_trees(existing, tree_to_insert);
+                            self.trees[current_rank] = None; // Clear this rank
+
+                            // Merged tree becomes carry for next rank
+                            carry = Some(merged);
+                            current_rank += 1;
+                        } else {
+                            // Slot at this rank is empty: insert tree there (done)
+                            self.trees[current_rank] = Some(tree_to_insert);
+                            carry = None; // No more carry
+                        }
                     }
                 }
             }
