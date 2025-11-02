@@ -10,6 +10,7 @@
 
 use crate::traits::{Handle, Heap};
 use std::ptr::{self, NonNull};
+use smallvec::SmallVec;
 
 /// Handle to an element in a Skew binomial heap
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -46,7 +47,7 @@ struct Node<T, P> {
 /// assert_eq!(heap.peek(), Some((&1, &"item")));
 /// ```
 pub struct SkewBinomialHeap<T, P: Ord> {
-    trees: Vec<Option<NonNull<Node<T, P>>>>, // Array indexed by rank
+    trees: SmallVec<[Option<NonNull<Node<T, P>>>; 32]>, // Array indexed by rank, stack-allocated for small heaps
     min: Option<NonNull<Node<T, P>>>,
     len: usize,
     _phantom: std::marker::PhantomData<T>,
@@ -69,7 +70,7 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
 
     fn new() -> Self {
         Self {
-            trees: Vec::new(),
+            trees: SmallVec::new(),
             min: None,
             len: 0,
             _phantom: std::marker::PhantomData,
