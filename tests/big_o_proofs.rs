@@ -57,7 +57,7 @@ fn test_insert_batch_complexity<H: Heap<i32, i32>>(
         || {
             let mut h = heap.write();
             for i in 0..1000 {
-                h.push(i as i32, i as i32);
+                h.push(i, i);
             }
             42
         },
@@ -65,7 +65,7 @@ fn test_insert_batch_complexity<H: Heap<i32, i32>>(
         || {
             let mut h = heap.write();
             for i in 0..2000 {
-                h.push(i as i32, i as i32);
+                h.push(i, i);
             }
             42
         },
@@ -88,7 +88,7 @@ fn test_pop_batch_complexity<H: Heap<i32, i32>>(heap_name: &str) {
         || {
             let mut h = heap.write();
             for i in 0..1000 {
-                h.push(i as i32, i as i32);
+                h.push(i, i);
             }
             for _ in 0..1000 {
                 assert!(
@@ -102,7 +102,7 @@ fn test_pop_batch_complexity<H: Heap<i32, i32>>(heap_name: &str) {
         || {
             let mut h = heap.write();
             for i in 0..2000 {
-                h.push(i as i32, i as i32);
+                h.push(i, i);
             }
             for _ in 0..2000 {
                 assert!(
