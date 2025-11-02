@@ -10,7 +10,10 @@
 //! To run these proofs:
 //!   cargo kani
 
+// Legacy proofs - these imports may be unused in future refactoring
+#[allow(unused_imports)]
 use rust_advanced_heaps::binomial::BinomialHeap;
+#[allow(unused_imports)]
 use rust_advanced_heaps::Heap;
 
 /// Proof that insert always increments the length

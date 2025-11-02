@@ -15,12 +15,12 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-      
+
       - name: Install Kani
         run: |
           cargo install --locked kani-verifier
           cargo kani setup
-      
+
       - name: Run Kani proofs
         run: |
           # Run a sample of key proofs to verify the system works
@@ -71,4 +71,3 @@ jobs:
           # Note: Prusti may take a while to verify, especially with complex proofs
           echo "Running Prusti verification..."
           cargo prusti --tests prusti_proofs || echo "Prusti verification failed - this is expected during development"
-
