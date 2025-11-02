@@ -9,13 +9,13 @@
 //! Prusti annotations are ignored by rustc but processed by Prusti when running:
 //!   cargo prusti
 
+#![allow(unused_imports, dead_code)]
+
 // Prusti contracts are always available
 // They compile normally but are processed by Prusti when running: cargo prusti
 use prusti_contracts::*;
 
-#[allow(unused_imports, dead_code)]
 use rust_advanced_heaps::binomial::BinomialHeap;
-#[allow(unused_imports, dead_code)]
 use rust_advanced_heaps::Heap;
 
 /// Verified implementation showing that insert increments length
