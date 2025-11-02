@@ -90,6 +90,11 @@ fn test_multiple_decrease_keys<H: Heap<i32, i32>>() {
 
     // Insert 20 elements with high priorities
     for i in 0..20 {
+        // Note: Clippy warns that casts to i32 are unnecessary because Rust infers i32
+        // from the context (Heap<i32, i32>). However, i is usize from the range,
+        // and explicit casts ensure type correctness. In some contexts (e.g., arithmetic
+        // expressions), Rust may infer i32, but explicit casts make the intent clear
+        // and prevent potential compilation errors if the type inference changes.
         #[allow(clippy::unnecessary_cast)]
         handles.push(heap.push(((i + 1) * 100) as i32, i as i32));
     }
@@ -204,6 +209,11 @@ fn test_stress_operations<H: Heap<i32, i32>>() {
 
     // Random decrease_key operations
     for i in (0..100).step_by(3) {
+        // Note: Clippy warns that cast to i32 is unnecessary. While Rust infers i32
+        // from decrease_key's signature (Heap<i32, i32>), the expression (i * 2 - 1)
+        // where i is usize results in usize. The explicit cast ensures correct type
+        // conversion. This is a case where clippy's inference and proof system
+        // requirements align, but the cast makes the conversion explicit.
         #[allow(clippy::unnecessary_cast)]
         heap.decrease_key(&handles[i], (i * 2 - 1) as i32);
     }
