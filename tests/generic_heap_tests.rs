@@ -105,7 +105,7 @@ fn test_multiple_decrease_keys<H: Heap<i32, i32>>() {
     // Pop all and verify ascending order
     for i in 0..20 {
         let popped = heap.pop();
-        assert_eq!(popped, Some((i as i32, i as i32)));
+        assert_eq!(popped, Some((i, i)));
     }
     assert!(heap.is_empty());
 }
