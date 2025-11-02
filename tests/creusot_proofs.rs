@@ -10,8 +10,10 @@
 // Actual Creusot proofs would need the heap implementations annotated with
 // #[requires] and #[ensures] specifications in Creusot's syntax.
 
-use rust_advanced_heaps::binomial::BinomialHeap;
-use rust_advanced_heaps::Heap;
+// Note: These imports are commented out since Creusot is not currently enabled
+// Uncomment when implementing actual Creusot proofs:
+// use rust_advanced_heaps::binomial::BinomialHeap;
+// use rust_advanced_heaps::Heap;
 
 // Example Creusot-style specification (syntax may vary):
 //
