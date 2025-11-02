@@ -90,6 +90,7 @@ fn test_multiple_decrease_keys<H: Heap<i32, i32>>() {
 
     // Insert 20 elements with high priorities
     for i in 0..20 {
+        #[allow(clippy::unnecessary_cast)]
         handles.push(heap.push(((i + 1) * 100) as i32, i as i32));
     }
 
@@ -203,6 +204,7 @@ fn test_stress_operations<H: Heap<i32, i32>>() {
 
     // Random decrease_key operations
     for i in (0..100).step_by(3) {
+        #[allow(clippy::unnecessary_cast)]
         heap.decrease_key(&handles[i], (i * 2 - 1) as i32);
     }
 
