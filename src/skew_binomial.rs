@@ -166,7 +166,7 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
                     // Slot at this rank is full: link two trees (binary addition carry)
                     let merged = self.link_trees(existing, tree);
                     self.trees[rank] = None; // Clear this rank
-                    // Merged tree becomes carry for next rank
+                                             // Merged tree becomes carry for next rank
                     carry = Some(merged);
                     rank += 1;
                 } else {
