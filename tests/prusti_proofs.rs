@@ -36,7 +36,6 @@ fn verified_insert(heap: &mut BinomialHeap<u32, u32>, priority: u32, item: u32) 
 /// They compile normally with rustc but are ignored.
 #[requires(true)]
 #[ensures(result == (heap.len() == 0))]
-#[allow(dead_code, unused_imports)]
 fn verified_is_empty(heap: &BinomialHeap<u32, u32>) -> bool {
     heap.is_empty()
 }
