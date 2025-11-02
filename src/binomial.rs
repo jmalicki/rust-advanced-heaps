@@ -31,7 +31,7 @@
 
 use crate::traits::{Handle, Heap};
 use std::ptr::{self, NonNull};
-use smallvec::{SmallVec, smallvec};
+use smallvec::SmallVec;
 
 /// Handle to an element in a Binomial heap
 ///
