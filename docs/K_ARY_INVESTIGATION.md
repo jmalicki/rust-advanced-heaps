@@ -283,7 +283,7 @@ unsafe fn link_trees(
     if (*a.as_ptr()).num_children >= K {
         return Err(b); // Would need splitting
     }
-    
+
     // Find first empty slot
     for i in 0..K {
         if (*a.as_ptr()).children[i].is_none() {
@@ -315,12 +315,12 @@ unsafe fn link_trees(
 ) -> Result<NonNull<Node<T, P>>, NonNull<Node<T, P>>> {
     let a_ptr = a.as_ptr();
     let max = (*a_ptr).max_children;
-    
+
     if (*a_ptr).children.len() >= max {
         // Need splitting strategy
         return Err(b);
     }
-    
+
     (*a_ptr).children.push(Some(b));
     (*b.as_ptr()).parent = Some(a);
     (*a_ptr).degree += 1;
@@ -336,7 +336,7 @@ unsafe fn link_trees(
 unsafe fn link(&mut self, y: NonNull<Node<T, P>>, x: NonNull<Node<T, P>>) {
     // Add y to x's child list (circular doubly linked)
     (*y.as_ptr()).parent = Some(x);
-    
+
     if let Some(x_child) = (*x.as_ptr()).child {
         // Add to circular list
         let x_child_left = (*x_child.as_ptr()).left;
@@ -349,7 +349,7 @@ unsafe fn link(&mut self, y: NonNull<Node<T, P>>, x: NonNull<Node<T, P>>) {
         (*y.as_ptr()).left = y;
         (*y.as_ptr()).right = y;
     }
-    
+
     (*x.as_ptr()).degree += 1; // Unbounded
 }
 ```
@@ -360,17 +360,17 @@ unsafe fn link(&mut self, y: NonNull<Node<T, P>>, x: NonNull<Node<T, P>>) {
 unsafe fn link(&mut self, y: NonNull<Node<T, P>>, x: NonNull<Node<T, P>>) {
     let x_ptr = x.as_ptr();
     let max_children = self.max_children; // K value stored in heap
-    
+
     if (*x_ptr).degree >= max_children {
         // Need to split or promote
         // Option 1: Split x, creating new root
         // Option 2: Promote y to root list
         self.split_node(x);
     }
-    
+
     // Add y to x's child list
     (*y.as_ptr()).parent = Some(x);
-    
+
     if let Some(x_child) = (*x_ptr).child {
         let x_child_left = (*x_child.as_ptr()).left;
         (*y.as_ptr()).right = x_child;
@@ -382,7 +382,7 @@ unsafe fn link(&mut self, y: NonNull<Node<T, P>>, x: NonNull<Node<T, P>>) {
         (*y.as_ptr()).left = y;
         (*y.as_ptr()).right = y;
     }
-    
+
     (*x_ptr).degree += 1;
 }
 ```
@@ -429,13 +429,13 @@ unsafe fn merge_nodes(
 ) -> Result<NonNull<Node<T, P>>, SplitAction> {
     let a_ptr = a.as_ptr();
     let max = (*a_ptr).max_children;
-    
+
     if (*a_ptr).child_count >= max {
         // Would exceed k-ary constraint
         // Need splitting strategy
         return Err(SplitAction::Promote(b));
     }
-    
+
     if (*a_ptr).priority < (*b.as_ptr()).priority {
         let a_child = (*a_ptr).child;
         (*b.as_ptr()).sibling = a_child;
@@ -462,7 +462,7 @@ struct Node<T, P> {
 unsafe fn maintain_structure(&mut self, node: NonNull<Node<T, P>>) {
     let num_children = (*node.as_ptr()).children.iter()
         .filter(|c| c.is_some()).count();
-    
+
     if num_children > 3 {
         // Split: keep first 2, move last 2 to new node
         // This pattern could be generalized to K
@@ -484,7 +484,7 @@ unsafe fn maintain_structure(&mut self, node: NonNull<Node<T, P>>) {
     let max = (*node_ptr).max_children;
     let num_children = (*node_ptr).children.iter()
         .filter(|c| c.is_some()).count();
-    
+
     if num_children > max {
         // Split strategy: keep first k/2, move rest to new node
         // Could be k-1 and 1, or balanced split
