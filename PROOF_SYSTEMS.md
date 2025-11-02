@@ -124,6 +124,7 @@ cargo test --test big_o_proofs -- --ignored
 #### What Gets Tested
 
 Each heap implementation is tested for:
+
 - **Insert**: O(1) amortized vs O(log n)
 - **Pop**: O(log n) for all heaps
 - **Decrease_key**: O(1) amortized vs O(log n)
