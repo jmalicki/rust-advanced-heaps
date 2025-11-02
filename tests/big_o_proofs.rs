@@ -91,7 +91,10 @@ fn test_pop_batch_complexity<H: Heap<i32, i32>>(heap_name: &str) {
                 h.push(i as i32, i as i32);
             }
             for _ in 0..1000 {
-                h.pop();
+                assert!(
+                    h.pop().is_some(),
+                    "pop() must succeed after pushing elements"
+                );
             }
             42
         },
@@ -102,7 +105,10 @@ fn test_pop_batch_complexity<H: Heap<i32, i32>>(heap_name: &str) {
                 h.push(i as i32, i as i32);
             }
             for _ in 0..2000 {
-                h.pop();
+                assert!(
+                    h.pop().is_some(),
+                    "pop() must succeed after pushing elements"
+                );
             }
             42
         },
