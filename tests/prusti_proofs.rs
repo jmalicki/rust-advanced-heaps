@@ -16,7 +16,7 @@ use prusti_contracts::*;
 /// Verified implementation showing that insert increments length
 #[cfg(feature = "prusti")]
 #[requires(true)]
-#[ensures(result.len() == old(heap.len()) + 1)]
+#[ensures(heap.len() == old(heap.len()) + 1)]
 fn verified_insert(heap: &mut BinomialHeap<u32, u32>, priority: u32, item: u32) -> () {
     heap.push(priority, item);
     // Postcondition: length increased by 1 is verified by Prusti

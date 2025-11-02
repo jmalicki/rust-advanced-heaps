@@ -12,4 +12,3 @@ provers = ["cvc5", "z3", "alt-ergo"]
 
 # Maximum number of iterations for loops
 loop_max_iterations = 10
-

@@ -51,9 +51,12 @@ fn verify_rank_pairing_pop_decrements_len() {
 
     let initial_len = heap.len();
 
-    if let Some(_) = heap.pop() {
-        assert!(heap.len() == initial_len - 1);
-    }
+    let popped = heap.pop();
+    assert!(
+        popped.is_some(),
+        "pop() must succeed after pushing elements"
+    );
+    assert!(heap.len() == initial_len - 1);
 }
 
 /// Proof: RankPairingHeap decrease_key maintains heap property
@@ -72,9 +75,10 @@ fn verify_rank_pairing_decrease_key() {
 
     heap.decrease_key(&handle, new_priority);
 
-    if let Some((&min, _)) = heap.find_min() {
-        assert!(min <= new_priority);
-    }
+    let (min_priority, _) = heap
+        .find_min()
+        .expect("find_min() must return the minimum after pushing elements");
+    assert!(*min_priority <= new_priority);
 }
 
 // ============================================================================
@@ -106,9 +110,12 @@ fn verify_skew_binomial_pop_decrements_len() {
 
     let initial_len = heap.len();
 
-    if let Some(_) = heap.pop() {
-        assert!(heap.len() == initial_len - 1);
-    }
+    let popped = heap.pop();
+    assert!(
+        popped.is_some(),
+        "pop() must succeed after pushing elements"
+    );
+    assert!(heap.len() == initial_len - 1);
 }
 
 /// Proof: SkewBinomialHeap decrease_key maintains heap property
@@ -127,9 +134,10 @@ fn verify_skew_binomial_decrease_key() {
 
     heap.decrease_key(&handle, new_priority);
 
-    if let Some((&min, _)) = heap.find_min() {
-        assert!(min <= new_priority);
-    }
+    let (min_priority, _) = heap
+        .find_min()
+        .expect("find_min() must return the minimum after pushing elements");
+    assert!(*min_priority <= new_priority);
 }
 
 // ============================================================================
@@ -161,9 +169,12 @@ fn verify_brodal_pop_decrements_len() {
 
     let initial_len = heap.len();
 
-    if let Some(_) = heap.pop() {
-        assert!(heap.len() == initial_len - 1);
-    }
+    let popped = heap.pop();
+    assert!(
+        popped.is_some(),
+        "pop() must succeed after pushing elements"
+    );
+    assert!(heap.len() == initial_len - 1);
 }
 
 /// Proof: BrodalHeap decrease_key maintains heap property
@@ -182,9 +193,10 @@ fn verify_brodal_decrease_key() {
 
     heap.decrease_key(&handle, new_priority);
 
-    if let Some((&min, _)) = heap.find_min() {
-        assert!(min <= new_priority);
-    }
+    let (min_priority, _) = heap
+        .find_min()
+        .expect("find_min() must return the minimum after pushing elements");
+    assert!(*min_priority <= new_priority);
 }
 
 // ============================================================================
@@ -216,9 +228,12 @@ fn verify_strict_fibonacci_pop_decrements_len() {
 
     let initial_len = heap.len();
 
-    if let Some(_) = heap.pop() {
-        assert!(heap.len() == initial_len - 1);
-    }
+    let popped = heap.pop();
+    assert!(
+        popped.is_some(),
+        "pop() must succeed after pushing elements"
+    );
+    assert!(heap.len() == initial_len - 1);
 }
 
 /// Proof: StrictFibonacciHeap decrease_key maintains heap property
@@ -237,9 +252,10 @@ fn verify_strict_fibonacci_decrease_key() {
 
     heap.decrease_key(&handle, new_priority);
 
-    if let Some((&min, _)) = heap.find_min() {
-        assert!(min <= new_priority);
-    }
+    let (min_priority, _) = heap
+        .find_min()
+        .expect("find_min() must return the minimum after pushing elements");
+    assert!(*min_priority <= new_priority);
 }
 
 // ============================================================================
@@ -271,9 +287,12 @@ fn verify_twothree_pop_decrements_len() {
 
     let initial_len = heap.len();
 
-    if let Some(_) = heap.pop() {
-        assert!(heap.len() == initial_len - 1);
-    }
+    let popped = heap.pop();
+    assert!(
+        popped.is_some(),
+        "pop() must succeed after pushing elements"
+    );
+    assert!(heap.len() == initial_len - 1);
 }
 
 /// Proof: TwoThreeHeap decrease_key maintains heap property
@@ -292,9 +311,10 @@ fn verify_twothree_decrease_key() {
 
     heap.decrease_key(&handle, new_priority);
 
-    if let Some((&min, _)) = heap.find_min() {
-        assert!(min <= new_priority);
-    }
+    let (min_priority, _) = heap
+        .find_min()
+        .expect("find_min() must return the minimum after pushing elements");
+    assert!(*min_priority <= new_priority);
 }
 
 // ============================================================================
@@ -348,19 +368,17 @@ fn verify_all_heaps_find_same_minimum() {
     let min_rank_pairing = rank_pairing.find_min().map(|(p, _)| *p);
     let min_skew_binomial = skew_binomial.find_min().map(|(p, _)| *p);
 
-    if let (Some(b), Some(f), Some(p), Some(rp), Some(sb)) = (
-        min_binomial,
-        min_fibonacci,
-        min_pairing,
-        min_rank_pairing,
-        min_skew_binomial,
-    ) {
-        assert!(b == expected_min);
-        assert!(f == expected_min);
-        assert!(p == expected_min);
-        assert!(rp == expected_min);
-        assert!(sb == expected_min);
-    }
+    let b = min_binomial.expect("binomial heap should have a minimum");
+    let f = min_fibonacci.expect("fibonacci heap should have a minimum");
+    let p = min_pairing.expect("pairing heap should have a minimum");
+    let rp = min_rank_pairing.expect("rank pairing heap should have a minimum");
+    let sb = min_skew_binomial.expect("skew binomial heap should have a minimum");
+
+    assert!(b == expected_min);
+    assert!(f == expected_min);
+    assert!(p == expected_min);
+    assert!(rp == expected_min);
+    assert!(sb == expected_min);
 }
 
 /// Proof: All heap implementations maintain length consistency
@@ -395,11 +413,11 @@ fn verify_all_heaps_length_consistency() {
     assert!(skew_binomial.len() == 2);
 
     // Pop from all
-    let _ = binomial.pop();
-    let _ = fibonacci.pop();
-    let _ = pairing.pop();
-    let _ = rank_pairing.pop();
-    let _ = skew_binomial.pop();
+    assert!(binomial.pop().is_some());
+    assert!(fibonacci.pop().is_some());
+    assert!(pairing.pop().is_some());
+    assert!(rank_pairing.pop().is_some());
+    assert!(skew_binomial.pop().is_some());
 
     // All should have length 1
     assert!(binomial.len() == 1);

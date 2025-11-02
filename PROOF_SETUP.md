@@ -72,7 +72,7 @@ cargo kani --tests kani_proofs --tests trait_level_proofs --tests implementation
 
 ```bash
 # Example: Verify binomial heap push increments length
-cargo kani --tests trait_level_proofs -- verify_push_increments_len_binomial
+cargo kani --tests --harness verify_push_increments_len_binomial
 ```
 
 ## Configuration

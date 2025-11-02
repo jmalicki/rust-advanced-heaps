@@ -97,6 +97,41 @@ cargo creusot
 
 See [Verus documentation](https://github.com/verus-lang/verus) for setup.
 
+### 5. Big-O Empirical Complexity Tests
+
+**Big-O Tests** empirically verify that heap operations meet their theoretical
+time complexity bounds by measuring actual runtime with varying input sizes.
+
+- ✅ Validates real-world performance matches theory
+- ✅ Detects performance regressions
+- ✅ No code annotations needed
+- ⚠️ Empirical only (statistical, not formal proofs)
+- ⚠️ May be sensitive to environment
+
+#### Running Big-O Tests
+
+```bash
+# Run all Big-O complexity tests
+cargo test --test big_o_proofs
+
+# Run tests for a specific heap
+cargo test --test big_o_proofs test_fibonacci
+
+# Note: Some tests are ignored due to flakiness
+cargo test --test big_o_proofs -- --ignored
+```
+
+#### What Gets Tested
+
+Each heap implementation is tested for:
+- **Insert**: O(1) amortized vs O(log n)
+- **Pop**: O(log n) for all heaps
+- **Decrease_key**: O(1) amortized vs O(log n)
+- **Merge**: O(1) vs O(log n) (currently disabled due to flakiness)
+- **Amortized bounds**: Mixed operations sequences
+
+See `tests/big_o_proofs.rs` for implementation details.
+
 ## Comparison
 
 | Tool | Setup Difficulty | Code Changes | Strengths |
@@ -105,6 +140,7 @@ See [Verus documentation](https://github.com/verus-lang/verus) for setup.
 | **Prusti** | ⭐⭐ Medium | Annotations needed | Static verification, good documentation |
 | **Creusot** | ⭐⭐⭐ Hard | Significant changes | Mathematical proofs via Why3 |
 | **Verus** | ⭐⭐⭐⭐ Very Hard | Rewrite needed | Full verification, new language |
+| **Big-O Tests** | ⭐ Easy | None | Empirical performance validation |
 
 ## Recommended Approach
 
