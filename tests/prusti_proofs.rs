@@ -5,32 +5,36 @@
 //!
 //! To run these proofs:
 //!   cargo prusti
+//!
+//! Prusti annotations are ignored by rustc but processed by Prusti when running:
+//!   cargo prusti
 
-// Enable Prusti verification
-// Note: Prusti feature is not currently enabled, so these proofs are not active
-// To enable: add `features = ["prusti"]` to Cargo.toml [dev-dependencies]
-#[cfg(feature = "prusti")]
-use prusti_contracts::*;
-
-#[cfg(feature = "prusti")]
 use rust_advanced_heaps::binomial::BinomialHeap;
-
-#[cfg(feature = "prusti")]
 use rust_advanced_heaps::Heap;
 
+// Prusti contracts are always available
+// They compile normally but are processed by Prusti when running: cargo prusti
+use prusti_contracts::*;
+
 /// Verified implementation showing that insert increments length
-#[cfg(feature = "prusti")]
+///
+/// Prusti annotations are processed when running `cargo prusti`.
+/// They compile normally with rustc but are ignored.
 #[requires(true)]
 #[ensures(heap.len() == old(heap.len()) + 1)]
+#[allow(dead_code)]
 fn verified_insert(heap: &mut BinomialHeap<u32, u32>, priority: u32, item: u32) -> () {
     heap.push(priority, item);
     // Postcondition: length increased by 1 is verified by Prusti
 }
 
 /// Proof that is_empty is consistent with len
-#[cfg(feature = "prusti")]
+///
+/// Prusti annotations are processed when running `cargo prusti`.
+/// They compile normally with rustc but are ignored.
 #[requires(true)]
 #[ensures(result == (heap.len() == 0))]
+#[allow(dead_code)]
 fn verified_is_empty(heap: &BinomialHeap<u32, u32>) -> bool {
     heap.is_empty()
 }
