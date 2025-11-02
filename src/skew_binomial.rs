@@ -150,38 +150,27 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
                 self.trees.push(None);
             }
 
-            if self.trees[0].is_some() {
-                // Rank-0 slot is full: link two rank-0 trees (binary addition carry)
-                // This produces a rank-1 tree
-                let existing = self.trees[0].unwrap();
-                let merged = self.link_trees(existing, node_ptr);
-                self.trees[0] = None; // Clear rank-0 slot
-
-                // Try to insert merged tree at rank 1
-                while self.trees.len() <= 1 {
+            // Use carry propagation similar to binomial heap insert
+            // This ensures proper cascade through all ranks
+            let mut carry = Some(node_ptr);
+            let mut rank = 0;
+            while let Some(tree) = carry {
+                while self.trees.len() <= rank {
                     self.trees.push(None);
                 }
 
-                // Check if rank-1 slot is also full (cascade)
-                if self.trees[1].is_some() {
-                    // Rank-1 slot is full: link two rank-1 trees → rank-2 tree
-                    let existing_rank1 = self.trees[1].unwrap();
-                    let merged_rank1 = self.link_trees(existing_rank1, merged);
-                    self.trees[1] = None; // Clear rank-1 slot
-
-                    // Continue cascade to rank 2
-                    while self.trees.len() <= 2 {
-                        self.trees.push(None);
-                    }
-                    self.trees[2] = Some(merged_rank1);
+                if let Some(existing) = self.trees[rank] {
+                    // Slot at this rank is full: link two trees (binary addition carry)
+                    let merged = self.link_trees(existing, tree);
+                    self.trees[rank] = None; // Clear this rank
+                    // Merged tree becomes carry for next rank
+                    carry = Some(merged);
+                    rank += 1;
                 } else {
-                    // Rank-1 slot is empty: insert merged tree there (done, O(1))
-                    self.trees[1] = Some(merged);
+                    // Slot at this rank is empty: insert tree there (done)
+                    self.trees[rank] = Some(tree);
+                    carry = None; // No more carry
                 }
-            } else {
-                // Rank-0 slot is empty: insert tree there (done, O(1))
-                // This is the common case: O(1) insert!
-                self.trees[0] = Some(node_ptr);
             }
 
             self.len += 1;
