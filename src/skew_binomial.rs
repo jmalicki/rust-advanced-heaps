@@ -55,11 +55,9 @@ pub struct SkewBinomialHeap<T, P: Ord> {
 
 impl<T, P: Ord> Drop for SkewBinomialHeap<T, P> {
     fn drop(&mut self) {
-        for tree_opt in self.trees.iter() {
-            if let Some(root) = tree_opt {
-                unsafe {
-                    Self::free_tree(*root);
-                }
+        for root in self.trees.iter().flatten() {
+            unsafe {
+                Self::free_tree(*root);
             }
         }
     }
@@ -149,7 +147,7 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
             // Insert as rank-0 tree (O(1) in common case)
             // Skew binomial allows O(1) insert via special handling
             // This is the key difference from standard binomial heaps
-            while self.trees.len() <= 0 {
+            if self.trees.is_empty() {
                 self.trees.push(None);
             }
 
@@ -524,16 +522,17 @@ impl<T, P: Ord> SkewBinomialHeap<T, P> {
     /// - Just pointer updates and comparisons
     /// - No traversal needed: linking is a constant-time operation
     /// - This enables efficient merging and insertion
+    #[allow(clippy::only_used_in_recursion)]
     unsafe fn link_trees(
         &mut self,
-        a: NonNull<Node<T, P>>,
-        b: NonNull<Node<T, P>>,
+        mut a: NonNull<Node<T, P>>,
+        mut b: NonNull<Node<T, P>>,
     ) -> NonNull<Node<T, P>> {
         // Make tree with larger priority a child of the one with smaller priority
         // This maintains heap property: parent <= child
-        // If a has larger priority, swap a and b and recurse
+        // If a has larger priority, swap a and b
         if (*a.as_ptr()).priority > (*b.as_ptr()).priority {
-            return self.link_trees(b, a);
+            std::mem::swap(&mut a, &mut b);
         }
 
         // Now a has smaller or equal priority: make b a child of a
@@ -613,14 +612,12 @@ impl<T, P: Ord> SkewBinomialHeap<T, P> {
     /// Finds and updates the minimum pointer
     fn find_and_update_min(&mut self) {
         self.min = None;
-        for tree_opt in self.trees.iter() {
-            if let Some(root) = tree_opt {
-                unsafe {
-                    if self.min.is_none()
-                        || (*root.as_ptr()).priority < (*self.min.unwrap().as_ptr()).priority
-                    {
-                        self.min = Some(*root);
-                    }
+        for root in self.trees.iter().flatten() {
+            unsafe {
+                if self.min.is_none()
+                    || (*root.as_ptr()).priority < (*self.min.unwrap().as_ptr()).priority
+                {
+                    self.min = Some(*root);
                 }
             }
         }
