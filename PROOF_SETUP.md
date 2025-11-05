@@ -79,7 +79,6 @@ cargo kani --tests --harness verify_push_increments_len_binomial
 
 - `kani.toml` - Kani configuration (unwind limits, timeouts)
 - `build.rs` - Allows `cfg(kani)` attributes
-- `.prusti.toml` - Prusti configuration (for future use)
 - `.creusot.toml` - Creusot configuration (for future use)
 
 ## Next Steps
@@ -87,8 +86,7 @@ cargo kani --tests --harness verify_push_increments_len_binomial
 1. **Install Kani** and run proofs to find bugs
 2. **Increase unwind limits** for complex operations if needed
 3. **Add more invariant checks** as bugs are found
-4. **Set up Prusti** for more sophisticated static verification
-5. **Set up Creusot** for mathematical proofs via Why3
+4. **Set up Creusot** for mathematical proofs via Why3
 
 ## Finding Bugs
 

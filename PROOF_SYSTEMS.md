@@ -42,32 +42,7 @@ See `tests/kani_proofs.rs` for examples including:
 - `verify_find_min_correct` - verifies find_min returns minimum
 - `verify_decrease_key_decreases` - verifies decrease_key correctness
 
-### 2. Prusti
-
-**Prusti** is a static verifier for Rust, similar to Dafny/Spec#.
-
-- ✅ Free and open source
-- ✅ Annotations-based verification
-- ⚠️ Requires `#[requires]` and `#[ensures]` annotations
-- ⚠️ May need code refactoring for unsafe code
-
-#### Prusti Installation
-
-```bash
-cargo install prusti
-```
-
-#### Prusti Usage
-
-```bash
-# Enable prusti feature
-cargo prusti --features prusti
-
-# Or compile with prusti
-cargo prusti
-```
-
-### 3. Creusot
+### 2. Creusot
 
 **Creusot** uses Why3 for verification of Rust programs.
 
@@ -85,7 +60,7 @@ See [Creusot documentation](https://github.com/creusot-rs/creusot) for setup.
 cargo creusot
 ```
 
-### 4. Verus
+### 3. Verus
 
 **Verus** is a verified Rust language variant.
 
@@ -97,7 +72,7 @@ cargo creusot
 
 See [Verus documentation](https://github.com/verus-lang/verus) for setup.
 
-### 5. Big-O Empirical Complexity Tests
+### 4. Big-O Empirical Complexity Tests
 
 **Big-O Tests** empirically verify that heap operations meet their theoretical
 time complexity bounds by measuring actual runtime with varying input sizes.
@@ -138,7 +113,6 @@ See `tests/big_o_proofs.rs` for implementation details.
 | Tool | Setup Difficulty | Code Changes | Strengths |
 |------|------------------|--------------|-----------|
 | **Kani** | ⭐ Easy | Minimal | Model checking, easy to start |
-| **Prusti** | ⭐⭐ Medium | Annotations needed | Static verification, good documentation |
 | **Creusot** | ⭐⭐⭐ Hard | Significant changes | Mathematical proofs via Why3 |
 | **Verus** | ⭐⭐⭐⭐ Very Hard | Rewrite needed | Full verification, new language |
 | **Big-O Tests** | ⭐ Easy | None | Empirical performance validation |
@@ -146,8 +120,7 @@ See `tests/big_o_proofs.rs` for implementation details.
 ## Recommended Approach
 
 1. **Start with Kani** - easiest to set up, works with existing code
-2. **Add Prusti** - for more sophisticated invariants via annotations
-3. **Consider Creusot/Verus** - for deeper verification, but requires more effort
+2. **Consider Creusot/Verus** - for deeper verification, but requires more effort
 
 ## Running Proofs
 
@@ -189,16 +162,6 @@ cargo kani --tests trait_level_proofs -- --unwind 20
 3. **Legacy Proofs** (`tests/kani_proofs.rs`):
    - Simpler examples for getting started
 
-### Prusti
-
-```bash
-# Install
-cargo install prusti
-
-# Run verification
-cargo prusti --features prusti
-```
-
 ## CI Integration
 
 You can add proof checking to CI workflows. Example for Kani:
@@ -223,7 +186,6 @@ jobs:
 ## Configuration
 
 - `kani.toml` - Kani configuration (unwind limits, timeouts)
-- `.prusti.toml` - Prusti configuration
 - `.creusot.toml` - Creusot configuration
 
 ## Notes

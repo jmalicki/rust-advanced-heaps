@@ -119,7 +119,7 @@ fn verify_decrease_key_decreases<H: Heap<u32, u32>>() {
     // Add another element to ensure heap is not empty
     heap.push(kani::any(), kani::any());
 
-    heap.decrease_key(&handle, new_priority);
+    heap.decrease_key(&handle, new_priority).unwrap();
 
     // After decrease_key, the minimum should be <= new_priority
     let (current_min, _) = heap

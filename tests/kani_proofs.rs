@@ -138,7 +138,7 @@ fn verify_decrease_key_decreases() {
     let item = kani::any();
     let handle = heap.push(initial_priority, item);
 
-    heap.decrease_key(&handle, new_priority);
+    heap.decrease_key(&handle, new_priority).unwrap();
 
     // Post-condition: if we find_min, it should return new_priority or less
     if let Some((&current_min, _)) = heap.find_min() {

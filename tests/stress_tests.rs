@@ -42,7 +42,7 @@ fn test_many_decrease_keys<H: Heap<i32, i32>>() {
 
     // Decrease all keys
     for (i, handle) in handles.iter().enumerate() {
-        assert!(heap.decrease_key(handle, i as i32).is_ok());
+        heap.decrease_key(handle, i as i32).unwrap();
     }
 
     // Verify order
@@ -113,7 +113,7 @@ fn test_decrease_on_many_operations<H: Heap<i32, i32>>() {
     for handle in handles.iter().skip(100) {
         // Get current priority and decrease if valid
         if let Some((current, _)) = heap.peek() {
-            assert!(heap.decrease_key(handle, *current - 1).is_ok());
+            heap.decrease_key(handle, *current - 1).unwrap();
         }
     }
 
@@ -147,7 +147,7 @@ fn test_rapid_fire<H: Heap<i32, i32>>() {
 
     // Rapid decrease keys
     for (i, handle) in handles.iter().enumerate().step_by(2) {
-        assert!(heap.decrease_key(handle, i as i32 - 10).is_ok());
+        heap.decrease_key(handle, i as i32 - 10).unwrap();
     }
 
     // Rapid pop
