@@ -20,6 +20,18 @@ pub struct TwoThreeHandle {
 impl Handle for TwoThreeHandle {}
 
 // Type alias for children array to avoid clippy type-complexity warnings
+//
+// Capacity choice (4):
+// - In a 2-3 heap, each internal node has exactly 2 or 3 children (hence the name)
+// - Capacity 4 is needed for splits: when a node would have 4 children, it splits into two nodes
+// - Each node with 4 children is split into two nodes with 2 children each
+// - Stack allocation (4 slots) is sufficient since nodes never have >4 children before splitting
+// - SmallVec will dynamically allocate if needed, but this should never occur in practice
+//
+// Performance considerations:
+// - 4 is the minimum needed for correct operation (splits require temporarily holding 4 children)
+// - Stack allocation is fast and avoids heap allocation for this small, fixed-size array
+// - The choice of 4 is optimal: any less would cause incorrect behavior, any more wastes stack space
 type ChildrenArray<T, P> = SmallVec<[Option<NonNull<Node<T, P>>>; 4]>;
 
 struct Node<T, P> {

@@ -31,6 +31,23 @@ struct Node<T, P> {
 }
 
 // Type alias for tree array to avoid clippy type-complexity warnings
+//
+// Capacity choice (32):
+// - The trees array is indexed by rank, where rank k corresponds to a tree with ~2^k nodes
+// - Maximum rank needed for n elements is floor(log₂(n))
+// - With capacity 32, we can handle heaps with up to 2³² ≈ 4 billion elements using stack allocation
+// - Beyond 32, SmallVec dynamically allocates on the heap
+//
+// Performance considerations:
+// - Stack allocation (≤32 ranks) avoids heap allocation overhead
+// - For heaps with >4B elements, heap allocation is necessary anyway (we'd need >32 ranks)
+// - Most practical heaps are much smaller than 4B elements, so 32 covers the common case
+// - The choice of 32 balances stack usage (8*32 = 256 bytes for Option<NonNull>) vs. heap allocation frequency
+//
+// Note: There is no significant advantage to a larger fixed capacity for huge heaps:
+// - Heaps with >4B elements already require heap allocation for the tree nodes themselves
+// - The overhead of one heap allocation for the trees array (when exceeding 32 ranks) is negligible
+// - The memory saved by stack allocation for small heaps outweighs the cost of occasional heap allocation
 type TreeArray<T, P> = SmallVec<[Option<NonNull<Node<T, P>>>; 32]>;
 
 /// Skew Binomial Heap
