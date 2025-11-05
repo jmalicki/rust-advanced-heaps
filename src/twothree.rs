@@ -10,6 +10,9 @@
 use crate::traits::{Handle, Heap, HeapError};
 use std::ptr::{self, NonNull};
 
+/// Type alias for compact node pointer storage
+type NodePtr<T, P> = Option<NonNull<Node<T, P>>>;
+
 /// Handle to an element in a 2-3 heap
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct TwoThreeHandle {
@@ -21,8 +24,8 @@ impl Handle for TwoThreeHandle {}
 struct Node<T, P> {
     item: T,
     priority: P,
-    parent: Option<NonNull<Node<T, P>>>,
-    children: Vec<Option<NonNull<Node<T, P>>>>, // 2 or 3 children
+    parent: NodePtr<T, P>,
+    children: Vec<NodePtr<T, P>>, // 2 or 3 children
 }
 
 /// 2-3 Heap

@@ -11,6 +11,9 @@
 use crate::traits::{Handle, Heap, HeapError};
 use std::ptr::{self, NonNull};
 
+/// Type alias for compact node pointer storage
+type NodePtr<T, P> = Option<NonNull<Node<T, P>>>;
+
 /// Handle to an element in a Skew binomial heap
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct SkewBinomialHandle {
@@ -46,8 +49,8 @@ struct Node<T, P> {
 /// assert_eq!(heap.peek(), Some((&1, &"item")));
 /// ```
 pub struct SkewBinomialHeap<T, P: Ord> {
-    trees: Vec<Option<NonNull<Node<T, P>>>>, // Array indexed by rank
-    min: Option<NonNull<Node<T, P>>>,
+    trees: Vec<NodePtr<T, P>>, // Array indexed by rank
+    min: NodePtr<T, P>,
     len: usize,
     _phantom: std::marker::PhantomData<T>,
 }
