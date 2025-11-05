@@ -156,7 +156,7 @@ fn test_decrease_key_batch_complexity<H: Heap<i32, i32>>(
             // Now decrease keys
             for (i, handle) in handles.iter().enumerate() {
                 let mut h = heap1.write();
-                let _ = h.decrease_key(handle, i as i32);
+                assert!(h.decrease_key(handle, i as i32).is_ok());
             }
             42
         },
@@ -172,7 +172,7 @@ fn test_decrease_key_batch_complexity<H: Heap<i32, i32>>(
 
             for (i, handle) in handles.iter().enumerate() {
                 let mut h = heap2.write();
-                let _ = h.decrease_key(handle, i as i32);
+                assert!(h.decrease_key(handle, i as i32).is_ok());
             }
             42
         },
