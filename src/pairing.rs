@@ -28,7 +28,7 @@
 //! 3. **Sibling list**: Children of a node form a linked list via sibling pointers
 //! 4. **Root tracking**: The minimum element is always at the root
 
-use crate::traits::{Handle, Heap};
+use crate::traits::{Handle, Heap, HeapError};
 use std::ptr::{self, NonNull};
 
 /// Handle to an element in a Pairing heap
@@ -275,7 +275,7 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
     /// Cutting a node means removing it from its parent's child list. Since we
     /// maintain prev pointers, this is O(1). We then add it as a child of the
     /// root (or make it root if it's smaller). This maintains heap property.
-    fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) {
+    fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) -> Result<(), HeapError> {
         let node_ptr = unsafe { NonNull::new_unchecked(handle.node as *mut Node<T, P>) };
 
         unsafe {
@@ -284,7 +284,7 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
             // Safety check: new priority must actually be less
             // If not, the operation is a no-op (or could panic in a checked version)
             if new_priority >= (*node).priority {
-                return;
+                return Err(HeapError::PriorityNotDecreased);
             }
 
             // Update the priority value
@@ -293,7 +293,7 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
             // If the node is already the root, no restructuring needed
             // The heap property is satisfied (root has no parent)
             if self.root == Some(node_ptr) {
-                return;
+                return Ok(());
             }
 
             // The node is not the root, so it has a parent
@@ -334,6 +334,7 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
                 self.root = Some(node_ptr);
             }
         }
+        Ok(())
     }
 
     /// Merges another heap into this heap
@@ -627,7 +628,7 @@ mod tests {
 
         assert_eq!(heap.find_min(), Some((&10, &"a")));
 
-        heap.decrease_key(&h1, 5);
+        let _ = heap.decrease_key(&h1, 5);
         assert_eq!(heap.find_min(), Some((&5, &"a")));
     }
 

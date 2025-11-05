@@ -8,7 +8,7 @@
 //! Skew binomial heaps allow more flexible tree structures than standard
 //! binomial heaps while maintaining efficient operations.
 
-use crate::traits::{Handle, Heap};
+use crate::traits::{Handle, Heap, HeapError};
 use std::ptr::{self, NonNull};
 
 /// Handle to an element in a Skew binomial heap
@@ -354,7 +354,7 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
     ///
     /// **Note**: We swap priorities and items, not pointers. This maintains the
     /// skew binomial tree structure while fixing heap property violations.
-    fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) {
+    fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) -> Result<(), HeapError> {
         let node_ptr = unsafe { NonNull::new_unchecked(handle.node as *mut Node<T, P>) };
 
         unsafe {
@@ -362,7 +362,7 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
 
             // Safety check: new priority must actually be less
             if new_priority >= (*node).priority {
-                return; // No-op if priority didn't decrease
+                return Err(HeapError::PriorityNotDecreased);
             }
 
             // Update the priority value
@@ -374,6 +374,7 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
             // The skew binomial structure maintains shape, keeping most bubbles shallow
             self.bubble_up(node_ptr);
         }
+        Ok(())
     }
 
     /// Merges another heap into this heap
@@ -666,7 +667,7 @@ mod tests {
         let h1 = heap.push(10, "a");
         let _h2 = heap.push(20, "b");
 
-        heap.decrease_key(&h1, 5);
+        let _ = heap.decrease_key(&h1, 5);
         assert_eq!(heap.peek(), Some((&5, &"a")));
     }
 

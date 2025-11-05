@@ -33,7 +33,7 @@
 //! These constraints bound the tree height while allowing efficient updates.
 //! Unlike Fibonacci heaps, ranks are explicit and updated locally.
 
-use crate::traits::{Handle, Heap};
+use crate::traits::{Handle, Heap, HeapError};
 use std::ptr::{self, NonNull};
 
 /// Handle to an element in a Rank-pairing heap
@@ -287,7 +287,7 @@ impl<T, P: Ord> Heap<T, P> for RankPairingHeap<T, P> {
     /// - Expensive operations (deep cuts with cascading) are rare
     /// - Cascading cuts are bounded: each node can be cut at most once
     /// - Amortized analysis shows average cost is O(1)
-    fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) {
+    fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) -> Result<(), HeapError> {
         let node_ptr = unsafe { NonNull::new_unchecked(handle.node as *mut Node<T, P>) };
 
         unsafe {
@@ -295,7 +295,7 @@ impl<T, P: Ord> Heap<T, P> for RankPairingHeap<T, P> {
 
             // Safety check: new priority must actually be less
             if new_priority >= (*node).priority {
-                return; // No-op if priority didn't decrease
+                return Err(HeapError::PriorityNotDecreased);
             }
 
             // Update the priority value
@@ -303,7 +303,7 @@ impl<T, P: Ord> Heap<T, P> for RankPairingHeap<T, P> {
 
             // If node is already root, heap property is satisfied (no parent)
             if self.root == Some(node_ptr) {
-                return;
+                return Ok(());
             }
 
             // Node is not root, so it has a parent
@@ -334,6 +334,7 @@ impl<T, P: Ord> Heap<T, P> for RankPairingHeap<T, P> {
                 // If heap property is not violated, no restructuring needed
             }
         }
+        Ok(())
     }
 
     /// Merges another heap into this heap
@@ -685,10 +686,10 @@ mod tests {
 
         assert_eq!(heap.find_min(), Some((&10, &"a")));
 
-        heap.decrease_key(&h1, 5);
+        let _ = heap.decrease_key(&h1, 5);
         assert_eq!(heap.find_min(), Some((&5, &"a")));
 
-        heap.decrease_key(&h3, 1);
+        let _ = heap.decrease_key(&h3, 1);
         assert_eq!(heap.find_min(), Some((&1, &"c")));
     }
 
@@ -717,7 +718,7 @@ mod tests {
         // Decrease keys in reverse order - each gets a priority that's half its index
         for (i, handle) in handles.iter().enumerate().rev() {
             let new_priority = i * 5; // item9 -> 45, item8 -> 40, ..., item0 -> 0
-            heap.decrease_key(handle, new_priority);
+            let _ = heap.decrease_key(handle, new_priority);
         }
 
         // After all decrease operations, item0 should have priority 0 (lowest)

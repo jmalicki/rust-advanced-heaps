@@ -38,7 +38,7 @@
 //! - This ensures no node loses more than one child before being cut
 //! - This maintains the Fibonacci property
 
-use crate::traits::{Handle, Heap};
+use crate::traits::{Handle, Heap, HeapError};
 use std::ptr::{self, NonNull};
 
 /// Handle to an element in a Fibonacci heap
@@ -247,7 +247,7 @@ impl<T, P: Ord> Heap<T, P> for FibonacciHeap<T, P> {
         }
     }
 
-    fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) {
+    fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) -> Result<(), HeapError> {
         let node_ptr = unsafe { NonNull::new_unchecked(handle.node as *mut Node<T, P>) };
 
         unsafe {
@@ -255,7 +255,7 @@ impl<T, P: Ord> Heap<T, P> for FibonacciHeap<T, P> {
 
             // Verify that new priority is actually less
             if new_priority >= (*node).priority {
-                return; // Or panic/error
+                return Err(HeapError::PriorityNotDecreased);
             }
 
             (*node).priority = new_priority;
@@ -268,13 +268,13 @@ impl<T, P: Ord> Heap<T, P> for FibonacciHeap<T, P> {
                         self.min = Some(node_ptr);
                     }
                 }
-                return;
+                return Ok(());
             }
 
             // Check if heap property is violated
             if let Some(parent_ptr) = (*node).parent {
                 if (*node).priority >= (*parent_ptr.as_ptr()).priority {
-                    return; // Heap property still satisfied
+                    return Ok(()); // Heap property still satisfied
                 }
             }
 
@@ -282,6 +282,7 @@ impl<T, P: Ord> Heap<T, P> for FibonacciHeap<T, P> {
             self.cut(node_ptr);
             self.cascading_cut((*node).parent);
         }
+        Ok(())
     }
 
     fn merge(&mut self, mut other: Self) {
@@ -554,10 +555,10 @@ mod tests {
 
         assert_eq!(heap.find_min(), Some((&10, &"a")));
 
-        heap.decrease_key(&h2, 5);
+        let _ = heap.decrease_key(&h2, 5);
         assert_eq!(heap.find_min(), Some((&5, &"b")));
 
-        heap.decrease_key(&h3, 1);
+        let _ = heap.decrease_key(&h3, 1);
         assert_eq!(heap.find_min(), Some((&1, &"c")));
     }
 

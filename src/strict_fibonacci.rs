@@ -8,7 +8,7 @@
 //! structural constraints that ensure worst-case bounds rather than just
 //! amortized bounds.
 
-use crate::traits::{Handle, Heap};
+use crate::traits::{Handle, Heap, HeapError};
 use std::ptr::{self, NonNull};
 
 /// Handle to an element in a Strict Fibonacci heap
@@ -269,7 +269,7 @@ impl<T, P: Ord> Heap<T, P> for StrictFibonacciHeap<T, P> {
     /// - Immediate consolidation (during delete_min) fixes violations
     /// - The active/passive distinction allows us to defer work safely
     /// - This maintains worst-case bounds without cascading cuts
-    fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) {
+    fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) -> Result<(), HeapError> {
         let node_ptr = unsafe { NonNull::new_unchecked(handle.node as *mut Node<T, P>) };
 
         unsafe {
@@ -277,7 +277,7 @@ impl<T, P: Ord> Heap<T, P> for StrictFibonacciHeap<T, P> {
 
             // Safety check: new priority must actually be less
             if new_priority >= (*node).priority {
-                return; // No-op if priority didn't decrease
+                return Err(HeapError::PriorityNotDecreased);
             }
 
             // Update the priority value
@@ -291,7 +291,7 @@ impl<T, P: Ord> Heap<T, P> for StrictFibonacciHeap<T, P> {
                         self.min = Some(node_ptr);
                     }
                 }
-                return;
+                return Ok(());
             }
 
             // Node is not root, so it has a parent
@@ -310,6 +310,7 @@ impl<T, P: Ord> Heap<T, P> for StrictFibonacciHeap<T, P> {
                 self.min = Some(node_ptr);
             }
         }
+        Ok(())
     }
 
     /// Merges another heap into this heap
@@ -761,10 +762,10 @@ mod tests {
 
         assert_eq!(heap.peek(), Some((&10, &"a")));
 
-        heap.decrease_key(&h1, 5);
+        let _ = heap.decrease_key(&h1, 5);
         assert_eq!(heap.peek(), Some((&5, &"a")));
 
-        heap.decrease_key(&h3, 1);
+        let _ = heap.decrease_key(&h3, 1);
         assert_eq!(heap.peek(), Some((&1, &"c")));
     }
 
