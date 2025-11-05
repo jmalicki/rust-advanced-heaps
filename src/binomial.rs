@@ -30,8 +30,8 @@
 //! O(log n) trees total, bounding operation costs.
 
 use crate::traits::{Handle, Heap};
-use std::ptr::{self, NonNull};
 use smallvec::SmallVec;
+use std::ptr::{self, NonNull};
 
 /// Handle to an element in a Binomial heap
 ///

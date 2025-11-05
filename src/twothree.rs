@@ -8,8 +8,8 @@
 //! The 2-3 structure ensures balance while allowing efficient decrease_key operations.
 
 use crate::traits::{Handle, Heap};
+use smallvec::{smallvec, SmallVec};
 use std::ptr::{self, NonNull};
-use smallvec::{SmallVec, smallvec};
 
 /// Handle to an element in a 2-3 heap
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -431,7 +431,10 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
                         item: new_item,
                         priority: new_priority,
                         parent: (*node_ptr).parent, // Same parent initially
-                        children: new_children.into_iter().map(Some).collect::<SmallVec<[Option<NonNull<Node<T, P>>>; 4]>>(),
+                        children: new_children
+                            .into_iter()
+                            .map(Some)
+                            .collect::<SmallVec<[Option<NonNull<Node<T, P>>>; 4]>>(),
                     }));
 
                     let new_node_ptr = NonNull::new_unchecked(new_node);
@@ -444,7 +447,10 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
                     }
 
                     // Update original node to have 2 children (first 2)
-                    (*node_ptr).children = children_vec.into_iter().map(Some).collect::<SmallVec<[Option<NonNull<Node<T, P>>>; 4]>>();
+                    (*node_ptr).children = children_vec
+                        .into_iter()
+                        .map(Some)
+                        .collect::<SmallVec<[Option<NonNull<Node<T, P>>>; 4]>>();
                     // Add new node as sibling (child of original node's parent)
                     // This may cause parent to have 4 children, triggering cascade
                     if let Some(parent) = (*node_ptr).parent {

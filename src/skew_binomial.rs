@@ -9,8 +9,8 @@
 //! binomial heaps while maintaining efficient operations.
 
 use crate::traits::{Handle, Heap};
-use std::ptr::{self, NonNull};
 use smallvec::SmallVec;
+use std::ptr::{self, NonNull};
 
 /// Handle to an element in a Skew binomial heap
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -157,7 +157,7 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
                 // Rank-0 slot is full: link two rank-0 trees (binary addition carry)
                 // This produces a rank-1 tree
                 let existing = self.trees[0].unwrap();
-                let merged = unsafe { self.link_trees(existing, node_ptr) };
+                let merged = self.link_trees(existing, node_ptr) ;
                 self.trees[0] = None; // Clear rank-0 slot
 
                 // Try to insert merged tree at rank 1
@@ -169,7 +169,7 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
                 if self.trees[1].is_some() {
                     // Rank-1 slot is full: link two rank-1 trees → rank-2 tree
                     let existing_rank1 = self.trees[1].unwrap();
-                    let merged_rank1 = unsafe { self.link_trees(existing_rank1, merged) };
+                    let merged_rank1 = self.link_trees(existing_rank1, merged) ;
                     self.trees[1] = None; // Clear rank-1 slot
 
                     // Continue cascade to rank 2
