@@ -8,7 +8,7 @@
 //! structural constraints that ensure worst-case bounds rather than just
 //! amortized bounds.
 
-use crate::traits::{Handle, Heap};
+use crate::traits::{Handle, Heap, HeapError};
 use std::ptr::{self, NonNull};
 
 /// Handle to an element in a Strict Fibonacci heap
@@ -269,7 +269,7 @@ impl<T, P: Ord> Heap<T, P> for StrictFibonacciHeap<T, P> {
     /// - Immediate consolidation (during delete_min) fixes violations
     /// - The active/passive distinction allows us to defer work safely
     /// - This maintains worst-case bounds without cascading cuts
-    fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) {
+    fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) -> Result<(), HeapError> {
         let node_ptr = unsafe { NonNull::new_unchecked(handle.node as *mut Node<T, P>) };
 
         unsafe {
@@ -277,7 +277,7 @@ impl<T, P: Ord> Heap<T, P> for StrictFibonacciHeap<T, P> {
 
             // Safety check: new priority must actually be less
             if new_priority >= (*node).priority {
-                return; // No-op if priority didn't decrease
+                return Err(HeapError::PriorityNotDecreased);
             }
 
             // Update the priority value
@@ -291,7 +291,7 @@ impl<T, P: Ord> Heap<T, P> for StrictFibonacciHeap<T, P> {
                         self.min = Some(node_ptr);
                     }
                 }
-                return;
+                return Ok(());
             }
 
             // Node is not root, so it has a parent
@@ -310,6 +310,7 @@ impl<T, P: Ord> Heap<T, P> for StrictFibonacciHeap<T, P> {
                 self.min = Some(node_ptr);
             }
         }
+        Ok(())
     }
 
     /// Merges another heap into this heap
@@ -461,14 +462,19 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
             let mut current = Some(first_child);
             let stop = first_child;
 
-            while let Some(curr) = current {
-                let next = (*curr.as_ptr()).right;
-                (*curr.as_ptr()).parent = None;
-                children.push(curr);
-                if next == stop {
+            loop {
+                if let Some(curr) = current {
+                    let next = (*curr.as_ptr()).right;
+                    (*curr.as_ptr()).parent = None;
+                    children.push(curr);
+
+                    if next == stop {
+                        break;
+                    }
+                    current = Some(next);
+                } else {
                     break;
                 }
-                current = Some(next);
             }
         }
 
@@ -483,17 +489,22 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
             let mut current = Some(root);
             let stop = root;
 
-            while let Some(curr) = current {
-                if self.min.is_none()
-                    || (*curr.as_ptr()).priority < (*self.min.unwrap().as_ptr()).priority
-                {
-                    self.min = Some(curr);
-                }
-                let next = (*curr.as_ptr()).right;
-                if next == stop {
+            loop {
+                if let Some(curr) = current {
+                    if self.min.is_none()
+                        || (*curr.as_ptr()).priority < (*self.min.unwrap().as_ptr()).priority
+                    {
+                        self.min = Some(curr);
+                    }
+
+                    let next = (*curr.as_ptr()).right;
+                    if next == stop {
+                        break;
+                    }
+                    current = Some(next);
+                } else {
                     break;
                 }
-                current = Some(next);
             }
         }
     }
@@ -542,13 +553,17 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
             let mut current = Some(root);
             let stop = root;
 
-            while let Some(curr) = current {
-                roots.push(curr);
-                let next = (*curr.as_ptr()).right;
-                if next == stop {
+            loop {
+                if let Some(curr) = current {
+                    roots.push(curr);
+                    let next = (*curr.as_ptr()).right;
+                    if next == stop {
+                        break;
+                    }
+                    current = Some(next);
+                } else {
                     break;
                 }
-                current = Some(next);
             }
         }
 

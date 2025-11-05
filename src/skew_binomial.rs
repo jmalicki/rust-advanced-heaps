@@ -8,8 +8,7 @@
 //! Skew binomial heaps allow more flexible tree structures than standard
 //! binomial heaps while maintaining efficient operations.
 
-use crate::traits::{Handle, Heap};
-use smallvec::SmallVec;
+use crate::traits::{Handle, Heap, HeapError};
 use std::ptr::{self, NonNull};
 
 /// Handle to an element in a Skew binomial heap
@@ -47,8 +46,7 @@ struct Node<T, P> {
 /// assert_eq!(heap.peek(), Some((&1, &"item")));
 /// ```
 pub struct SkewBinomialHeap<T, P: Ord> {
-    #[allow(clippy::type_complexity)]
-    trees: SmallVec<[Option<NonNull<Node<T, P>>>; 32]>, // Array indexed by rank, stack-allocated for small heaps
+    trees: Vec<Option<NonNull<Node<T, P>>>>, // Array indexed by rank
     min: Option<NonNull<Node<T, P>>>,
     len: usize,
     _phantom: std::marker::PhantomData<T>,
@@ -56,9 +54,11 @@ pub struct SkewBinomialHeap<T, P: Ord> {
 
 impl<T, P: Ord> Drop for SkewBinomialHeap<T, P> {
     fn drop(&mut self) {
-        for root in self.trees.iter().flatten() {
-            unsafe {
-                Self::free_tree(*root);
+        for tree_opt in self.trees.iter() {
+            if let Some(root) = tree_opt {
+                unsafe {
+                    Self::free_tree(*root);
+                }
             }
         }
     }
@@ -69,7 +69,7 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
 
     fn new() -> Self {
         Self {
-            trees: SmallVec::new(),
+            trees: Vec::new(),
             min: None,
             len: 0,
             _phantom: std::marker::PhantomData,
@@ -148,7 +148,7 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
             // Insert as rank-0 tree (O(1) in common case)
             // Skew binomial allows O(1) insert via special handling
             // This is the key difference from standard binomial heaps
-            if self.trees.is_empty() {
+            while self.trees.len() <= 0 {
                 self.trees.push(None);
             }
 
@@ -156,7 +156,7 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
                 // Rank-0 slot is full: link two rank-0 trees (binary addition carry)
                 // This produces a rank-1 tree
                 let existing = self.trees[0].unwrap();
-                let merged = self.link_trees(existing, node_ptr);
+                let merged = unsafe { self.link_trees(existing, node_ptr) };
                 self.trees[0] = None; // Clear rank-0 slot
 
                 // Try to insert merged tree at rank 1
@@ -168,7 +168,7 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
                 if self.trees[1].is_some() {
                     // Rank-1 slot is full: link two rank-1 trees → rank-2 tree
                     let existing_rank1 = self.trees[1].unwrap();
-                    let merged_rank1 = self.link_trees(existing_rank1, merged);
+                    let merged_rank1 = unsafe { self.link_trees(existing_rank1, merged) };
                     self.trees[1] = None; // Clear rank-1 slot
 
                     // Continue cascade to rank 2
@@ -354,7 +354,7 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
     ///
     /// **Note**: We swap priorities and items, not pointers. This maintains the
     /// skew binomial tree structure while fixing heap property violations.
-    fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) {
+    fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) -> Result<(), HeapError> {
         let node_ptr = unsafe { NonNull::new_unchecked(handle.node as *mut Node<T, P>) };
 
         unsafe {
@@ -362,7 +362,7 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
 
             // Safety check: new priority must actually be less
             if new_priority >= (*node).priority {
-                return; // No-op if priority didn't decrease
+                return Err(HeapError::PriorityNotDecreased);
             }
 
             // Update the priority value
@@ -374,6 +374,7 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
             // The skew binomial structure maintains shape, keeping most bubbles shallow
             self.bubble_up(node_ptr);
         }
+        Ok(())
     }
 
     /// Merges another heap into this heap
@@ -523,17 +524,16 @@ impl<T, P: Ord> SkewBinomialHeap<T, P> {
     /// - Just pointer updates and comparisons
     /// - No traversal needed: linking is a constant-time operation
     /// - This enables efficient merging and insertion
-    #[allow(clippy::only_used_in_recursion)]
     unsafe fn link_trees(
         &mut self,
-        mut a: NonNull<Node<T, P>>,
-        mut b: NonNull<Node<T, P>>,
+        a: NonNull<Node<T, P>>,
+        b: NonNull<Node<T, P>>,
     ) -> NonNull<Node<T, P>> {
         // Make tree with larger priority a child of the one with smaller priority
         // This maintains heap property: parent <= child
-        // If a has larger priority, swap a and b
+        // If a has larger priority, swap a and b and recurse
         if (*a.as_ptr()).priority > (*b.as_ptr()).priority {
-            std::mem::swap(&mut a, &mut b);
+            return self.link_trees(b, a);
         }
 
         // Now a has smaller or equal priority: make b a child of a
@@ -613,12 +613,14 @@ impl<T, P: Ord> SkewBinomialHeap<T, P> {
     /// Finds and updates the minimum pointer
     fn find_and_update_min(&mut self) {
         self.min = None;
-        for root in self.trees.iter().flatten() {
-            unsafe {
-                if self.min.is_none()
-                    || (*root.as_ptr()).priority < (*self.min.unwrap().as_ptr()).priority
-                {
-                    self.min = Some(*root);
+        for tree_opt in self.trees.iter() {
+            if let Some(root) = tree_opt {
+                unsafe {
+                    if self.min.is_none()
+                        || (*root.as_ptr()).priority < (*self.min.unwrap().as_ptr()).priority
+                    {
+                        self.min = Some(*root);
+                    }
                 }
             }
         }

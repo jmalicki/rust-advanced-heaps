@@ -3,6 +3,27 @@
 //! This module provides traits compatible with Rust's standard heap API while
 //! adding support for efficient `decrease_key` operations.
 
+use std::fmt;
+
+/// Error type for heap operations
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HeapError {
+    /// The new priority is not less than the current priority
+    PriorityNotDecreased,
+}
+
+impl fmt::Display for HeapError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            HeapError::PriorityNotDecreased => {
+                write!(f, "new priority is not less than current priority")
+            }
+        }
+    }
+}
+
+impl std::error::Error for HeapError {}
+
 /// A handle to an element in the heap, used for decrease_key operations
 ///
 /// This is an opaque type that identifies a specific element in the heap.
@@ -102,8 +123,11 @@ pub trait Heap<T, P: Ord> {
     ///
     /// # Safety
     /// The handle must be valid (from a previous `push` and not yet popped).
-    /// Behavior is undefined if the handle is invalid or if the new priority
-    /// is not actually less than the current priority.
+    /// Behavior is undefined if the handle is invalid.
+    ///
+    /// # Errors
+    /// Returns `HeapError::PriorityNotDecreased` if the new priority is not
+    /// less than the current priority.
     ///
     /// # Time Complexity
     /// - Fibonacci Heap: O(1) amortized
@@ -111,7 +135,7 @@ pub trait Heap<T, P: Ord> {
     /// - Rank-Pairing Heap: O(1) amortized
     /// - Binomial Heap: O(log n)
     /// - Brodal Heap: O(1) worst-case
-    fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P);
+    fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) -> Result<(), HeapError>;
 
     /// Merges another heap into this one, consuming the other heap
     ///

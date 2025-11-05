@@ -10,6 +10,7 @@ use rust_advanced_heaps::pairing::PairingHeap;
 use rust_advanced_heaps::rank_pairing::RankPairingHeap;
 use rust_advanced_heaps::skew_binomial::SkewBinomialHeap;
 use rust_advanced_heaps::strict_fibonacci::StrictFibonacciHeap;
+use rust_advanced_heaps::traits::HeapError;
 use rust_advanced_heaps::twothree::TwoThreeHeap;
 use rust_advanced_heaps::Heap;
 
@@ -65,15 +66,15 @@ fn test_decrease_key_operations<H: Heap<i32, i32>>() {
     assert_eq!(heap.peek(), Some((&100, &1)));
 
     // Decrease key of element not at min
-    heap.decrease_key(&h2, 50);
+    assert!(heap.decrease_key(&h2, 50).is_ok());
     assert_eq!(heap.peek(), Some((&50, &2)));
 
     // Decrease key to become new min
-    heap.decrease_key(&h4, 25);
+    assert!(heap.decrease_key(&h4, 25).is_ok());
     assert_eq!(heap.peek(), Some((&25, &4)));
 
     // Decrease key of current min even more
-    heap.decrease_key(&h4, 1);
+    assert!(heap.decrease_key(&h4, 1).is_ok());
     assert_eq!(heap.peek(), Some((&1, &4)));
 
     // Pop and verify order
@@ -95,7 +96,7 @@ fn test_multiple_decrease_keys<H: Heap<i32, i32>>() {
 
     // Decrease all keys to be much smaller
     for (i, handle) in handles.iter().enumerate() {
-        heap.decrease_key(handle, i as i32);
+        assert!(heap.decrease_key(handle, i as i32).is_ok());
     }
 
     // Verify heap property maintained
@@ -203,7 +204,7 @@ fn test_stress_operations<H: Heap<i32, i32>>() {
 
     // Random decrease_key operations
     for i in (0..100).step_by(3) {
-        heap.decrease_key(&handles[i], i as i32 * 2 - 1);
+        assert!(heap.decrease_key(&handles[i], i as i32 * 2 - 1).is_ok());
     }
 
     // Pop some elements
@@ -250,7 +251,7 @@ fn test_single_element<H: Heap<&'static str, i32>>() {
     assert_eq!(heap.peek(), Some((&42, &"single")));
 
     // Decrease key
-    heap.decrease_key(&handle, 10);
+    assert!(heap.decrease_key(&handle, 10).is_ok());
     assert_eq!(heap.peek(), Some((&10, &"single")));
 
     // Pop
@@ -328,8 +329,11 @@ fn test_decrease_key_same<H: Heap<i32, i32>>() {
     let mut heap = H::new();
     let handle = heap.push(10, 1);
 
-    // Decrease to same priority (should be handled gracefully)
-    heap.decrease_key(&handle, 10);
+    // Decrease to same priority (should return error)
+    assert_eq!(
+        heap.decrease_key(&handle, 10),
+        Err(HeapError::PriorityNotDecreased)
+    );
 
     // Should still be min
     assert_eq!(heap.peek(), Some((&10, &1)));
@@ -351,7 +355,7 @@ fn test_complex_sequence<H: Heap<String, i32>>() {
     for (i, handle) in handles.iter().enumerate().skip(3).step_by(3) {
         let new_priority = (i as i32 * 5).max(1); // Ensure positive priority
         if new_priority < i as i32 * 10 {
-            heap.decrease_key(handle, new_priority);
+            assert!(heap.decrease_key(handle, new_priority).is_ok());
         }
     }
 
@@ -442,19 +446,19 @@ fn test_multiple_decrease_same<H: Heap<i32, i32>>() {
     let mut heap = H::new();
     let handle = heap.push(1000, 1);
 
-    heap.decrease_key(&handle, 500);
+    assert!(heap.decrease_key(&handle, 500).is_ok());
     assert_eq!(heap.peek(), Some((&500, &1)));
 
-    heap.decrease_key(&handle, 250);
+    assert!(heap.decrease_key(&handle, 250).is_ok());
     assert_eq!(heap.peek(), Some((&250, &1)));
 
-    heap.decrease_key(&handle, 100);
+    assert!(heap.decrease_key(&handle, 100).is_ok());
     assert_eq!(heap.peek(), Some((&100, &1)));
 
-    heap.decrease_key(&handle, 50);
+    assert!(heap.decrease_key(&handle, 50).is_ok());
     assert_eq!(heap.peek(), Some((&50, &1)));
 
-    heap.decrease_key(&handle, 1);
+    assert!(heap.decrease_key(&handle, 1).is_ok());
     assert_eq!(heap.peek(), Some((&1, &1)));
 }
 
@@ -466,13 +470,13 @@ fn test_decrease_key_new_min<H: Heap<i32, i32>>() {
     let h3 = heap.push(300, 3);
 
     // Each decrease_key should make element new min
-    heap.decrease_key(&h3, 150);
+    assert!(heap.decrease_key(&h3, 150).is_ok());
     assert_eq!(heap.peek(), Some((&100, &1))); // Still h1
 
-    heap.decrease_key(&h2, 50);
+    assert!(heap.decrease_key(&h2, 50).is_ok());
     assert_eq!(heap.peek(), Some((&50, &2))); // Now h2
 
-    heap.decrease_key(&h1, 25);
+    assert!(heap.decrease_key(&h1, 25).is_ok());
     assert_eq!(heap.peek(), Some((&25, &1))); // Now h1
 }
 
@@ -550,7 +554,7 @@ fn test_decrease_key_selective<H: Heap<i32, i32>>() {
     // Decrease keys of even-indexed elements
     for (i, handle) in handles.iter().enumerate() {
         if i % 2 == 0 {
-            heap.decrease_key(handle, i as i32 * 10);
+            assert!(heap.decrease_key(handle, i as i32 * 10).is_ok());
         }
     }
 
@@ -580,7 +584,7 @@ fn test_all_same_priority<H: Heap<i32, i32>>() {
 
     // Decrease all to same priority
     for handle in &handles {
-        heap.decrease_key(handle, 5);
+        assert!(heap.decrease_key(handle, 5).is_ok());
     }
 
     // All should have priority 5
@@ -617,7 +621,7 @@ fn test_decrease_to_negative<H: Heap<i32, i32>>() {
     let h1 = heap.push(10, 1);
     let _h2 = heap.push(20, 2);
 
-    heap.decrease_key(&h1, -5);
+    assert!(heap.decrease_key(&h1, -5).is_ok());
     assert_eq!(heap.peek(), Some((&-5, &1)));
     assert_eq!(heap.pop(), Some((-5, 1)));
 }
@@ -654,7 +658,7 @@ fn test_heap_property<H: Heap<i32, i32>>() {
         if let Some(handle) = handles.get(i) {
             let current_min = heap.peek().unwrap().0;
             let new_priority = (*current_min / 2).max(1);
-            heap.decrease_key(handle, new_priority);
+            assert!(heap.decrease_key(handle, new_priority).is_ok());
         }
     }
 
@@ -677,10 +681,10 @@ fn test_merge_with_handles<H: Heap<i32, i32>>() {
     heap1.merge(heap2);
 
     // After merge, both handles should still be valid
-    heap1.decrease_key(&h1, 50);
+    assert!(heap1.decrease_key(&h1, 50).is_ok());
     assert_eq!(heap1.peek(), Some((&50, &1)));
 
-    heap1.decrease_key(&h2, 25);
+    assert!(heap1.decrease_key(&h2, 25).is_ok());
     assert_eq!(heap1.peek(), Some((&25, &2)));
 }
 
@@ -696,7 +700,7 @@ fn test_very_large_sequence<H: Heap<i32, i32>>() {
 
     // Decrease keys of every 10th element
     for i in (0..1000).step_by(10) {
-        heap.decrease_key(&handles[i], i as i32);
+        assert!(heap.decrease_key(&handles[i], i as i32).is_ok());
     }
 
     // Pop first 100
