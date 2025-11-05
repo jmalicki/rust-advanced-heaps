@@ -437,10 +437,8 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
                     let new_node_ptr = NonNull::new_unchecked(new_node);
 
                     // Update parent links for new children (they now belong to new node)
-                    for child_opt in (*new_node_ptr.as_ptr()).children.iter() {
-                        if let Some(child) = child_opt {
-                            (*child.as_ptr()).parent = Some(new_node_ptr);
-                        }
+                    for child in (*new_node_ptr.as_ptr()).children.iter().flatten() {
+                        (*child.as_ptr()).parent = Some(new_node_ptr);
                     }
 
                     // Update original node to have 2 children (first 2)
@@ -553,19 +551,18 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
     }
 
     /// Recursively finds minimum node
+    #[allow(clippy::only_used_in_recursion)]
     unsafe fn find_min_recursive(&self, node: NonNull<Node<T, P>>) -> NonNull<Node<T, P>> {
         let node_ptr = node.as_ptr();
         let mut min_node = node;
         let mut min_priority = &(*node_ptr).priority;
 
-        for child_opt in (*node_ptr).children.iter() {
-            if let Some(child) = child_opt {
-                let child_min = self.find_min_recursive(*child);
-                let child_priority = &(*child_min.as_ptr()).priority;
-                if child_priority < min_priority {
-                    min_priority = child_priority;
-                    min_node = child_min;
-                }
+        for child in (*node_ptr).children.iter().flatten() {
+            let child_min = self.find_min_recursive(*child);
+            let child_priority = &(*child_min.as_ptr()).priority;
+            if child_priority < min_priority {
+                min_priority = child_priority;
+                min_node = child_min;
             }
         }
 
@@ -605,10 +602,8 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
     /// Recursively frees a tree
     unsafe fn free_tree(node: NonNull<Node<T, P>>) {
         let node_ptr = node.as_ptr();
-        for child_opt in (*node_ptr).children.iter() {
-            if let Some(child) = child_opt {
-                Self::free_tree(*child);
-            }
+        for child in (*node_ptr).children.iter().flatten() {
+            Self::free_tree(*child);
         }
         drop(Box::from_raw(node_ptr));
     }

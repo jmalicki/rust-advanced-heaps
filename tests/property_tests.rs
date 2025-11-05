@@ -102,7 +102,9 @@ fn test_decrease_key_invariant<H: Heap<i32, i32>>(
         if handle_idx < handles.len() {
             let old_priority = priorities[&handle_idx];
             if new_priority < old_priority {
-                heap.decrease_key(&handles[handle_idx], new_priority);
+                prop_assert!(heap
+                    .decrease_key(&handles[handle_idx], new_priority)
+                    .is_ok());
                 priorities.insert(handle_idx, new_priority);
             }
         }
@@ -307,7 +309,7 @@ fn test_complex_operations<H: Heap<i32, i32>>(
                         } else {
                             old_priority - 1
                         };
-                        heap.decrease_key(&handles[idx], new_priority);
+                        prop_assert!(heap.decrease_key(&handles[idx], new_priority).is_ok());
                         priorities.insert(idx, new_priority);
                     }
                 }
@@ -454,7 +456,7 @@ fn test_decrease_key_edge_cases<H: Heap<i32, i32>>(values: Vec<i32>) -> Result<(
     // Try decreasing each key to various smaller values
     for (idx, &val) in values.iter().enumerate() {
         let new_priority = val - 100;
-        heap.decrease_key(&handles[idx], new_priority);
+        prop_assert!(heap.decrease_key(&handles[idx], new_priority).is_ok());
 
         // Verify min is now this value or something smaller
         if let Some((min, _)) = heap.peek() {
