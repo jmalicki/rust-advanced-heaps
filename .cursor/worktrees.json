@@ -1,0 +1,21 @@
+{
+  "worktreeSetup": {
+    "steps": [
+      {
+        "name": "Install pre-commit hooks",
+        "commands": [
+          {
+            "command": "python3 -m pip install --user pre-commit || pip install --user pre-commit",
+            "description": "Install pre-commit if not already installed"
+          },
+          {
+            "command": "pre-commit install",
+            "description": "Install pre-commit hooks in the worktree",
+            "requires": ["pre-commit-config.yaml"]
+          }
+        ]
+      }
+    ],
+    "enabled": true
+  }
+}
