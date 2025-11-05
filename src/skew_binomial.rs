@@ -92,7 +92,7 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
 
     /// Inserts a new element into the heap
     ///
-    /// **Time Complexity**: O(1) worst-case (unlike binomial heap which is O(log n) worst-case!)
+    /// **Time Complexity**: O(1) amortized, O(log n) worst-case
     ///
     /// **Algorithm (Skew Binary Addition Analogy)**:
     /// 1. Create new rank-0 tree (single node, marked as skew)
@@ -101,27 +101,32 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
     ///    - If rank-0 slot full: link two rank-0 trees → rank-1 tree (carry propagation)
     ///      - If rank-1 slot empty: insert merged tree there (done, O(1))
     ///      - If rank-1 slot full: link two rank-1 trees → rank-2 tree (cascade)
-    ///      - Continue until empty slot found (at most O(log n) but usually O(1))
+    ///      - Continue until empty slot found (at most O(log n) in worst case)
     ///
-    /// **Key Achievement**: O(1) worst-case inserts vs O(log n) for standard binomial heaps!
+    /// **Key Achievement**: O(1) amortized inserts (better than standard binomial heaps which are O(log n) worst-case)
     ///
-    /// **Why O(1) worst-case?**
+    /// **Why O(1) amortized?**
     /// - Skew flag allows special merging rules
     /// - Skew trees can be merged differently than non-skew trees
-    /// - This enables O(1) inserts in the common case
-    /// - Worst-case is still O(log n), but amortized and often better
+    /// - Most inserts are O(1) (empty slot found quickly)
+    /// - Carry propagation is rare, amortizing to O(1) overall
+    ///
+    /// **Why O(log n) worst-case?**
+    /// - The while loop (lines 161-178) can iterate up to O(log n) times
+    /// - When all ranks are full, carry propagates through all ranks
+    /// - Each iteration links trees and increments rank, potentially reaching rank log(n)
     ///
     /// **Skew Flag**:
     /// - Skew trees: trees with special structure that allow faster merging
     /// - New single-node trees are always skew
     /// - Skew flag is maintained during linking operations
-    /// - This flag enables O(1) insert optimization
+    /// - This flag enables better amortized performance
     ///
     /// **Difference from Standard Binomial Heaps**:
     /// - Standard: O(log n) worst-case insert (binary addition analogy)
-    /// - Skew: O(1) worst-case insert (skew binary addition analogy)
+    /// - Skew: O(1) amortized insert (skew binary addition analogy)
     /// - Skew flag enables special merging rules
-    /// - This achieves better worst-case bounds
+    /// - This achieves better amortized bounds
     fn insert(&mut self, priority: P, item: T) -> Self::Handle {
         // Create new rank-0 tree (single node, always skew)
         let node = Box::into_raw(Box::new(Node {
