@@ -8,7 +8,6 @@
 //! The 2-3 structure ensures balance while allowing efficient decrease_key operations.
 
 use crate::traits::{Handle, Heap};
-use smallvec::{smallvec, SmallVec};
 use std::ptr::{self, NonNull};
 
 /// Handle to an element in a 2-3 heap
@@ -26,13 +25,13 @@ impl Handle for TwoThreeHandle {}
 // - Capacity 4 is needed for splits: when a node would have 4 children, it splits into two nodes
 // - Each node with 4 children is split into two nodes with 2 children each
 // - Stack allocation (4 slots) is sufficient since nodes never have >4 children before splitting
-// - SmallVec will dynamically allocate if needed, but this should never occur in practice
 //
 // Performance considerations:
 // - 4 is the minimum needed for correct operation (splits require temporarily holding 4 children)
 // - Stack allocation is fast and avoids heap allocation for this small, fixed-size array
 // - The choice of 4 is optimal: any less would cause incorrect behavior, any more wastes stack space
-type ChildrenArray<T, P> = SmallVec<[Option<NonNull<Node<T, P>>>; 4]>;
+// - With only 4 elements, finding the first None slot is fast (linear scan is O(1) for fixed size)
+type ChildrenArray<T, P> = [Option<NonNull<Node<T, P>>>; 4];
 
 struct Node<T, P> {
     item: T,
@@ -130,7 +129,7 @@ impl<T, P: Ord> Heap<T, P> for TwoThreeHeap<T, P> {
             item,
             priority,
             parent: None,
-            children: SmallVec::new(), // Leaf node has no children
+            children: [None; 4], // Leaf node has no children (all slots None)
         }));
 
         let node_ptr = unsafe { NonNull::new_unchecked(node) };
@@ -143,7 +142,13 @@ impl<T, P: Ord> Heap<T, P> for TwoThreeHeap<T, P> {
                     // Case 1: New node has smaller priority
                     // Make new node the root, old root becomes its child
                     // This maintains heap property: parent <= child
-                    (*node_ptr.as_ptr()).children.push(Some(root_ptr));
+                    // Find first None slot and insert there (fast for 4 elements)
+                    for slot in (*node_ptr.as_ptr()).children.iter_mut() {
+                        if slot.is_none() {
+                            *slot = Some(root_ptr);
+                            break;
+                        }
+                    }
                     (*root_ptr.as_ptr()).parent = Some(node_ptr);
                     self.root = Some(node_ptr);
                     self.min = Some(node_ptr);
@@ -371,7 +376,13 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
     unsafe fn insert_as_child(&mut self, parent: NonNull<Node<T, P>>, child: NonNull<Node<T, P>>) {
         let parent_ptr = parent.as_ptr();
         (*child.as_ptr()).parent = Some(parent);
-        (*parent_ptr).children.push(Some(child));
+        // Find first None slot and insert there (fast for 4 elements)
+        for slot in (*parent_ptr).children.iter_mut() {
+            if slot.is_none() {
+                *slot = Some(child);
+                break;
+            }
+        }
 
         // Maintain 2-3 structure (each internal node should have 2 or 3 children)
         self.maintain_structure(parent);
@@ -442,14 +453,15 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
                     let new_priority = ptr::read(&(*node_ptr).priority);
 
                     // Create new node with last 2 children
+                    let mut new_children_array = [None; 4];
+                    for (i, child) in new_children.into_iter().enumerate() {
+                        new_children_array[i] = Some(child);
+                    }
                     let new_node = Box::into_raw(Box::new(Node {
                         item: new_item,
                         priority: new_priority,
                         parent: (*node_ptr).parent, // Same parent initially
-                        children: new_children
-                            .into_iter()
-                            .map(Some)
-                            .collect::<ChildrenArray<T, P>>(),
+                        children: new_children_array,
                     }));
 
                     let new_node_ptr = NonNull::new_unchecked(new_node);
@@ -460,10 +472,11 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
                     }
 
                     // Update original node to have 2 children (first 2)
-                    (*node_ptr).children = children_vec
-                        .into_iter()
-                        .map(Some)
-                        .collect::<ChildrenArray<T, P>>();
+                    let mut updated_children = [None; 4];
+                    for (i, child) in children_vec.into_iter().enumerate() {
+                        updated_children[i] = Some(child);
+                    }
+                    (*node_ptr).children = updated_children;
                     // Add new node as sibling (child of original node's parent)
                     // This may cause parent to have 4 children, triggering cascade
                     if let Some(parent) = (*node_ptr).parent {
@@ -480,7 +493,7 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
                             item: root_item,
                             priority: root_priority,
                             parent: None,
-                            children: smallvec![Some(node), Some(new_node_ptr)], // Both nodes as children
+                            children: [Some(node), Some(new_node_ptr), None, None], // Both nodes as children
                         }));
                         let new_root_ptr = NonNull::new_unchecked(new_root);
                         (*node_ptr).parent = Some(new_root_ptr);
