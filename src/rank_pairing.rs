@@ -626,6 +626,7 @@ impl<T, P: Ord> RankPairingHeap<T, P> {
     }
 
     /// Links two trees of the same rank
+    #[allow(dead_code)]
     unsafe fn link_same_rank(
         &mut self,
         a: NonNull<Node<T, P>>,
