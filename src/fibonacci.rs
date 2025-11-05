@@ -533,9 +533,9 @@ mod tests {
         assert!(heap.is_empty());
         assert_eq!(heap.len(), 0);
 
-        let h1 = heap.insert(5, "a");
-        let h2 = heap.insert(3, "b");
-        let h3 = heap.insert(7, "c");
+        heap.insert(5, "a");
+        heap.insert(3, "b");
+        heap.insert(7, "c");
 
         assert_eq!(heap.len(), 3);
         assert_eq!(heap.find_min(), Some((&3, &"b")));
@@ -548,7 +548,7 @@ mod tests {
     #[test]
     fn test_decrease_key() {
         let mut heap = FibonacciHeap::new();
-        let h1 = heap.insert(10, "a");
+        heap.insert(10, "a");
         let h2 = heap.insert(20, "b");
         let h3 = heap.insert(30, "c");
 

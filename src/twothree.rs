@@ -8,8 +8,8 @@
 //! The 2-3 structure ensures balance while allowing efficient decrease_key operations.
 
 use crate::traits::{Handle, Heap};
+use smallvec::{smallvec, SmallVec};
 use std::ptr::{self, NonNull};
-use smallvec::{SmallVec, smallvec};
 
 /// Handle to an element in a 2-3 heap
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -23,6 +23,7 @@ struct Node<T, P> {
     item: T,
     priority: P,
     parent: Option<NonNull<Node<T, P>>>,
+    #[allow(clippy::type_complexity)]
     children: SmallVec<[Option<NonNull<Node<T, P>>>; 4]>, // 2 or 3 children typically, capacity 4 for splits
 }
 
@@ -431,20 +432,24 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
                         item: new_item,
                         priority: new_priority,
                         parent: (*node_ptr).parent, // Same parent initially
-                        children: new_children.into_iter().map(Some).collect::<SmallVec<[Option<NonNull<Node<T, P>>>; 4]>>(),
+                        children: new_children
+                            .into_iter()
+                            .map(Some)
+                            .collect::<SmallVec<[Option<NonNull<Node<T, P>>>; 4]>>(),
                     }));
 
                     let new_node_ptr = NonNull::new_unchecked(new_node);
 
                     // Update parent links for new children (they now belong to new node)
-                    for child_opt in (*new_node_ptr.as_ptr()).children.iter() {
-                        if let Some(child) = child_opt {
-                            (*child.as_ptr()).parent = Some(new_node_ptr);
-                        }
+                    for child in (*new_node_ptr.as_ptr()).children.iter().flatten() {
+                        (*child.as_ptr()).parent = Some(new_node_ptr);
                     }
 
                     // Update original node to have 2 children (first 2)
-                    (*node_ptr).children = children_vec.into_iter().map(Some).collect::<SmallVec<[Option<NonNull<Node<T, P>>>; 4]>>();
+                    (*node_ptr).children = children_vec
+                        .into_iter()
+                        .map(Some)
+                        .collect::<SmallVec<[Option<NonNull<Node<T, P>>>; 4]>>();
                     // Add new node as sibling (child of original node's parent)
                     // This may cause parent to have 4 children, triggering cascade
                     if let Some(parent) = (*node_ptr).parent {
@@ -552,23 +557,21 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
     }
 
     /// Recursively finds minimum node
-    unsafe fn find_min_recursive(&self, node: NonNull<Node<T, P>>) -> NonNull<Node<T, P>> {
+    #[allow(clippy::only_used_in_recursion)]
+    unsafe fn find_min_recursive(&self, mut node: NonNull<Node<T, P>>) -> NonNull<Node<T, P>> {
         let node_ptr = node.as_ptr();
-        let mut min_node = node;
         let mut min_priority = &(*node_ptr).priority;
 
-        for child_opt in (*node_ptr).children.iter() {
-            if let Some(child) = child_opt {
-                let child_min = self.find_min_recursive(*child);
-                let child_priority = &(*child_min.as_ptr()).priority;
-                if child_priority < min_priority {
-                    min_priority = child_priority;
-                    min_node = child_min;
-                }
+        for child in (*node_ptr).children.iter().flatten() {
+            let child_min = self.find_min_recursive(*child);
+            let child_priority = &(*child_min.as_ptr()).priority;
+            if child_priority < min_priority {
+                min_priority = child_priority;
+                node = child_min;
             }
         }
 
-        min_node
+        node
     }
 
     /// Rebuilds heap from children
@@ -604,10 +607,8 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
     /// Recursively frees a tree
     unsafe fn free_tree(node: NonNull<Node<T, P>>) {
         let node_ptr = node.as_ptr();
-        for child_opt in (*node_ptr).children.iter() {
-            if let Some(child) = child_opt {
-                Self::free_tree(*child);
-            }
+        for child in (*node_ptr).children.iter().flatten() {
+            Self::free_tree(*child);
         }
         drop(Box::from_raw(node_ptr));
     }

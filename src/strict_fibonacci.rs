@@ -461,19 +461,14 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
             let mut current = Some(first_child);
             let stop = first_child;
 
-            loop {
-                if let Some(curr) = current {
-                    let next = (*curr.as_ptr()).right;
-                    (*curr.as_ptr()).parent = None;
-                    children.push(curr);
-
-                    if next == stop {
-                        break;
-                    }
-                    current = Some(next);
-                } else {
+            while let Some(curr) = current {
+                let next = (*curr.as_ptr()).right;
+                (*curr.as_ptr()).parent = None;
+                children.push(curr);
+                if next == stop {
                     break;
                 }
+                current = Some(next);
             }
         }
 
@@ -488,22 +483,17 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
             let mut current = Some(root);
             let stop = root;
 
-            loop {
-                if let Some(curr) = current {
-                    if self.min.is_none()
-                        || (*curr.as_ptr()).priority < (*self.min.unwrap().as_ptr()).priority
-                    {
-                        self.min = Some(curr);
-                    }
-
-                    let next = (*curr.as_ptr()).right;
-                    if next == stop {
-                        break;
-                    }
-                    current = Some(next);
-                } else {
+            while let Some(curr) = current {
+                if self.min.is_none()
+                    || (*curr.as_ptr()).priority < (*self.min.unwrap().as_ptr()).priority
+                {
+                    self.min = Some(curr);
+                }
+                let next = (*curr.as_ptr()).right;
+                if next == stop {
                     break;
                 }
+                current = Some(next);
             }
         }
     }
@@ -552,17 +542,13 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
             let mut current = Some(root);
             let stop = root;
 
-            loop {
-                if let Some(curr) = current {
-                    roots.push(curr);
-                    let next = (*curr.as_ptr()).right;
-                    if next == stop {
-                        break;
-                    }
-                    current = Some(next);
-                } else {
+            while let Some(curr) = current {
+                roots.push(curr);
+                let next = (*curr.as_ptr()).right;
+                if next == stop {
                     break;
                 }
+                current = Some(next);
             }
         }
 
