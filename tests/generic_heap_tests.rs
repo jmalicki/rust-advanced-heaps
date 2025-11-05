@@ -90,7 +90,7 @@ fn test_multiple_decrease_keys<H: Heap<i32, i32>>() {
 
     // Insert 20 elements with high priorities
     for i in 0..20 {
-        handles.push(heap.push((i + 1) * 100, i as i32));
+        handles.push(heap.push((i + 1) * 100, i));
     }
 
     // Decrease all keys to be much smaller
@@ -105,7 +105,7 @@ fn test_multiple_decrease_keys<H: Heap<i32, i32>>() {
     // Pop all and verify ascending order
     for i in 0..20 {
         let popped = heap.pop();
-        assert_eq!(popped, Some((i as i32, i as i32)));
+        assert_eq!(popped, Some((i, i)));
     }
     assert!(heap.is_empty());
 }
@@ -179,9 +179,10 @@ fn test_duplicate_priorities<H: Heap<&'static str, i32>>() {
 }
 
 /// Test decrease_key after pop (should panic or handle gracefully)
+#[allow(dead_code)]
 fn test_decrease_key_after_pop<H: Heap<i32, i32>>() {
     let mut heap = H::new();
-    let handle = heap.push(10, 1);
+    let _handle = heap.push(10, 1);
 
     // Pop the element
     heap.pop();
@@ -373,7 +374,7 @@ fn test_complex_sequence<H: Heap<String, i32>>() {
 
     // Pop all remaining (carefully)
     let mut count = 0;
-    while let Some(_) = heap.pop() {
+    while heap.pop().is_some() {
         count += 1;
         if count > 50 {
             // Safety limit

@@ -523,56 +523,5 @@ impl<T, P: Ord> FibonacciHeap<T, P> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_basic_operations() {
-        let mut heap = FibonacciHeap::new();
-        assert!(heap.is_empty());
-        assert_eq!(heap.len(), 0);
-
-        heap.insert(5, "a");
-        heap.insert(3, "b");
-        heap.insert(7, "c");
-
-        assert_eq!(heap.len(), 3);
-        assert_eq!(heap.find_min(), Some((&3, &"b")));
-
-        let min = heap.delete_min();
-        assert_eq!(min, Some((3, "b")));
-        assert_eq!(heap.find_min(), Some((&5, &"a")));
-    }
-
-    #[test]
-    fn test_decrease_key() {
-        let mut heap = FibonacciHeap::new();
-        heap.insert(10, "a");
-        let h2 = heap.insert(20, "b");
-        let h3 = heap.insert(30, "c");
-
-        assert_eq!(heap.find_min(), Some((&10, &"a")));
-
-        heap.decrease_key(&h2, 5);
-        assert_eq!(heap.find_min(), Some((&5, &"b")));
-
-        heap.decrease_key(&h3, 1);
-        assert_eq!(heap.find_min(), Some((&1, &"c")));
-    }
-
-    #[test]
-    fn test_merge() {
-        let mut heap1 = FibonacciHeap::new();
-        heap1.insert(5, "a");
-        heap1.insert(10, "b");
-
-        let mut heap2 = FibonacciHeap::new();
-        heap2.insert(3, "c");
-        heap2.insert(7, "d");
-
-        heap1.merge(heap2);
-        assert_eq!(heap1.find_min(), Some((&3, &"c")));
-        assert_eq!(heap1.len(), 4);
-    }
-}
+// Note: Most tests are in tests/generic_heap_tests.rs which provides comprehensive
+// test coverage for all heap implementations.
