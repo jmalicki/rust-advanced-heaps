@@ -83,6 +83,7 @@ struct Node<T, P> {
 /// assert_eq!(heap.find_min(), Some((&1, &"item")));
 /// ```
 pub struct BinomialHeap<T, P: Ord> {
+    #[allow(clippy::type_complexity)]
     trees: SmallVec<[Option<NonNull<Node<T, P>>>; 32]>, // Array indexed by degree, stack-allocated for small heaps
     min: Option<NonNull<Node<T, P>>>,
     len: usize,

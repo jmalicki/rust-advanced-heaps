@@ -23,6 +23,7 @@ struct Node<T, P> {
     item: T,
     priority: P,
     parent: Option<NonNull<Node<T, P>>>,
+    #[allow(clippy::type_complexity)]
     children: SmallVec<[Option<NonNull<Node<T, P>>>; 4]>, // 2 or 3 children typically, capacity 4 for splits
 }
 

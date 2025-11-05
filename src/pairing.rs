@@ -623,7 +623,7 @@ mod tests {
         let mut heap = PairingHeap::new();
         let h1 = heap.insert(10, "a");
         let _h2 = heap.insert(20, "b");
-        let h3 = heap.insert(30, "c");
+        heap.insert(30, "c");
 
         assert_eq!(heap.find_min(), Some((&10, &"a")));
 
