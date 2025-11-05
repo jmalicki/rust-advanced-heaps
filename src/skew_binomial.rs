@@ -8,11 +8,9 @@
 //! Skew binomial heaps allow more flexible tree structures than standard
 //! binomial heaps while maintaining efficient operations.
 
-use crate::traits::{Handle, Heap, HeapError};
+use crate::traits::{Handle, Heap};
+use smallvec::SmallVec;
 use std::ptr::{self, NonNull};
-
-/// Type alias for compact node pointer storage
-type NodePtr<T, P> = Option<NonNull<Node<T, P>>>;
 
 /// Handle to an element in a Skew binomial heap
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -32,6 +30,9 @@ struct Node<T, P> {
     skew: bool, // Skew flag for skew binomial trees
 }
 
+// Type alias for tree array to avoid clippy type-complexity warnings
+type TreeArray<T, P> = SmallVec<[Option<NonNull<Node<T, P>>>; 32]>;
+
 /// Skew Binomial Heap
 ///
 /// Skew binomial heaps are similar to binomial heaps but allow skew trees,
@@ -49,8 +50,8 @@ struct Node<T, P> {
 /// assert_eq!(heap.peek(), Some((&1, &"item")));
 /// ```
 pub struct SkewBinomialHeap<T, P: Ord> {
-    trees: Vec<NodePtr<T, P>>, // Array indexed by rank
-    min: NodePtr<T, P>,
+    trees: TreeArray<T, P>, // Array indexed by rank, stack-allocated for small heaps
+    min: Option<NonNull<Node<T, P>>>,
     len: usize,
     _phantom: std::marker::PhantomData<T>,
 }
@@ -70,7 +71,7 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
 
     fn new() -> Self {
         Self {
-            trees: Vec::new(),
+            trees: SmallVec::new(),
             min: None,
             len: 0,
             _phantom: std::marker::PhantomData,
@@ -353,7 +354,7 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
     ///
     /// **Note**: We swap priorities and items, not pointers. This maintains the
     /// skew binomial tree structure while fixing heap property violations.
-    fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) -> Result<(), HeapError> {
+    fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) {
         let node_ptr = unsafe { NonNull::new_unchecked(handle.node as *mut Node<T, P>) };
 
         unsafe {
@@ -361,7 +362,7 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
 
             // Safety check: new priority must actually be less
             if new_priority >= (*node).priority {
-                return Err(HeapError::PriorityNotDecreased);
+                return; // No-op if priority didn't decrease
             }
 
             // Update the priority value
@@ -373,7 +374,6 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
             // The skew binomial structure maintains shape, keeping most bubbles shallow
             self.bubble_up(node_ptr);
         }
-        Ok(())
     }
 
     /// Merges another heap into this heap
@@ -639,5 +639,48 @@ impl<T, P: Ord> SkewBinomialHeap<T, P> {
     }
 }
 
-// Note: Most tests are in tests/generic_heap_tests.rs which provides comprehensive
-// test coverage for all heap implementations.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_basic_operations() {
+        let mut heap = SkewBinomialHeap::new();
+        assert!(heap.is_empty());
+
+        let _h1 = heap.push(5, "a");
+        let _h2 = heap.push(3, "b");
+        let _h3 = heap.push(7, "c");
+
+        assert_eq!(heap.peek(), Some((&3, &"b")));
+
+        let min = heap.pop();
+        assert_eq!(min, Some((3, "b")));
+        assert_eq!(heap.peek(), Some((&5, &"a")));
+    }
+
+    #[test]
+    fn test_decrease_key() {
+        let mut heap = SkewBinomialHeap::new();
+        let h1 = heap.push(10, "a");
+        let _h2 = heap.push(20, "b");
+
+        heap.decrease_key(&h1, 5);
+        assert_eq!(heap.peek(), Some((&5, &"a")));
+    }
+
+    #[test]
+    fn test_merge() {
+        let mut heap1 = SkewBinomialHeap::new();
+        heap1.push(5, "a");
+        heap1.push(10, "b");
+
+        let mut heap2 = SkewBinomialHeap::new();
+        heap2.push(3, "c");
+        heap2.push(7, "d");
+
+        heap1.merge(heap2);
+        assert_eq!(heap1.peek(), Some((&3, &"c")));
+        assert_eq!(heap1.len(), 4);
+    }
+}

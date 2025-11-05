@@ -7,11 +7,9 @@
 //!
 //! The 2-3 structure ensures balance while allowing efficient decrease_key operations.
 
-use crate::traits::{Handle, Heap, HeapError};
+use crate::traits::{Handle, Heap};
+use smallvec::{smallvec, SmallVec};
 use std::ptr::{self, NonNull};
-
-/// Type alias for compact node pointer storage
-type NodePtr<T, P> = Option<NonNull<Node<T, P>>>;
 
 /// Handle to an element in a 2-3 heap
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -21,11 +19,14 @@ pub struct TwoThreeHandle {
 
 impl Handle for TwoThreeHandle {}
 
+// Type alias for children array to avoid clippy type-complexity warnings
+type ChildrenArray<T, P> = SmallVec<[Option<NonNull<Node<T, P>>>; 4]>;
+
 struct Node<T, P> {
     item: T,
     priority: P,
-    parent: NodePtr<T, P>,
-    children: Vec<NodePtr<T, P>>, // 2 or 3 children
+    parent: Option<NonNull<Node<T, P>>>,
+    children: ChildrenArray<T, P>, // 2 or 3 children typically, capacity 4 for splits
 }
 
 /// 2-3 Heap
@@ -117,7 +118,7 @@ impl<T, P: Ord> Heap<T, P> for TwoThreeHeap<T, P> {
             item,
             priority,
             parent: None,
-            children: Vec::new(), // Leaf node has no children
+            children: SmallVec::new(), // Leaf node has no children
         }));
 
         let node_ptr = unsafe { NonNull::new_unchecked(node) };
@@ -268,7 +269,7 @@ impl<T, P: Ord> Heap<T, P> for TwoThreeHeap<T, P> {
     /// - The 2-3 structure ensures tree remains balanced
     /// - This prevents deep bubbles: most bubbles are near leaves
     /// - Amortized analysis shows average bubble depth is O(1)
-    fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) -> Result<(), HeapError> {
+    fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) {
         let node_ptr = unsafe { NonNull::new_unchecked(handle.node as *mut Node<T, P>) };
 
         unsafe {
@@ -276,7 +277,7 @@ impl<T, P: Ord> Heap<T, P> for TwoThreeHeap<T, P> {
 
             // Safety check: new priority must actually be less
             if new_priority >= (*node).priority {
-                return Err(HeapError::PriorityNotDecreased);
+                return; // No-op if priority didn't decrease
             }
 
             // Update the priority value
@@ -288,7 +289,6 @@ impl<T, P: Ord> Heap<T, P> for TwoThreeHeap<T, P> {
             // The 2-3 structure maintains balance, keeping most bubbles shallow
             self.bubble_up(node_ptr);
         }
-        Ok(())
     }
 
     /// Merges another heap into this heap
@@ -434,7 +434,10 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
                         item: new_item,
                         priority: new_priority,
                         parent: (*node_ptr).parent, // Same parent initially
-                        children: new_children.into_iter().map(Some).collect(),
+                        children: new_children
+                            .into_iter()
+                            .map(Some)
+                            .collect::<ChildrenArray<T, P>>(),
                     }));
 
                     let new_node_ptr = NonNull::new_unchecked(new_node);
@@ -445,8 +448,10 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
                     }
 
                     // Update original node to have 2 children (first 2)
-                    (*node_ptr).children = children_vec.into_iter().map(Some).collect();
-
+                    (*node_ptr).children = children_vec
+                        .into_iter()
+                        .map(Some)
+                        .collect::<ChildrenArray<T, P>>();
                     // Add new node as sibling (child of original node's parent)
                     // This may cause parent to have 4 children, triggering cascade
                     if let Some(parent) = (*node_ptr).parent {
@@ -463,7 +468,7 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
                             item: root_item,
                             priority: root_priority,
                             parent: None,
-                            children: vec![Some(node), Some(new_node_ptr)], // Both nodes as children
+                            children: smallvec![Some(node), Some(new_node_ptr)], // Both nodes as children
                         }));
                         let new_root_ptr = NonNull::new_unchecked(new_root);
                         (*node_ptr).parent = Some(new_root_ptr);
@@ -612,5 +617,45 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
     }
 }
 
-// Note: Most tests are in tests/generic_heap_tests.rs which provides comprehensive
-// test coverage for all heap implementations.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_basic_operations() {
+        let mut heap = TwoThreeHeap::new();
+        assert!(heap.is_empty());
+
+        let _h1 = heap.push(5, "a");
+        let _h2 = heap.push(3, "b");
+        let _h3 = heap.push(7, "c");
+
+        assert_eq!(heap.peek(), Some((&3, &"b")));
+
+        let min = heap.pop();
+        assert_eq!(min, Some((3, "b")));
+        assert_eq!(heap.peek(), Some((&5, &"a")));
+    }
+
+    #[test]
+    fn test_decrease_key() {
+        let mut heap = TwoThreeHeap::new();
+        let h1 = heap.push(10, "a");
+        let _h2 = heap.push(20, "b");
+
+        heap.decrease_key(&h1, 5);
+        assert_eq!(heap.peek(), Some((&5, &"a")));
+    }
+
+    #[test]
+    fn test_merge() {
+        let mut heap1 = TwoThreeHeap::new();
+        heap1.push(5, "a");
+
+        let mut heap2 = TwoThreeHeap::new();
+        heap2.push(3, "b");
+
+        heap1.merge(heap2);
+        assert_eq!(heap1.peek(), Some((&3, &"b")));
+    }
+}
