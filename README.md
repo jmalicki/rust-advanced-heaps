@@ -73,7 +73,7 @@ All heaps implement the `Heap` trait:
 ```rust
 pub trait Heap<T, P: Ord> {
     type Handle: Handle;
-    
+
     fn new() -> Self;
     fn is_empty(&self) -> bool;
     fn len(&self) -> usize;
@@ -96,7 +96,7 @@ pub trait Heap<T, P: Ord> {
 ## Implementation Status
 
 - ✅ Fibonacci Heap
-- ✅ Pairing Heap  
+- ✅ Pairing Heap
 - ✅ Rank-Pairing Heap
 - ✅ Binomial Heap
 - ✅ Brodal Heap

@@ -17,4 +17,3 @@ echo "Installing pre-commit hooks..."
 pre-commit install
 
 echo "✓ Setup complete! Pre-commit hooks are now active."
-
