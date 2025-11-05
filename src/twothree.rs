@@ -7,7 +7,7 @@
 //!
 //! The 2-3 structure ensures balance while allowing efficient decrease_key operations.
 
-use crate::traits::{Handle, Heap};
+use crate::traits::{Handle, Heap, HeapError};
 use std::ptr::{self, NonNull};
 
 /// Handle to an element in a 2-3 heap
@@ -286,7 +286,7 @@ impl<T, P: Ord> Heap<T, P> for TwoThreeHeap<T, P> {
     /// - The 2-3 structure ensures tree remains balanced
     /// - This prevents deep bubbles: most bubbles are near leaves
     /// - Amortized analysis shows average bubble depth is O(1)
-    fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) {
+    fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) -> Result<(), HeapError> {
         let node_ptr = unsafe { NonNull::new_unchecked(handle.node as *mut Node<T, P>) };
 
         unsafe {
@@ -294,7 +294,7 @@ impl<T, P: Ord> Heap<T, P> for TwoThreeHeap<T, P> {
 
             // Safety check: new priority must actually be less
             if new_priority >= (*node).priority {
-                return; // No-op if priority didn't decrease
+                return Err(HeapError::PriorityNotDecreased);
             }
 
             // Update the priority value
@@ -306,6 +306,7 @@ impl<T, P: Ord> Heap<T, P> for TwoThreeHeap<T, P> {
             // The 2-3 structure maintains balance, keeping most bubbles shallow
             self.bubble_up(node_ptr);
         }
+        Ok(())
     }
 
     /// Merges another heap into this heap
@@ -668,7 +669,7 @@ mod tests {
         let h1 = heap.push(10, "a");
         let _h2 = heap.push(20, "b");
 
-        heap.decrease_key(&h1, 5);
+        heap.decrease_key(&h1, 5).unwrap();
         assert_eq!(heap.peek(), Some((&5, &"a")));
     }
 

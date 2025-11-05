@@ -29,7 +29,7 @@
 //! **Invariant**: After merge, at most one tree of each degree. This ensures
 //! O(log n) trees total, bounding operation costs.
 
-use crate::traits::{Handle, Heap};
+use crate::traits::{Handle, Heap, HeapError};
 use smallvec::SmallVec;
 use std::ptr::{self, NonNull};
 
@@ -344,7 +344,7 @@ impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
     /// - Simpler but slower: O(log n) vs O(1) amortized
     ///
     /// **Trade-off**: Simpler implementation, but worse bound for decrease_key.
-    fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) {
+    fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) -> Result<(), HeapError> {
         let node_ptr = unsafe { NonNull::new_unchecked(handle.node as *mut Node<T, P>) };
 
         unsafe {
@@ -352,7 +352,7 @@ impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
 
             // Safety check: new priority must actually be less
             if new_priority >= (*node).priority {
-                return; // No-op if priority didn't decrease
+                return Err(HeapError::PriorityNotDecreased);
             }
 
             // Update the priority value
@@ -363,6 +363,7 @@ impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
             // Unlike Fibonacci/pairing heaps, we don't cut - we swap values
             self.bubble_up(node_ptr);
         }
+        Ok(())
     }
 
     /// Merges another heap into this heap
@@ -670,10 +671,10 @@ mod tests {
 
         assert_eq!(heap.find_min(), Some((&10, &"a")));
 
-        heap.decrease_key(&h1, 5);
+        heap.decrease_key(&h1, 5).unwrap();
         assert_eq!(heap.find_min(), Some((&5, &"a")));
 
-        heap.decrease_key(&h3, 1);
+        heap.decrease_key(&h3, 1).unwrap();
         assert_eq!(heap.find_min(), Some((&1, &"c")));
     }
 
