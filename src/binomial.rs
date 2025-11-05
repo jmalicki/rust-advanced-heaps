@@ -91,11 +91,9 @@ pub struct BinomialHeap<T, P: Ord> {
 impl<T, P: Ord> Drop for BinomialHeap<T, P> {
     fn drop(&mut self) {
         // Free all trees
-        for tree_opt in self.trees.iter() {
-            if let Some(root) = tree_opt {
-                unsafe {
-                    Self::free_tree(*root);
-                }
+        for root in self.trees.iter().flatten() {
+            unsafe {
+                Self::free_tree(*root);
             }
         }
     }
@@ -445,6 +443,7 @@ impl<T, P: Ord> BinomialHeap<T, P> {
     /// **Invariant**: This operation maintains:
     /// - Heap property: parent priority <= child priority
     /// - Binomial tree structure: exactly 2ᵏ nodes in a Bₖ tree
+    #[allow(clippy::only_used_in_recursion)]
     unsafe fn link_trees(
         &self,
         a: NonNull<Node<T, P>>,
@@ -646,20 +645,18 @@ impl<T, P: Ord> BinomialHeap<T, P> {
     /// Finds and updates the minimum pointer
     fn find_and_update_min(&mut self) {
         self.min = None;
-        for tree_opt in self.trees.iter() {
-            if let Some(root) = tree_opt {
-                unsafe {
-                    let root_priority = &(*root.as_ptr()).priority;
-                    let should_update = if let Some(min_ptr) = self.min {
-                        let min_priority = &(*min_ptr.as_ptr()).priority;
-                        root_priority < min_priority
-                    } else {
-                        true
-                    };
+        for root in self.trees.iter().flatten() {
+            unsafe {
+                let root_priority = &(*root.as_ptr()).priority;
+                let should_update = if let Some(min_ptr) = self.min {
+                    let min_priority = &(*min_ptr.as_ptr()).priority;
+                    root_priority < min_priority
+                } else {
+                    true
+                };
 
-                    if should_update {
-                        self.min = Some(*root);
-                    }
+                if should_update {
+                    self.min = Some(*root);
                 }
             }
         }
