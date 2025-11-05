@@ -601,15 +601,7 @@ impl<T, P: Ord> RankPairingHeap<T, P> {
                     // Pair two trees
                     let a = children[i];
                     let b = children[i + 1];
-                    let merged = if (*a.as_ptr()).priority < (*b.as_ptr()).priority {
-                        self.make_child(a, b);
-                        self.update_rank(a);
-                        a
-                    } else {
-                        self.make_child(b, a);
-                        self.update_rank(b);
-                        b
-                    };
+                    let merged = self.link_same_rank(a, b);
                     next.push(merged);
                     i += 2;
                 } else {
