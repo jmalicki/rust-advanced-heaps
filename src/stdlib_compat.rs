@@ -104,8 +104,12 @@ impl<T: Ord + Clone, H: Heap<T, T>> StdHeap<T, H> {
     /// # Safety
     /// The handle must be valid (from a previous `push` and not yet popped).
     /// The new priority must be less than the current priority.
-    pub fn decrease_key(&mut self, handle: &H::Handle, new_priority: T) {
-        self.heap.decrease_key(handle, new_priority);
+    pub fn decrease_key(
+        &mut self,
+        handle: &H::Handle,
+        new_priority: T,
+    ) -> Result<(), crate::traits::HeapError> {
+        self.heap.decrease_key(handle, new_priority)
     }
 }
 

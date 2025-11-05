@@ -33,7 +33,7 @@
 //! These constraints bound the tree height while allowing efficient updates.
 //! Unlike Fibonacci heaps, ranks are explicit and updated locally.
 
-use crate::traits::{Handle, Heap};
+use crate::traits::{Handle, Heap, HeapError};
 use std::ptr::{self, NonNull};
 
 /// Handle to an element in a Rank-pairing heap
@@ -287,7 +287,7 @@ impl<T, P: Ord> Heap<T, P> for RankPairingHeap<T, P> {
     /// - Expensive operations (deep cuts with cascading) are rare
     /// - Cascading cuts are bounded: each node can be cut at most once
     /// - Amortized analysis shows average cost is O(1)
-    fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) {
+    fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) -> Result<(), HeapError> {
         let node_ptr = unsafe { NonNull::new_unchecked(handle.node as *mut Node<T, P>) };
 
         unsafe {
@@ -295,7 +295,7 @@ impl<T, P: Ord> Heap<T, P> for RankPairingHeap<T, P> {
 
             // Safety check: new priority must actually be less
             if new_priority >= (*node).priority {
-                return; // No-op if priority didn't decrease
+                return Err(HeapError::PriorityNotDecreased);
             }
 
             // Update the priority value
@@ -303,7 +303,7 @@ impl<T, P: Ord> Heap<T, P> for RankPairingHeap<T, P> {
 
             // If node is already root, heap property is satisfied (no parent)
             if self.root == Some(node_ptr) {
-                return;
+                return Ok(());
             }
 
             // Node is not root, so it has a parent
@@ -334,6 +334,7 @@ impl<T, P: Ord> Heap<T, P> for RankPairingHeap<T, P> {
                 // If heap property is not violated, no restructuring needed
             }
         }
+        Ok(())
     }
 
     /// Merges another heap into this heap
@@ -601,7 +602,15 @@ impl<T, P: Ord> RankPairingHeap<T, P> {
                     // Pair two trees
                     let a = children[i];
                     let b = children[i + 1];
-                    let merged = self.link_same_rank(a, b);
+                    let merged = if (*a.as_ptr()).priority < (*b.as_ptr()).priority {
+                        self.make_child(a, b);
+                        self.update_rank(a);
+                        a
+                    } else {
+                        self.make_child(b, a);
+                        self.update_rank(b);
+                        b
+                    };
                     next.push(merged);
                     i += 2;
                 } else {
