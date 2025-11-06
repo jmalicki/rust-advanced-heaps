@@ -104,6 +104,24 @@ fn verify_binomial_merge_maintains_invariant() {
     let _ = heap1
         .find_min()
         .expect("find_min() must succeed after merging heaps with elements");
+
+    // Verify degree invariant: no two root trees share the same degree
+    let degrees = heap1.root_tree_degrees();
+
+    // Use a set to track which degrees we've seen
+    // If we see a duplicate, the invariant is violated
+    let mut seen_degrees = std::collections::HashSet::new();
+    for degree in &degrees {
+        assert!(
+            !seen_degrees.contains(degree),
+            "Degree invariant violated after merge: degree {} appears multiple times in root list",
+            degree
+        );
+        seen_degrees.insert(*degree);
+    }
+
+    // Verify that the number of trees matches the number of unique degrees
+    assert_eq!(degrees.len(), seen_degrees.len());
 }
 
 // ============================================================================
