@@ -102,6 +102,7 @@ See `tests/big_o_proofs.rs` for implementation details.
 |------|------------------|--------------|-----------|
 | **Kani** | ⭐ Easy | Minimal | Model checking, easy to start |
 | **Creusot** | ⭐⭐⭐ Hard | Significant changes | Mathematical proofs via Why3 |
+| **Verus** | ⭐⭐⭐⭐ Very Hard | Rewrite needed | Full verification, new language (not used) |
 | **Big-O Tests** | ⭐ Easy | None | Empirical performance validation |
 
 ## Recommended Approach
@@ -187,3 +188,8 @@ jobs:
 
 - **Performance**: Verification can be slow for complex invariants. Start with
   simple properties and build up.
+
+- **Verus**: Verus is a verified Rust language variant that requires rewriting
+  code in a Verus dialect. While it provides full functional verification, the
+  requirement to rewrite existing code made it unsuitable for this project,
+  which focuses on verifying existing Rust implementations.
