@@ -1,7 +1,7 @@
 # Proof Tests
 
-This directory contains proof tests that use verification tools like Kani,
-Creusot, and Verus.
+This directory contains proof tests that use verification tools like Kani
+and Creusot.
 
 These tests are separate from regular tests because they:
 
@@ -14,7 +14,6 @@ These tests are separate from regular tests because they:
 
 - `kani/` - Kani verification proofs
 - `creusot/` - Creusot verification proofs
-- `verus/` - Verus verification proofs
 
 ## Running Proofs
 
@@ -22,7 +21,6 @@ Each verification tool has its own command:
 
 - Kani: `cargo kani --tests proofs/kani/<file>`
 - Creusot: `cargo creusot proofs/creusot/<file>`
-- Verus: `verus proofs/verus/<file>`
 
 ## Note
 

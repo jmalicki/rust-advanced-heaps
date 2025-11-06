@@ -60,19 +60,7 @@ See [Creusot documentation](https://github.com/creusot-rs/creusot) for setup.
 cargo creusot
 ```
 
-### 3. Verus
-
-**Verus** is a verified Rust language variant.
-
-- ✅ Full functional verification
-- ⚠️ Requires rewriting code in Verus dialect
-- ⚠️ Best for new implementations or verified wrappers
-
-#### Verus Installation
-
-See [Verus documentation](https://github.com/verus-lang/verus) for setup.
-
-### 4. Big-O Empirical Complexity Tests
+### 3. Big-O Empirical Complexity Tests
 
 **Big-O Tests** empirically verify that heap operations meet their theoretical
 time complexity bounds by measuring actual runtime with varying input sizes.
@@ -114,13 +102,12 @@ See `tests/big_o_proofs.rs` for implementation details.
 |------|------------------|--------------|-----------|
 | **Kani** | ⭐ Easy | Minimal | Model checking, easy to start |
 | **Creusot** | ⭐⭐⭐ Hard | Significant changes | Mathematical proofs via Why3 |
-| **Verus** | ⭐⭐⭐⭐ Very Hard | Rewrite needed | Full verification, new language |
 | **Big-O Tests** | ⭐ Easy | None | Empirical performance validation |
 
 ## Recommended Approach
 
 1. **Start with Kani** - easiest to set up, works with existing code
-2. **Consider Creusot/Verus** - for deeper verification, but requires more effort
+2. **Consider Creusot** - for deeper verification, but requires more effort
 
 ## Running Proofs
 
