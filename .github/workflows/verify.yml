@@ -1,0 +1,18 @@
+name: Verify with Proof Systems
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+# Note: Kani verification has been moved to a separate on-demand workflow
+# (.github/workflows/kani-verify.yml) because the CBMC processes consume
+# 9+ GB of memory and will OOM the GitHub Actions runners (~7 GB RAM).
+#
+# To run Kani verification:
+# 1. Use the "Kani Verification (On-Demand)" workflow from the Actions tab
+# 2. Or run locally: cargo kani --tests 2>&1 | tee kani_all.log
+
+jobs:
+  # Kani verification removed - see kani-verify.yml for on-demand workflow

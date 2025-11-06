@@ -1,0 +1,180 @@
+# Proof Systems Setup Guide
+
+This project integrates multiple proof/verification systems to help find bugs
+in the advanced heap implementations.
+
+## Available Proof Systems
+
+### 1. Kani (Recommended for Getting Started)
+
+**Kani** is AWS's open-source model checker for Rust. It does NOT require an
+AWS account - it runs entirely locally.
+
+- ✅ **No AWS account needed** - completely free and local
+- ✅ **Easy to set up** - just install via cargo
+- ✅ **Works with existing Rust code** - minimal code changes needed
+- ✅ **Model checking** - explores all possible execution paths up to bounds
+- ⚠️ **Bounded verification** - only checks up to a certain unwind limit
+
+#### Installation
+
+```bash
+cargo install --locked kani-verifier
+cargo kani setup
+```
+
+#### Usage
+
+```bash
+# Verify a specific proof
+cargo kani --tests kani_proofs
+
+# Verify all proofs
+cargo kani
+```
+
+#### Example Proofs
+
+See `proofs/kani/kani_proofs.rs` for examples including:
+
+- `verify_insert_increments_len` - ensures insert always increments length
+- `verify_pop_decrements_len` - ensures pop decrements length
+- `verify_find_min_correct` - verifies find_min returns minimum
+- `verify_decrease_key_decreases` - verifies decrease_key correctness
+
+### 2. Big-O Empirical Complexity Tests
+
+**Big-O Tests** empirically verify that heap operations meet their theoretical
+time complexity bounds by measuring actual runtime with varying input sizes.
+
+- ✅ Validates real-world performance matches theory
+- ✅ Detects performance regressions
+- ✅ No code annotations needed
+- ⚠️ Empirical only (statistical, not formal proofs)
+- ⚠️ May be sensitive to environment
+
+#### Running Big-O Tests
+
+```bash
+# Run all Big-O complexity tests
+cargo test --test big_o_proofs
+
+# Run tests for a specific heap
+cargo test --test big_o_proofs test_fibonacci
+
+# Note: Some tests are ignored due to flakiness
+cargo test --test big_o_proofs -- --ignored
+```
+
+#### What Gets Tested
+
+Each heap implementation is tested for:
+
+- **Insert**: O(1) amortized vs O(log n)
+- **Pop**: O(log n) for all heaps
+- **Decrease_key**: O(1) amortized vs O(log n)
+- **Merge**: O(1) vs O(log n) (currently disabled due to flakiness)
+- **Amortized bounds**: Mixed operations sequences
+
+See `tests/big_o_proofs.rs` for implementation details.
+
+## Comparison
+
+| Tool | Setup Difficulty | Code Changes | Strengths |
+|------|------------------|--------------|-----------|
+| **Kani** | ⭐ Easy | Minimal | Model checking, easy to start |
+| **Creusot** | ⭐⭐⭐ Hard | Significant changes | Mathematical proofs via Why3 (not used) |
+| **Verus** | ⭐⭐⭐⭐ Very Hard | Rewrite needed | Full verification, new language (not used) |
+| **Big-O Tests** | ⭐ Easy | None | Empirical performance validation |
+
+## Recommended Approach
+
+1. **Start with Kani** - easiest to set up, works with existing code
+
+## Running Proofs
+
+### Kani
+
+```bash
+# Install
+cargo install --locked kani-verifier
+cargo kani setup
+
+# Run trait-level proofs (verify Heap trait contract)
+cargo kani proofs/kani/trait_level_proofs.rs
+
+# Run implementation-specific proofs (verify heap invariants)
+cargo kani proofs/kani/implementation_proofs.rs
+
+# Run all proofs
+cargo kani proofs/kani/*.rs
+
+# With more unwind iterations (for complex operations)
+cargo kani proofs/kani/trait_level_proofs.rs -- --unwind 20
+```
+
+### Proof Structure
+
+1. **Trait-Level Proofs** (`proofs/kani/trait_level_proofs.rs` and `proofs/kani/generic_trait_proofs.rs`):
+   - Verify that ALL heap implementations satisfy the Heap trait contract
+   - Properties like: push increments length, pop decrements length,
+     find_min is correct
+   - Tests BinomialHeap, FibonacciHeap, and PairingHeap
+
+2. **Implementation-Specific Proofs** (`proofs/kani/implementation_proofs.rs`):
+   - Verify specific invariants of each heap implementation
+   - Binomial Heap: Degree invariant, heap property
+   - Fibonacci Heap: Heap property, cascading cuts, consolidation
+   - Pairing Heap: Heap property, structure maintenance
+   - Cross-implementation consistency
+
+3. **Legacy Proofs** (`proofs/kani/kani_proofs.rs`):
+   - Simpler examples for getting started
+
+## CI Integration
+
+You can add proof checking to CI workflows. Example for Kani:
+
+```yaml
+# .github/workflows/verify.yml
+name: Verify with Kani
+on: [push, pull_request]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Kani
+        run: |
+          cargo install --locked kani-verifier
+          cargo kani setup
+      - name: Run Kani proofs
+        run: cargo kani proofs/kani/*.rs
+```
+
+## Configuration
+
+- `kani.toml` - Kani configuration (unwind limits, timeouts)
+
+## Notes
+
+- **Unsafe Code**: The heap implementations use unsafe Rust for pointer
+  manipulation. Some proof systems may require additional work to verify unsafe
+  code safely.
+
+- **Unwind Limits**: Model checkers like Kani are bounded - they only check
+  executions up to a certain depth. Increase unwind limits for complex
+  operations.
+
+- **Performance**: Verification can be slow for complex invariants. Start with
+  simple properties and build up.
+
+- **Creusot**: Creusot uses Why3 for mathematical proofs but requires
+  significant code annotations and refactoring for unsafe pointer code. The
+  annotation burden made it less suitable for this project compared to Kani's
+  model-checking approach.
+
+- **Verus**: Verus is a verified Rust language variant that requires rewriting
+  code in a Verus dialect. While it provides full functional verification, the
+  requirement to rewrite existing code made it unsuitable for this project,
+  which focuses on verifying existing Rust implementations.
