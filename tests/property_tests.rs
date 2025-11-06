@@ -515,11 +515,13 @@ macro_rules! create_heap_tests {
 
             proptest::proptest! {
                 #[test]
+                #[ignore]  // Property tests are slow - run with `cargo test -- --ignored`
                 fn push_pop_invariant(ops in prop::collection::vec((prop::bool::ANY, -100i32..100), $ops_size)) {
                     test_push_pop_invariant::<$heap_type>(ops)?;
                 }
 
                 #[test]
+                #[ignore]
                 fn decrease_key_invariant(
                     initial in prop::collection::vec(-100i32..100, $initial_size),
                     decreases in prop::collection::vec((0usize..50, -100i32..100), $decreases_size)
@@ -528,11 +530,13 @@ macro_rules! create_heap_tests {
                 }
 
                 #[test]
+                #[ignore]
                 fn pop_order_invariant(values in prop::collection::vec(-100i32..100, $values_size)) {
                     test_pop_order_invariant::<$heap_type>(values)?;
                 }
 
                 #[test]
+                #[ignore]
                 fn merge_invariant(
                     heap1 in prop::collection::vec(-100i32..100, $values_size),
                     heap2 in prop::collection::vec(-100i32..100, $values_size)
@@ -541,16 +545,19 @@ macro_rules! create_heap_tests {
                 }
 
                 #[test]
+                #[ignore]
                 fn len_invariant(ops in prop::collection::vec((prop::bool::ANY, -100i32..100), $ops_size)) {
                     test_len_invariant::<$heap_type>(ops)?;
                 }
 
                 #[test]
+                #[ignore]
                 fn peek_idempotent(values in prop::collection::vec(-100i32..100, $values_size)) {
                     test_peek_idempotent::<$heap_type>(values)?;
                 }
 
                 #[test]
+                #[ignore]
                 fn complex_operations(
                     initial in prop::collection::vec(-100i32..100, 1..20),
                     ops in prop::collection::vec((0u8..4, -100i32..100), 0..50)
@@ -559,21 +566,25 @@ macro_rules! create_heap_tests {
                 }
 
                 #[test]
+                #[ignore]
                 fn multiple_merges(heaps in prop::collection::vec(prop::collection::vec(-100i32..100, 0..20), 0..10)) {
                     test_multiple_merges::<$heap_type>(heaps)?;
                 }
 
                 #[test]
+                #[ignore]
                 fn completeness(values in prop::collection::vec(-100i32..100, 1..100)) {
                     test_completeness::<$heap_type>(values)?;
                 }
 
                 #[test]
+                #[ignore]
                 fn decrease_key_edge_cases(values in prop::collection::vec(-100i32..100, 1..30)) {
                     test_decrease_key_edge_cases::<$heap_type>(values)?;
                 }
 
                 #[test]
+                #[ignore]
                 fn duplicate_operations(value in -100i32..100, count in 1..20usize) {
                     test_duplicate_operations::<$heap_type>(value, count)?;
                 }

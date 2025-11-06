@@ -39,7 +39,7 @@ type NodePtr<T, P> = Option<NonNull<Node<T, P>>>;
 ///
 /// Note: This handle is tied to a specific heap instance. Using it with a different
 /// heap or after the heap is dropped is undefined behavior.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub struct BinomialHandle {
     node: *const (), // Type-erased pointer to Node<T, P>
 }
@@ -675,6 +675,35 @@ impl<T, P: Ord> BinomialHeap<T, P> {
             Self::free_tree(sibling);
         }
         drop(Box::from_raw(node_ptr));
+    }
+
+    /// Test-only helper: Returns the degrees of all root trees
+    ///
+    /// This helper is only available under test/Kani configurations to verify
+    /// the degree invariant: at most one tree of each degree.
+    ///
+    /// # Safety
+    /// This function is only safe to call when the heap is in a valid state.
+    /// It's only exposed under test/Kani configurations.
+    #[cfg(any(test, kani))]
+    pub fn root_tree_degrees(&self) -> Vec<usize> {
+        let mut degrees = Vec::new();
+        for (degree, tree_opt) in self.trees.iter().enumerate() {
+            if let Some(tree) = tree_opt {
+                unsafe {
+                    let tree_degree = (*tree.as_ptr()).degree;
+                    // Verify that the stored degree matches the array index
+                    // (this is an internal consistency check)
+                    assert_eq!(
+                        tree_degree, degree,
+                        "Tree degree mismatch: stored degree {} != array index {}",
+                        tree_degree, degree
+                    );
+                    degrees.push(degree);
+                }
+            }
+        }
+        degrees
     }
 }
 
