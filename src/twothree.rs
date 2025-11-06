@@ -442,7 +442,7 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
                 // Heap Property: parent priority <= child priority
                 assert!(
                     (*node_ptr).priority <= (*child_ptr).priority,
-                    "Heap property violated: parent priority {} > child priority {}",
+                    "Heap property violated: parent priority {:?} > child priority {:?}",
                     (*node_ptr).priority,
                     (*child_ptr).priority
                 );
@@ -762,7 +762,7 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
                 let parent_priority = (*parent.as_ptr()).priority;
                 assert!(
                     parent_priority <= node_priority,
-                    "Heap property violated after bubble_up: parent {} > child {}",
+                    "Heap property violated after bubble_up: parent {:?} > child {:?}",
                     parent_priority,
                     node_priority
                 );

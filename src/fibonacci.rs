@@ -417,7 +417,7 @@ impl<T, P: Ord> FibonacciHeap<T, P> {
             let child_priority = (*current.as_ptr()).priority;
             assert!(
                 parent_priority <= child_priority,
-                "Heap property violated: parent priority {} > child priority {}",
+                "Heap property violated: parent priority {:?} > child priority {:?}",
                 parent_priority,
                 child_priority
             );
@@ -619,7 +619,7 @@ impl<T, P: Ord> FibonacciHeap<T, P> {
             // Verify heap property after linking
             assert!(
                 (*y.as_ptr()).priority >= (*x.as_ptr()).priority,
-                "Heap property violated after link: child priority {} < parent priority {}",
+                "Heap property violated after link: child priority {:?} < parent priority {:?}",
                 (*y.as_ptr()).priority,
                 (*x.as_ptr()).priority
             );
