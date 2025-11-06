@@ -146,7 +146,8 @@ fn verify_fibonacci_consolidate_maintains_structure() {
     heap.push(kani::any(), kani::any());
 
     // Pop to trigger consolidation
-    let _ = heap.pop();
+    heap.pop()
+        .expect("pop() must succeed after inserting three elements to trigger consolidation");
 
     // After consolidation, heap should still be valid
     assert!(heap.len() == 2);
