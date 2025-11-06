@@ -34,10 +34,26 @@ fn verify_binomial_degree_invariant_after_insert() {
     heap.push(kani::any(), kani::any());
     heap.push(kani::any(), kani::any());
 
-    // After insert, the invariant is maintained by the carry propagation
-    // We can't directly check this from outside, but we can verify the heap
-    // maintains its structure by checking that operations work correctly
+    // Verify heap is non-empty
     assert!(!heap.is_empty());
+
+    // Verify degree invariant: collect degrees of root trees and check no duplicates
+    let degrees = heap.root_tree_degrees();
+
+    // Use a set to track which degrees we've seen
+    // If we see a duplicate, the invariant is violated
+    let mut seen_degrees = std::collections::HashSet::new();
+    for degree in &degrees {
+        assert!(
+            !seen_degrees.contains(degree),
+            "Degree invariant violated: degree {} appears multiple times in root list",
+            degree
+        );
+        seen_degrees.insert(*degree);
+    }
+
+    // Verify that the number of trees matches the number of unique degrees
+    assert_eq!(degrees.len(), seen_degrees.len());
 }
 
 /// Proof: Binomial heap maintains heap property after decrease_key
@@ -56,11 +72,12 @@ fn verify_binomial_heap_property_after_decrease_key() {
 
     heap.decrease_key(&handle, new_priority);
 
-    // After decrease_key, find_min should return the minimum
+    // After decrease_key, find_min must return the minimum
     // This implicitly checks that heap property is maintained
-    if let Some((&min_priority, _)) = heap.find_min() {
-        assert!(min_priority <= new_priority);
-    }
+    let (&min_priority, _) = heap
+        .find_min()
+        .expect("find_min() must succeed after pushing elements and decrease_key");
+    assert!(min_priority <= new_priority);
 }
 
 /// Proof: Binomial heap merge maintains degree invariant
@@ -83,8 +100,10 @@ fn verify_binomial_merge_maintains_invariant() {
     // After merge, length should be sum
     assert!(heap1.len() == len_before);
 
-    // Minimum should be correct
-    assert!(heap1.find_min().is_some());
+    // Minimum must be correct after merge
+    let _ = heap1
+        .find_min()
+        .expect("find_min() must succeed after merging heaps with elements");
 }
 
 // ============================================================================
@@ -107,10 +126,11 @@ fn verify_fibonacci_heap_property_after_decrease_key() {
 
     heap.decrease_key(&handle, new_priority);
 
-    // After decrease_key with cascading cuts, heap property should be maintained
-    if let Some((&min_priority, _)) = heap.find_min() {
-        assert!(min_priority <= new_priority);
-    }
+    // After decrease_key with cascading cuts, heap property must be maintained
+    let (&min_priority, _) = heap
+        .find_min()
+        .expect("find_min() must succeed after pushing elements and decrease_key");
+    assert!(min_priority <= new_priority);
 }
 
 /// Proof: Fibonacci heap maintains structure after consolidate
@@ -153,10 +173,11 @@ fn verify_fibonacci_merge_maintains_property() {
 
     heap1.merge(heap2);
 
-    // After merge, minimum should be correct
-    if let Some((&actual_min, _)) = heap1.find_min() {
-        assert!(actual_min == expected_min);
-    }
+    // After merge, minimum must be correct
+    let (&actual_min, _) = heap1
+        .find_min()
+        .expect("find_min() must succeed after merging heaps with elements");
+    assert!(actual_min == expected_min);
 }
 
 // ============================================================================
@@ -179,10 +200,11 @@ fn verify_pairing_heap_property_after_decrease_key() {
 
     heap.decrease_key(&handle, new_priority);
 
-    // After decrease_key, heap property should be maintained
-    if let Some((&min_priority, _)) = heap.find_min() {
-        assert!(min_priority <= new_priority);
-    }
+    // After decrease_key, heap property must be maintained
+    let (&min_priority, _) = heap
+        .find_min()
+        .expect("find_min() must succeed after pushing elements and decrease_key");
+    assert!(min_priority <= new_priority);
 }
 
 /// Proof: Pairing heap maintains structure after delete_min
@@ -225,10 +247,11 @@ fn verify_pairing_merge_maintains_property() {
 
     heap1.merge(heap2);
 
-    // After merge, minimum should be correct
-    if let Some((&actual_min, _)) = heap1.find_min() {
-        assert!(actual_min == expected_min);
-    }
+    // After merge, minimum must be correct
+    let (&actual_min, _) = heap1
+        .find_min()
+        .expect("find_min() must succeed after merging heaps with elements");
+    assert!(actual_min == expected_min);
 }
 
 // ============================================================================
@@ -261,11 +284,15 @@ fn verify_all_heaps_consistent() {
     pairing.push(p3, kani::any());
 
     // All should find the same minimum
-    let min_binomial = binomial.find_min().map(|(p, _)| *p);
-    let min_fibonacci = fibonacci.find_min().map(|(p, _)| *p);
-    let min_pairing = pairing.find_min().map(|(p, _)| *p);
+    let (&min_binomial, _) = binomial
+        .find_min()
+        .expect("find_min() must succeed after pushing elements to binomial heap");
+    let (&min_fibonacci, _) = fibonacci
+        .find_min()
+        .expect("find_min() must succeed after pushing elements to fibonacci heap");
+    let (&min_pairing, _) = pairing
+        .find_min()
+        .expect("find_min() must succeed after pushing elements to pairing heap");
 
-    if let (Some(b), Some(f), Some(p)) = (min_binomial, min_fibonacci, min_pairing) {
-        assert!(b == f && f == p);
-    }
+    assert!(min_binomial == min_fibonacci && min_fibonacci == min_pairing);
 }
