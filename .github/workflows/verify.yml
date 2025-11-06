@@ -6,69 +6,13 @@ on:
   pull_request:
     branches: [ main ]
 
+# Note: Kani verification has been moved to a separate on-demand workflow
+# (.github/workflows/kani-verify.yml) because the CBMC processes consume
+# 9+ GB of memory and will OOM the GitHub Actions runners (~7 GB RAM).
+#
+# To run Kani verification:
+# 1. Use the "Kani Verification (On-Demand)" workflow from the Actions tab
+# 2. Or run locally: cargo kani --tests 2>&1 | tee kani_all.log
+
 jobs:
-  kani:
-    name: Kani Verification
-    runs-on: ubuntu-latest
-    # Prevent auto-cancel on new pushes to the same ref while we diagnose
-    concurrency:
-      group: ${{ github.workflow }}-${{ github.ref }}
-      cancel-in-progress: false
-    # Put an explicit cap so failures show as timeout rather than cancellation
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install Kani
-        run: |
-          cargo install --locked kani-verifier
-          cargo kani setup
-
-      - name: Build crate
-        run: cargo build
-
-      - name: Kani codegen sanity (fast compile)
-        run: |
-          set -euxo pipefail
-          date
-          # Quick compile-only pass to surface build errors fast
-          cargo kani --tests --harness verify_push_increments_len_binomial --only-codegen 2>&1 | tee kani_codegen.log
-          date
-
-      - name: Run Kani – basic trait-level proof
-        timeout-minutes: 30
-        run: |
-          set -euxo pipefail
-          date
-          cargo kani --tests --harness verify_push_increments_len_binomial 2>&1 | tee kani_basic.log
-          date
-
-      - name: Run Kani – implementation-specific proof (binomial decrease_key)
-        timeout-minutes: 30
-        run: |
-          set -euxo pipefail
-          date
-          cargo kani --tests --harness verify_binomial_heap_property_after_decrease_key 2>&1 | tee kani_impl.log
-          date
-
-      - name: Run Kani – legacy simple proof
-        timeout-minutes: 30
-        run: |
-          set -euxo pipefail
-          date
-          cargo kani --tests --harness verify_insert_increments_len 2>&1 | tee kani_legacy.log
-          date
-
-      - name: Upload Kani logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: kani-logs
-          path: |
-            kani_codegen.log
-            kani_basic.log
-            kani_impl.log
-            kani_legacy.log
+  # Kani verification removed - see kani-verify.yml for on-demand workflow
