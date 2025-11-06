@@ -32,32 +32,43 @@ jobs:
 
       - name: Kani codegen sanity (fast compile)
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           date
           # Quick compile-only pass to surface build errors fast
-          cargo kani --tests --harness verify_push_increments_len_binomial --only-codegen --verbose
+          cargo kani --tests --harness verify_push_increments_len_binomial --only-codegen 2>&1 | tee kani_codegen.log
           date
 
       - name: Run Kani – basic trait-level proof
         timeout-minutes: 30
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           date
-          cargo kani --tests --harness verify_push_increments_len_binomial --verbose
+          cargo kani --tests --harness verify_push_increments_len_binomial 2>&1 | tee kani_basic.log
           date
 
       - name: Run Kani – implementation-specific proof (binomial decrease_key)
         timeout-minutes: 30
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           date
-          cargo kani --tests --harness verify_binomial_heap_property_after_decrease_key --verbose
+          cargo kani --tests --harness verify_binomial_heap_property_after_decrease_key 2>&1 | tee kani_impl.log
           date
 
       - name: Run Kani – legacy simple proof
         timeout-minutes: 30
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           date
-          cargo kani --tests --harness verify_insert_increments_len --verbose
+          cargo kani --tests --harness verify_insert_increments_len 2>&1 | tee kani_legacy.log
           date
+
+      - name: Upload Kani logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kani-logs
+          path: |
+            kani_codegen.log
+            kani_basic.log
+            kani_impl.log
+            kani_legacy.log
