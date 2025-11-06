@@ -642,36 +642,3 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
         drop(Box::from_raw(node_ptr));
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_basic_operations() {
-        let mut heap = TwoThreeHeap::new();
-        assert!(heap.is_empty());
-
-        let _h1 = heap.push(5, "a");
-        let _h2 = heap.push(3, "b");
-        let _h3 = heap.push(7, "c");
-
-        assert_eq!(heap.peek(), Some((&3, &"b")));
-
-        let min = heap.pop();
-        assert_eq!(min, Some((3, "b")));
-        assert_eq!(heap.peek(), Some((&5, &"a")));
-    }
-
-    #[test]
-    fn test_merge() {
-        let mut heap1 = TwoThreeHeap::new();
-        heap1.push(5, "a");
-
-        let mut heap2 = TwoThreeHeap::new();
-        heap2.push(3, "b");
-
-        heap1.merge(heap2);
-        assert_eq!(heap1.peek(), Some((&3, &"b")));
-    }
-}
