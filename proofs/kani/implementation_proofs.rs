@@ -219,7 +219,8 @@ fn verify_pairing_delete_min_maintains_structure() {
     heap.push(kani::any(), kani::any());
 
     let len_before = heap.len();
-    let _ = heap.pop();
+    heap.pop()
+        .expect("pop() must succeed after inserting three elements into the pairing heap");
 
     // After delete_min with pairing, heap should still be valid
     assert!(heap.len() == len_before - 1);
