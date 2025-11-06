@@ -40,7 +40,7 @@ use std::ptr::{self, NonNull};
 ///
 /// Note: This handle is tied to a specific heap instance. Using it with a different
 /// heap or after the heap is dropped is undefined behavior.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub struct RankPairingHandle {
     node: *const (), // Type-erased pointer to Node<T, P>
 }

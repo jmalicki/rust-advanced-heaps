@@ -1,0 +1,53 @@
+name: Verify with Proof Systems
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  kani:
+    name: Kani Verification
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Kani
+        run: |
+          cargo install --locked kani-verifier
+          cargo kani setup
+
+      - name: Build crate
+        run: cargo build
+
+      - name: Run Kani proofs
+        run: |
+          # Run a sample of key proofs to verify the system works
+          # Proof files are now in tests/kani/ as integration tests
+          # Full proof suite can be run locally with: cargo kani --tests
+          echo "Running basic trait-level proofs..."
+          cargo kani --tests --harness verify_push_increments_len_binomial
+          echo "Running implementation-specific proofs..."
+          cargo kani --tests --harness verify_binomial_heap_property_after_decrease_key
+          echo "Running legacy proofs..."
+          cargo kani --tests --harness verify_insert_increments_len
+
+  property_tests:
+    name: Property Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run property tests
+        run: |
+          echo "Running parallel property tests (comparing all heap implementations)..."
+          cargo test --test parallel_property_tests --release
+          echo "Running individual heap property tests..."
+          cargo test --test property_tests --release

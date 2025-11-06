@@ -16,7 +16,7 @@ criterion = "0.5"
 smallvec = "1.13"
 
 [dev-dependencies]
-proptest = "1.4"
+proptest = { version = "1.4", features = ["fork"] }
 criterion = "0.5"
 big-o-test = "0.2"
 ctor = "0.2"

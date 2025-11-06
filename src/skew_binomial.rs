@@ -15,7 +15,7 @@ use std::ptr::{self, NonNull};
 type NodePtr<T, P> = Option<NonNull<Node<T, P>>>;
 
 /// Handle to an element in a Skew binomial heap
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub struct SkewBinomialHandle {
     node: *const (), // Type-erased pointer to Node<T, P>
 }
