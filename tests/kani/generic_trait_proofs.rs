@@ -91,7 +91,7 @@ fn verify_pop_returns_find_min<H: Heap<u32, u32>>() {
     heap.push(priority1, kani::any());
     heap.push(priority2, kani::any());
 
-    let min_before = heap
+    let min_before = *heap
         .find_min()
         .expect("find_min() must return the minimum after pushing elements")
         .0;
@@ -99,7 +99,7 @@ fn verify_pop_returns_find_min<H: Heap<u32, u32>>() {
     let (popped_priority, _) = heap
         .pop()
         .expect("pop() must succeed after pushing elements");
-    assert!(popped_priority == *min_before);
+    assert!(popped_priority == min_before);
 }
 
 /// Generic proof: decrease_key actually decreases the priority

@@ -442,9 +442,7 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
                 // Heap Property: parent priority <= child priority
                 assert!(
                     (*node_ptr).priority <= (*child_ptr).priority,
-                    "Heap property violated: parent priority {:?} > child priority {:?}",
-                    (*node_ptr).priority,
-                    (*child_ptr).priority
+                    "Heap property violated: parent priority > child priority"
                 );
 
                 // Degree constraint: track each child's degree for verification
@@ -729,8 +727,8 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
                 // Node now has parent's old priority (which was >= node's old priority)
                 // Parent now has node's old priority (which was < parent's old priority)
                 // So after swap: node.priority >= parent.priority (heap property satisfied)
-                let node_priority_after = (*node_ptr).priority;
-                let parent_priority_after = (*parent_ptr).priority;
+                let node_priority_after = &(*node_ptr).priority;
+                let parent_priority_after = &(*parent_ptr).priority;
                 assert!(
                     parent_priority_after <= node_priority_after,
                     "Workspace constraint violated: heap property not maintained after swap in bubble_up"
@@ -758,13 +756,11 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
             // Verify that after bubbling, heap property is maintained
             // (checked in verify_invariants, but we can also check locally)
             if let Some(parent) = (*node.as_ptr()).parent {
-                let node_priority = (*node.as_ptr()).priority;
-                let parent_priority = (*parent.as_ptr()).priority;
+                let node_priority = &(*node.as_ptr()).priority;
+                let parent_priority = &(*parent.as_ptr()).priority;
                 assert!(
                     parent_priority <= node_priority,
-                    "Heap property violated after bubble_up: parent {:?} > child {:?}",
-                    parent_priority,
-                    node_priority
+                    "Heap property violated after bubble_up: parent > child"
                 );
             }
         }

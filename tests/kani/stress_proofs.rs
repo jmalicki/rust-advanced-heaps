@@ -185,17 +185,15 @@ fn verify_skew_binomial_binomial_stress() {
 #[kani::proof]
 #[kani::unwind(200)] // Higher unwind for all 8 heaps
 fn verify_all_heaps_stress() {
-    // Store heaps as trait objects in a vector for iteration
-    let mut heaps: Vec<Box<dyn Heap<u32, u32>>> = vec![
-        Box::new(BinomialHeap::new()),
-        Box::new(BrodalHeap::new()),
-        Box::new(FibonacciHeap::new()),
-        Box::new(PairingHeap::new()),
-        Box::new(RankPairingHeap::new()),
-        Box::new(SkewBinomialHeap::new()),
-        Box::new(StrictFibonacciHeap::new()),
-        Box::new(TwoThreeHeap::new()),
-    ];
+    // Store heaps as concrete types (Heap is not object-safe)
+    let mut binomial: BinomialHeap<u32, u32> = BinomialHeap::new();
+    let mut brodal: BrodalHeap<u32, u32> = BrodalHeap::new();
+    let mut fibonacci: FibonacciHeap<u32, u32> = FibonacciHeap::new();
+    let mut pairing: PairingHeap<u32, u32> = PairingHeap::new();
+    let mut rank_pairing: RankPairingHeap<u32, u32> = RankPairingHeap::new();
+    let mut skew: SkewBinomialHeap<u32, u32> = SkewBinomialHeap::new();
+    let mut strict: StrictFibonacciHeap<u32, u32> = StrictFibonacciHeap::new();
+    let mut twothree: TwoThreeHeap<u32, u32> = TwoThreeHeap::new();
 
     let num_operations = 30;
 
@@ -208,63 +206,216 @@ fn verify_all_heaps_stress() {
                 // Push operation
                 let priority = kani::any();
                 let item = kani::any();
-                for heap in heaps.iter_mut() {
-                    heap.push(priority, item);
-                }
+                binomial.push(priority, item);
+                brodal.push(priority, item);
+                fibonacci.push(priority, item);
+                pairing.push(priority, item);
+                rank_pairing.push(priority, item);
+                skew.push(priority, item);
+                strict.push(priority, item);
+                twothree.push(priority, item);
 
                 // Verify all heaps have same length
-                let len = heaps[0].len();
-                for heap in heaps.iter() {
+                let len = binomial.len();
+                assert!(
+                    brodal.len() == len,
+                    "Heaps have different lengths after push: {} vs {}",
+                    brodal.len(),
+                    len
+                );
+                assert!(
+                    fibonacci.len() == len,
+                    "Heaps have different lengths after push: {} vs {}",
+                    fibonacci.len(),
+                    len
+                );
+                assert!(
+                    pairing.len() == len,
+                    "Heaps have different lengths after push: {} vs {}",
+                    pairing.len(),
+                    len
+                );
+                assert!(
+                    rank_pairing.len() == len,
+                    "Heaps have different lengths after push: {} vs {}",
+                    rank_pairing.len(),
+                    len
+                );
+                assert!(
+                    skew.len() == len,
+                    "Heaps have different lengths after push: {} vs {}",
+                    skew.len(),
+                    len
+                );
+                assert!(
+                    strict.len() == len,
+                    "Heaps have different lengths after push: {} vs {}",
+                    strict.len(),
+                    len
+                );
+                assert!(
+                    twothree.len() == len,
+                    "Heaps have different lengths after push: {} vs {}",
+                    twothree.len(),
+                    len
+                );
+            }
+            1 => {
+                // Pop operation
+                if !binomial.is_empty() {
+                    let binomial_result = binomial.pop();
+                    let brodal_result = brodal.pop();
+                    let fibonacci_result = fibonacci.pop();
+                    let pairing_result = pairing.pop();
+                    let rank_pairing_result = rank_pairing.pop();
+                    let skew_result = skew.pop();
+                    let strict_result = strict.pop();
+                    let twothree_result = twothree.pop();
+
+                    // Verify all heaps produce same result
                     assert!(
-                        heap.len() == len,
-                        "Heaps have different lengths after push: {} vs {}",
-                        heap.len(),
+                        brodal_result == binomial_result,
+                        "Heaps produced different results on pop: {:?} vs {:?}",
+                        brodal_result,
+                        binomial_result
+                    );
+                    assert!(
+                        fibonacci_result == binomial_result,
+                        "Heaps produced different results on pop: {:?} vs {:?}",
+                        fibonacci_result,
+                        binomial_result
+                    );
+                    assert!(
+                        pairing_result == binomial_result,
+                        "Heaps produced different results on pop: {:?} vs {:?}",
+                        pairing_result,
+                        binomial_result
+                    );
+                    assert!(
+                        rank_pairing_result == binomial_result,
+                        "Heaps produced different results on pop: {:?} vs {:?}",
+                        rank_pairing_result,
+                        binomial_result
+                    );
+                    assert!(
+                        skew_result == binomial_result,
+                        "Heaps produced different results on pop: {:?} vs {:?}",
+                        skew_result,
+                        binomial_result
+                    );
+                    assert!(
+                        strict_result == binomial_result,
+                        "Heaps produced different results on pop: {:?} vs {:?}",
+                        strict_result,
+                        binomial_result
+                    );
+                    assert!(
+                        twothree_result == binomial_result,
+                        "Heaps produced different results on pop: {:?} vs {:?}",
+                        twothree_result,
+                        binomial_result
+                    );
+
+                    // Verify all heaps have same length
+                    let len = binomial.len();
+                    assert!(
+                        brodal.len() == len,
+                        "Heaps have different lengths after pop: {} vs {}",
+                        brodal.len(),
+                        len
+                    );
+                    assert!(
+                        fibonacci.len() == len,
+                        "Heaps have different lengths after pop: {} vs {}",
+                        fibonacci.len(),
+                        len
+                    );
+                    assert!(
+                        pairing.len() == len,
+                        "Heaps have different lengths after pop: {} vs {}",
+                        pairing.len(),
+                        len
+                    );
+                    assert!(
+                        rank_pairing.len() == len,
+                        "Heaps have different lengths after pop: {} vs {}",
+                        rank_pairing.len(),
+                        len
+                    );
+                    assert!(
+                        skew.len() == len,
+                        "Heaps have different lengths after pop: {} vs {}",
+                        skew.len(),
+                        len
+                    );
+                    assert!(
+                        strict.len() == len,
+                        "Heaps have different lengths after pop: {} vs {}",
+                        strict.len(),
+                        len
+                    );
+                    assert!(
+                        twothree.len() == len,
+                        "Heaps have different lengths after pop: {} vs {}",
+                        twothree.len(),
                         len
                     );
                 }
             }
-            1 => {
-                // Pop operation
-                if !heaps[0].is_empty() {
-                    let results: Vec<_> = heaps.iter_mut().map(|heap| heap.pop()).collect();
-
-                    // Verify all heaps produce same result
-                    let first_result = results[0];
-                    for result in results.iter() {
-                        assert!(
-                            *result == first_result,
-                            "Heaps produced different results on pop: {:?} vs {:?}",
-                            result,
-                            first_result
-                        );
-                    }
-
-                    // Verify all heaps have same length
-                    let len = heaps[0].len();
-                    for heap in heaps.iter() {
-                        assert!(
-                            heap.len() == len,
-                            "Heaps have different lengths after pop: {} vs {}",
-                            heap.len(),
-                            len
-                        );
-                    }
-                }
-            }
             2 => {
                 // Peek operation
-                let results: Vec<_> = heaps.iter().map(|heap| heap.peek()).collect();
+                let binomial_result = binomial.peek();
+                let brodal_result = brodal.peek();
+                let fibonacci_result = fibonacci.peek();
+                let pairing_result = pairing.peek();
+                let rank_pairing_result = rank_pairing.peek();
+                let skew_result = skew.peek();
+                let strict_result = strict.peek();
+                let twothree_result = twothree.peek();
 
                 // Verify all heaps produce same result
-                let first_result = results[0];
-                for result in results.iter() {
-                    assert!(
-                        *result == first_result,
-                        "Heaps produced different results on peek: {:?} vs {:?}",
-                        result,
-                        first_result
-                    );
-                }
+                assert!(
+                    brodal_result == binomial_result,
+                    "Heaps produced different results on peek: {:?} vs {:?}",
+                    brodal_result,
+                    binomial_result
+                );
+                assert!(
+                    fibonacci_result == binomial_result,
+                    "Heaps produced different results on peek: {:?} vs {:?}",
+                    fibonacci_result,
+                    binomial_result
+                );
+                assert!(
+                    pairing_result == binomial_result,
+                    "Heaps produced different results on peek: {:?} vs {:?}",
+                    pairing_result,
+                    binomial_result
+                );
+                assert!(
+                    rank_pairing_result == binomial_result,
+                    "Heaps produced different results on peek: {:?} vs {:?}",
+                    rank_pairing_result,
+                    binomial_result
+                );
+                assert!(
+                    skew_result == binomial_result,
+                    "Heaps produced different results on peek: {:?} vs {:?}",
+                    skew_result,
+                    binomial_result
+                );
+                assert!(
+                    strict_result == binomial_result,
+                    "Heaps produced different results on peek: {:?} vs {:?}",
+                    strict_result,
+                    binomial_result
+                );
+                assert!(
+                    twothree_result == binomial_result,
+                    "Heaps produced different results on peek: {:?} vs {:?}",
+                    twothree_result,
+                    binomial_result
+                );
             }
             3 => {
                 // Merge operation - merge requires Self, so we need to extract concrete types
@@ -292,101 +443,117 @@ fn verify_all_heaps_stress() {
                     other_twothree.push(priority, item);
                 }
 
-                // Extract concrete heaps from trait objects, merge, and put back
-                let mut new_heaps: Vec<Box<dyn Heap<u32, u32>>> = vec![
-                    {
-                        let mut h: BinomialHeap<u32, u32> = *heaps[0]
-                            .as_mut()
-                            .downcast_mut::<BinomialHeap<u32, u32>>()
-                            .unwrap();
-                        h.merge(other_binomial);
-                        Box::new(h)
-                    },
-                    {
-                        let mut h: BrodalHeap<u32, u32> = *heaps[1]
-                            .as_mut()
-                            .downcast_mut::<BrodalHeap<u32, u32>>()
-                            .unwrap();
-                        h.merge(other_brodal);
-                        Box::new(h)
-                    },
-                    {
-                        let mut h: FibonacciHeap<u32, u32> = *heaps[2]
-                            .as_mut()
-                            .downcast_mut::<FibonacciHeap<u32, u32>>()
-                            .unwrap();
-                        h.merge(other_fibonacci);
-                        Box::new(h)
-                    },
-                    {
-                        let mut h: PairingHeap<u32, u32> = *heaps[3]
-                            .as_mut()
-                            .downcast_mut::<PairingHeap<u32, u32>>()
-                            .unwrap();
-                        h.merge(other_pairing);
-                        Box::new(h)
-                    },
-                    {
-                        let mut h: RankPairingHeap<u32, u32> = *heaps[4]
-                            .as_mut()
-                            .downcast_mut::<RankPairingHeap<u32, u32>>()
-                            .unwrap();
-                        h.merge(other_rank_pairing);
-                        Box::new(h)
-                    },
-                    {
-                        let mut h: SkewBinomialHeap<u32, u32> = *heaps[5]
-                            .as_mut()
-                            .downcast_mut::<SkewBinomialHeap<u32, u32>>()
-                            .unwrap();
-                        h.merge(other_skew);
-                        Box::new(h)
-                    },
-                    {
-                        let mut h: StrictFibonacciHeap<u32, u32> = *heaps[6]
-                            .as_mut()
-                            .downcast_mut::<StrictFibonacciHeap<u32, u32>>()
-                            .unwrap();
-                        h.merge(other_strict);
-                        Box::new(h)
-                    },
-                    {
-                        let mut h: TwoThreeHeap<u32, u32> = *heaps[7]
-                            .as_mut()
-                            .downcast_mut::<TwoThreeHeap<u32, u32>>()
-                            .unwrap();
-                        h.merge(other_twothree);
-                        Box::new(h)
-                    },
-                ];
-                heaps = new_heaps;
+                // Merge directly on concrete types (no need for downcast)
+                binomial.merge(other_binomial);
+                brodal.merge(other_brodal);
+                fibonacci.merge(other_fibonacci);
+                pairing.merge(other_pairing);
+                rank_pairing.merge(other_rank_pairing);
+                skew.merge(other_skew);
+                strict.merge(other_strict);
+                twothree.merge(other_twothree);
 
                 // Verify all heaps have same length after merge
-                let len = heaps[0].len();
-                for heap in heaps.iter() {
-                    assert!(
-                        heap.len() == len,
-                        "Heaps have different lengths after merge: {} vs {}",
-                        heap.len(),
-                        len
-                    );
-                }
+                let len = binomial.len();
+                assert!(
+                    brodal.len() == len,
+                    "Heaps have different lengths after merge: {} vs {}",
+                    brodal.len(),
+                    len
+                );
+                assert!(
+                    fibonacci.len() == len,
+                    "Heaps have different lengths after merge: {} vs {}",
+                    fibonacci.len(),
+                    len
+                );
+                assert!(
+                    pairing.len() == len,
+                    "Heaps have different lengths after merge: {} vs {}",
+                    pairing.len(),
+                    len
+                );
+                assert!(
+                    rank_pairing.len() == len,
+                    "Heaps have different lengths after merge: {} vs {}",
+                    rank_pairing.len(),
+                    len
+                );
+                assert!(
+                    skew.len() == len,
+                    "Heaps have different lengths after merge: {} vs {}",
+                    skew.len(),
+                    len
+                );
+                assert!(
+                    strict.len() == len,
+                    "Heaps have different lengths after merge: {} vs {}",
+                    strict.len(),
+                    len
+                );
+                assert!(
+                    twothree.len() == len,
+                    "Heaps have different lengths after merge: {} vs {}",
+                    twothree.len(),
+                    len
+                );
             }
             4 => {
                 // Multiple pops in sequence
                 let num_pops = kani::any::<u8>() % 3;
                 for _ in 0..num_pops {
-                    if !heaps[0].is_empty() {
-                        let results: Vec<_> = heaps.iter_mut().map(|heap| heap.pop()).collect();
-                        let first_result = results[0];
-                        for result in results.iter() {
-                            assert!(
-                                *result == first_result,
-                                "Heaps produced different results on sequential pop: {:?} vs {:?}",
-                                result,
-                                first_result
-                            );
-                        }
+                    if !binomial.is_empty() {
+                        let binomial_result = binomial.pop();
+                        let brodal_result = brodal.pop();
+                        let fibonacci_result = fibonacci.pop();
+                        let pairing_result = pairing.pop();
+                        let rank_pairing_result = rank_pairing.pop();
+                        let skew_result = skew.pop();
+                        let strict_result = strict.pop();
+                        let twothree_result = twothree.pop();
+
+                        assert!(
+                            brodal_result == binomial_result,
+                            "Heaps produced different results on sequential pop: {:?} vs {:?}",
+                            brodal_result,
+                            binomial_result
+                        );
+                        assert!(
+                            fibonacci_result == binomial_result,
+                            "Heaps produced different results on sequential pop: {:?} vs {:?}",
+                            fibonacci_result,
+                            binomial_result
+                        );
+                        assert!(
+                            pairing_result == binomial_result,
+                            "Heaps produced different results on sequential pop: {:?} vs {:?}",
+                            pairing_result,
+                            binomial_result
+                        );
+                        assert!(
+                            rank_pairing_result == binomial_result,
+                            "Heaps produced different results on sequential pop: {:?} vs {:?}",
+                            rank_pairing_result,
+                            binomial_result
+                        );
+                        assert!(
+                            skew_result == binomial_result,
+                            "Heaps produced different results on sequential pop: {:?} vs {:?}",
+                            skew_result,
+                            binomial_result
+                        );
+                        assert!(
+                            strict_result == binomial_result,
+                            "Heaps produced different results on sequential pop: {:?} vs {:?}",
+                            strict_result,
+                            binomial_result
+                        );
+                        assert!(
+                            twothree_result == binomial_result,
+                            "Heaps produced different results on sequential pop: {:?} vs {:?}",
+                            twothree_result,
+                            binomial_result
+                        );
                     }
                 }
             }
@@ -395,27 +562,69 @@ fn verify_all_heaps_stress() {
     }
 
     // Final verification: all heaps should be empty if we pop everything
-    while !heaps[0].is_empty() {
-        let results: Vec<_> = heaps.iter_mut().map(|heap| heap.pop()).collect();
-        let first_result = results[0];
-        for result in results.iter() {
-            assert!(
-                *result == first_result,
-                "Heaps produced different results during final pop sequence: {:?} vs {:?}",
-                result,
-                first_result
-            );
-        }
+    while !binomial.is_empty() {
+        let binomial_result = binomial.pop();
+        let brodal_result = brodal.pop();
+        let fibonacci_result = fibonacci.pop();
+        let pairing_result = pairing.pop();
+        let rank_pairing_result = rank_pairing.pop();
+        let skew_result = skew.pop();
+        let strict_result = strict.pop();
+        let twothree_result = twothree.pop();
+
+        assert!(
+            brodal_result == binomial_result,
+            "Heaps produced different results during final pop sequence: {:?} vs {:?}",
+            brodal_result,
+            binomial_result
+        );
+        assert!(
+            fibonacci_result == binomial_result,
+            "Heaps produced different results during final pop sequence: {:?} vs {:?}",
+            fibonacci_result,
+            binomial_result
+        );
+        assert!(
+            pairing_result == binomial_result,
+            "Heaps produced different results during final pop sequence: {:?} vs {:?}",
+            pairing_result,
+            binomial_result
+        );
+        assert!(
+            rank_pairing_result == binomial_result,
+            "Heaps produced different results during final pop sequence: {:?} vs {:?}",
+            rank_pairing_result,
+            binomial_result
+        );
+        assert!(
+            skew_result == binomial_result,
+            "Heaps produced different results during final pop sequence: {:?} vs {:?}",
+            skew_result,
+            binomial_result
+        );
+        assert!(
+            strict_result == binomial_result,
+            "Heaps produced different results during final pop sequence: {:?} vs {:?}",
+            strict_result,
+            binomial_result
+        );
+        assert!(
+            twothree_result == binomial_result,
+            "Heaps produced different results during final pop sequence: {:?} vs {:?}",
+            twothree_result,
+            binomial_result
+        );
     }
 
     // All heaps should now be empty
-    for heap in heaps.iter() {
-        assert!(
-            heap.is_empty(),
-            "Heap is not empty after popping all elements: len = {}",
-            heap.len()
-        );
-    }
+    assert!(binomial.is_empty());
+    assert!(brodal.is_empty());
+    assert!(fibonacci.is_empty());
+    assert!(pairing.is_empty());
+    assert!(rank_pairing.is_empty());
+    assert!(skew.is_empty());
+    assert!(strict.is_empty());
+    assert!(twothree.is_empty());
 }
 
 // ============================================================================
@@ -427,16 +636,15 @@ fn verify_all_heaps_stress() {
 #[kani::proof]
 #[kani::unwind(250)] // Very high unwind bound for long sequence
 fn verify_very_long_sequence_stress() {
-    let mut heaps: Vec<Box<dyn Heap<u32, u32>>> = vec![
-        Box::new(BinomialHeap::new()),
-        Box::new(BrodalHeap::new()),
-        Box::new(FibonacciHeap::new()),
-        Box::new(PairingHeap::new()),
-        Box::new(RankPairingHeap::new()),
-        Box::new(SkewBinomialHeap::new()),
-        Box::new(StrictFibonacciHeap::new()),
-        Box::new(TwoThreeHeap::new()),
-    ];
+    // Store heaps as concrete types (Heap is not object-safe)
+    let mut binomial: BinomialHeap<u32, u32> = BinomialHeap::new();
+    let mut brodal: BrodalHeap<u32, u32> = BrodalHeap::new();
+    let mut fibonacci: FibonacciHeap<u32, u32> = FibonacciHeap::new();
+    let mut pairing: PairingHeap<u32, u32> = PairingHeap::new();
+    let mut rank_pairing: RankPairingHeap<u32, u32> = RankPairingHeap::new();
+    let mut skew: SkewBinomialHeap<u32, u32> = SkewBinomialHeap::new();
+    let mut strict: StrictFibonacciHeap<u32, u32> = StrictFibonacciHeap::new();
+    let mut twothree: TwoThreeHeap<u32, u32> = TwoThreeHeap::new();
 
     // Perform 50 operations
     for _ in 0..50 {
@@ -448,65 +656,188 @@ fn verify_very_long_sequence_stress() {
                 // Push
                 let priority = kani::any();
                 let item = kani::any();
-                for heap in heaps.iter_mut() {
-                    heap.push(priority, item);
-                }
+                binomial.push(priority, item);
+                brodal.push(priority, item);
+                fibonacci.push(priority, item);
+                pairing.push(priority, item);
+                rank_pairing.push(priority, item);
+                skew.push(priority, item);
+                strict.push(priority, item);
+                twothree.push(priority, item);
             }
             1 => {
                 // Pop
-                if !heaps[0].is_empty() {
-                    let results: Vec<_> = heaps.iter_mut().map(|heap| heap.pop()).collect();
-                    let first_result = results[0];
-                    for result in results.iter() {
-                        assert!(
-                            *result == first_result,
-                            "Different results on pop: {:?} vs {:?}",
-                            result,
-                            first_result
-                        );
-                    }
+                if !binomial.is_empty() {
+                    let binomial_result = binomial.pop();
+                    let brodal_result = brodal.pop();
+                    let fibonacci_result = fibonacci.pop();
+                    let pairing_result = pairing.pop();
+                    let rank_pairing_result = rank_pairing.pop();
+                    let skew_result = skew.pop();
+                    let strict_result = strict.pop();
+                    let twothree_result = twothree.pop();
+
+                    assert!(
+                        brodal_result == binomial_result,
+                        "Different results on pop: {:?} vs {:?}",
+                        brodal_result,
+                        binomial_result
+                    );
+                    assert!(
+                        fibonacci_result == binomial_result,
+                        "Different results on pop: {:?} vs {:?}",
+                        fibonacci_result,
+                        binomial_result
+                    );
+                    assert!(
+                        pairing_result == binomial_result,
+                        "Different results on pop: {:?} vs {:?}",
+                        pairing_result,
+                        binomial_result
+                    );
+                    assert!(
+                        rank_pairing_result == binomial_result,
+                        "Different results on pop: {:?} vs {:?}",
+                        rank_pairing_result,
+                        binomial_result
+                    );
+                    assert!(
+                        skew_result == binomial_result,
+                        "Different results on pop: {:?} vs {:?}",
+                        skew_result,
+                        binomial_result
+                    );
+                    assert!(
+                        strict_result == binomial_result,
+                        "Different results on pop: {:?} vs {:?}",
+                        strict_result,
+                        binomial_result
+                    );
+                    assert!(
+                        twothree_result == binomial_result,
+                        "Different results on pop: {:?} vs {:?}",
+                        twothree_result,
+                        binomial_result
+                    );
                 }
             }
             2 => {
                 // Peek
-                let results: Vec<_> = heaps.iter().map(|heap| heap.peek()).collect();
-                let first_result = results[0];
-                for result in results.iter() {
-                    assert!(
-                        *result == first_result,
-                        "Different results on peek: {:?} vs {:?}",
-                        result,
-                        first_result
-                    );
-                }
+                let binomial_result = binomial.peek();
+                let brodal_result = brodal.peek();
+                let fibonacci_result = fibonacci.peek();
+                let pairing_result = pairing.peek();
+                let rank_pairing_result = rank_pairing.peek();
+                let skew_result = skew.peek();
+                let strict_result = strict.peek();
+                let twothree_result = twothree.peek();
+
+                assert!(
+                    brodal_result == binomial_result,
+                    "Different results on peek: {:?} vs {:?}",
+                    brodal_result,
+                    binomial_result
+                );
+                assert!(
+                    fibonacci_result == binomial_result,
+                    "Different results on peek: {:?} vs {:?}",
+                    fibonacci_result,
+                    binomial_result
+                );
+                assert!(
+                    pairing_result == binomial_result,
+                    "Different results on peek: {:?} vs {:?}",
+                    pairing_result,
+                    binomial_result
+                );
+                assert!(
+                    rank_pairing_result == binomial_result,
+                    "Different results on peek: {:?} vs {:?}",
+                    rank_pairing_result,
+                    binomial_result
+                );
+                assert!(
+                    skew_result == binomial_result,
+                    "Different results on peek: {:?} vs {:?}",
+                    skew_result,
+                    binomial_result
+                );
+                assert!(
+                    strict_result == binomial_result,
+                    "Different results on peek: {:?} vs {:?}",
+                    strict_result,
+                    binomial_result
+                );
+                assert!(
+                    twothree_result == binomial_result,
+                    "Different results on peek: {:?} vs {:?}",
+                    twothree_result,
+                    binomial_result
+                );
             }
             3 => {
-                // Merge - simulate by creating new heaps and transferring items
-                let mut other_heaps: Vec<Box<dyn Heap<u32, u32>>> = vec![
-                    Box::new(BinomialHeap::new()),
-                    Box::new(BrodalHeap::new()),
-                    Box::new(FibonacciHeap::new()),
-                    Box::new(PairingHeap::new()),
-                    Box::new(RankPairingHeap::new()),
-                    Box::new(SkewBinomialHeap::new()),
-                    Box::new(StrictFibonacciHeap::new()),
-                    Box::new(TwoThreeHeap::new()),
-                ];
+                // Merge - create new heaps and transfer items
+                let mut other_binomial: BinomialHeap<u32, u32> = BinomialHeap::new();
+                let mut other_brodal: BrodalHeap<u32, u32> = BrodalHeap::new();
+                let mut other_fibonacci: FibonacciHeap<u32, u32> = FibonacciHeap::new();
+                let mut other_pairing: PairingHeap<u32, u32> = PairingHeap::new();
+                let mut other_rank_pairing: RankPairingHeap<u32, u32> = RankPairingHeap::new();
+                let mut other_skew: SkewBinomialHeap<u32, u32> = SkewBinomialHeap::new();
+                let mut other_strict: StrictFibonacciHeap<u32, u32> = StrictFibonacciHeap::new();
+                let mut other_twothree: TwoThreeHeap<u32, u32> = TwoThreeHeap::new();
 
                 for _ in 0..3 {
                     let priority = kani::any();
                     let item = kani::any();
-                    for heap in other_heaps.iter_mut() {
-                        heap.push(priority, item);
-                    }
+                    other_binomial.push(priority, item);
+                    other_brodal.push(priority, item);
+                    other_fibonacci.push(priority, item);
+                    other_pairing.push(priority, item);
+                    other_rank_pairing.push(priority, item);
+                    other_skew.push(priority, item);
+                    other_strict.push(priority, item);
+                    other_twothree.push(priority, item);
                 }
 
-                // Transfer items from other_heaps to main heaps
-                for (heap, other_heap) in heaps.iter_mut().zip(other_heaps.iter()) {
-                    while !other_heap.is_empty() {
-                        if let Some((priority, item)) = other_heap.pop() {
-                            heap.push(priority, item);
-                        }
+                // Transfer items from other heaps to main heaps
+                while !other_binomial.is_empty() {
+                    if let Some((priority, item)) = other_binomial.pop() {
+                        binomial.push(priority, item);
+                    }
+                }
+                while !other_brodal.is_empty() {
+                    if let Some((priority, item)) = other_brodal.pop() {
+                        brodal.push(priority, item);
+                    }
+                }
+                while !other_fibonacci.is_empty() {
+                    if let Some((priority, item)) = other_fibonacci.pop() {
+                        fibonacci.push(priority, item);
+                    }
+                }
+                while !other_pairing.is_empty() {
+                    if let Some((priority, item)) = other_pairing.pop() {
+                        pairing.push(priority, item);
+                    }
+                }
+                while !other_rank_pairing.is_empty() {
+                    if let Some((priority, item)) = other_rank_pairing.pop() {
+                        rank_pairing.push(priority, item);
+                    }
+                }
+                while !other_skew.is_empty() {
+                    if let Some((priority, item)) = other_skew.pop() {
+                        skew.push(priority, item);
+                    }
+                }
+                while !other_strict.is_empty() {
+                    if let Some((priority, item)) = other_strict.pop() {
+                        strict.push(priority, item);
+                    }
+                }
+                while !other_twothree.is_empty() {
+                    if let Some((priority, item)) = other_twothree.pop() {
+                        twothree.push(priority, item);
                     }
                 }
             }
@@ -515,15 +846,49 @@ fn verify_very_long_sequence_stress() {
 
         // Periodically verify lengths match
         if kani::any::<bool>() {
-            let len = heaps[0].len();
-            for heap in heaps.iter() {
-                assert!(
-                    heap.len() == len,
-                    "Lengths don't match: {} vs {}",
-                    heap.len(),
-                    len
-                );
-            }
+            let len = binomial.len();
+            assert!(
+                brodal.len() == len,
+                "Lengths don't match: {} vs {}",
+                brodal.len(),
+                len
+            );
+            assert!(
+                fibonacci.len() == len,
+                "Lengths don't match: {} vs {}",
+                fibonacci.len(),
+                len
+            );
+            assert!(
+                pairing.len() == len,
+                "Lengths don't match: {} vs {}",
+                pairing.len(),
+                len
+            );
+            assert!(
+                rank_pairing.len() == len,
+                "Lengths don't match: {} vs {}",
+                rank_pairing.len(),
+                len
+            );
+            assert!(
+                skew.len() == len,
+                "Lengths don't match: {} vs {}",
+                skew.len(),
+                len
+            );
+            assert!(
+                strict.len() == len,
+                "Lengths don't match: {} vs {}",
+                strict.len(),
+                len
+            );
+            assert!(
+                twothree.len() == len,
+                "Lengths don't match: {} vs {}",
+                twothree.len(),
+                len
+            );
         }
     }
 }

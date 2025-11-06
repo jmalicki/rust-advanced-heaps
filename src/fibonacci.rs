@@ -409,17 +409,15 @@ impl<T, P: Ord> FibonacciHeap<T, P> {
     unsafe fn verify_child_list(&self, start: NonNull<Node<T, P>>, parent: NonNull<Node<T, P>>) {
         let mut current = start;
         let stop = start;
-        let parent_priority = (*parent.as_ptr()).priority;
+        let parent_priority = &(*parent.as_ptr()).priority;
         let mut child_count = 0;
 
         loop {
             // Heap property: parent <= child
-            let child_priority = (*current.as_ptr()).priority;
+            let child_priority = &(*current.as_ptr()).priority;
             assert!(
                 parent_priority <= child_priority,
-                "Heap property violated: parent priority {:?} > child priority {:?}",
-                parent_priority,
-                child_priority
+                "Heap property violated: parent priority > child priority"
             );
 
             // Parent-child consistency
@@ -619,9 +617,7 @@ impl<T, P: Ord> FibonacciHeap<T, P> {
             // Verify heap property after linking
             assert!(
                 (*y.as_ptr()).priority >= (*x.as_ptr()).priority,
-                "Heap property violated after link: child priority {:?} < parent priority {:?}",
-                (*y.as_ptr()).priority,
-                (*x.as_ptr()).priority
+                "Heap property violated after link: child priority < parent priority"
             );
         }
     }
