@@ -41,6 +41,9 @@
 use crate::traits::{Handle, Heap, HeapError};
 use std::ptr::{self, NonNull};
 
+#[cfg(kani)]
+use kani;
+
 /// Handle to an element in a Fibonacci heap
 ///
 /// Note: This handle is tied to a specific heap instance. Using it with a different
@@ -175,6 +178,14 @@ impl<T, P: Ord> Heap<T, P> for FibonacciHeap<T, P> {
         }
 
         self.len += 1;
+
+        #[cfg(kani)]
+        {
+            unsafe {
+                self.verify_invariants();
+            }
+        }
+
         FibonacciHandle {
             node: node_ptr.as_ptr() as *const (),
         }
@@ -243,6 +254,12 @@ impl<T, P: Ord> Heap<T, P> for FibonacciHeap<T, P> {
             drop(Box::from_raw(node));
 
             self.len -= 1;
+
+            #[cfg(kani)]
+            {
+                self.verify_invariants();
+            }
+
             Some((priority, item))
         }
     }
@@ -282,6 +299,14 @@ impl<T, P: Ord> Heap<T, P> for FibonacciHeap<T, P> {
             self.cut(node_ptr);
             self.cascading_cut((*node).parent);
         }
+
+        #[cfg(kani)]
+        {
+            unsafe {
+                self.verify_invariants();
+            }
+        }
+
         Ok(())
     }
 
@@ -319,10 +344,151 @@ impl<T, P: Ord> Heap<T, P> for FibonacciHeap<T, P> {
             other.min = None;
             other.len = 0;
         }
+
+        #[cfg(kani)]
+        {
+            unsafe {
+                self.verify_invariants();
+            }
+        }
     }
 }
 
 impl<T, P: Ord> FibonacciHeap<T, P> {
+    /// Verifies Fibonacci heap invariants (for Kani verification)
+    ///
+    /// Checks:
+    /// - Heap property: parent priority <= child priority
+    /// - Degree invariant: After consolidation, at most one tree of each degree
+    /// - Marking rule: A node can lose at most one child before being cut
+    /// - Circular list consistency: Roots and children are in circular doubly-linked lists
+    /// - Parent-child consistency: Bidirectional links are correct
+    #[cfg(kani)]
+    unsafe fn verify_invariants(&self) {
+        if let Some(min_ptr) = self.min {
+            self.verify_root_list(min_ptr);
+            self.verify_degree_invariant(min_ptr);
+        }
+    }
+
+    /// Verifies the root list is a circular doubly-linked list
+    #[cfg(kani)]
+    unsafe fn verify_root_list(&self, start: NonNull<Node<T, P>>) {
+        let mut current = start;
+        let stop = start;
+
+        loop {
+            // Verify node is a root (no parent)
+            kani::assert!(
+                (*current.as_ptr()).parent.is_none(),
+                "Root list contains non-root node"
+            );
+
+            // Verify circular list consistency
+            let left = (*current.as_ptr()).left;
+            let right = (*current.as_ptr()).right;
+            kani::assert!(
+                (*left.as_ptr()).right == current && (*right.as_ptr()).left == current,
+                "Root list circular links are inconsistent"
+            );
+
+            // Verify and check children recursively
+            if let Some(child) = (*current.as_ptr()).child {
+                self.verify_child_list(child, current);
+            }
+
+            current = right;
+            if current == stop {
+                break;
+            }
+        }
+    }
+
+    /// Verifies a child list and the heap property
+    #[cfg(kani)]
+    unsafe fn verify_child_list(&self, start: NonNull<Node<T, P>>, parent: NonNull<Node<T, P>>) {
+        let mut current = start;
+        let stop = start;
+        let parent_priority = (*parent.as_ptr()).priority;
+        let mut child_count = 0;
+
+        loop {
+            // Heap property: parent <= child
+            let child_priority = (*current.as_ptr()).priority;
+            kani::assert!(
+                parent_priority <= child_priority,
+                "Heap property violated: parent priority {} > child priority {}",
+                parent_priority,
+                child_priority
+            );
+
+            // Parent-child consistency
+            kani::assert!(
+                (*current.as_ptr()).parent == Some(parent),
+                "Parent-child consistency violated: child's parent does not match"
+            );
+
+            // Circular list consistency
+            let left = (*current.as_ptr()).left;
+            let right = (*current.as_ptr()).right;
+            kani::assert!(
+                (*left.as_ptr()).right == current && (*right.as_ptr()).left == current,
+                "Child list circular links are inconsistent"
+            );
+
+            // Marking rule: If node is marked, it must have a parent (non-root)
+            if (*current.as_ptr()).marked {
+                kani::assert!(
+                    (*current.as_ptr()).parent.is_some(),
+                    "Marked node must have a parent (roots cannot be marked)"
+                );
+            }
+
+            child_count += 1;
+
+            // Recursively verify grandchildren
+            if let Some(grandchild) = (*current.as_ptr()).child {
+                self.verify_child_list(grandchild, current);
+            }
+
+            current = right;
+            if current == stop {
+                break;
+            }
+        }
+
+        // Verify degree field matches actual number of children
+        kani::assert!(
+            (*parent.as_ptr()).degree == child_count,
+            "Degree field mismatch: stored degree {} != actual child count {}",
+            (*parent.as_ptr()).degree,
+            child_count
+        );
+    }
+
+    /// Verifies degree invariant: at most one tree of each degree
+    #[cfg(kani)]
+    unsafe fn verify_degree_invariant(&self, start: NonNull<Node<T, P>>) {
+        let mut current = start;
+        let stop = start;
+        let mut degrees_seen = std::collections::HashSet::new();
+
+        loop {
+            let degree = (*current.as_ptr()).degree;
+            kani::assert!(
+                !degrees_seen.contains(&degree),
+                "Degree invariant violated: multiple trees with degree {}",
+                degree
+            );
+            degrees_seen.insert(degree);
+
+            current = (*current.as_ptr()).right;
+            if current == stop {
+                break;
+            }
+        }
+    }
+
     /// Consolidates the heap by linking trees of the same degree
     ///
     /// **Time Complexity**: O(log n) worst-case, but O(1) amortized per insert
@@ -410,6 +576,14 @@ impl<T, P: Ord> FibonacciHeap<T, P> {
                 }
             }
         }
+
+        #[cfg(kani)]
+        {
+            // After consolidation, degree invariant should hold
+            unsafe {
+                self.verify_degree_invariant(self.min.unwrap());
+            }
+        }
     }
 
     /// Links node y as a child of node x
@@ -439,6 +613,17 @@ impl<T, P: Ord> FibonacciHeap<T, P> {
         }
 
         (*x.as_ptr()).degree += 1;
+
+        #[cfg(kani)]
+        {
+            // Verify heap property after linking
+            kani::assert!(
+                (*y.as_ptr()).priority >= (*x.as_ptr()).priority,
+                "Heap property violated after link: child priority {} < parent priority {}",
+                (*y.as_ptr()).priority,
+                (*x.as_ptr()).priority
+            );
+        }
     }
 
     /// Cuts node from its parent and adds it to the root list
@@ -481,6 +666,19 @@ impl<T, P: Ord> FibonacciHeap<T, P> {
 
         (*node.as_ptr()).parent = None;
         (*node.as_ptr()).marked = false;
+
+        #[cfg(kani)]
+        {
+            // Verify node is now a root after cut
+            kani::assert!(
+                (*node.as_ptr()).parent.is_none(),
+                "Node should be root after cut"
+            );
+            kani::assert!(
+                !(*node.as_ptr()).marked,
+                "Node should not be marked after cut (roots cannot be marked)"
+            );
+        }
     }
 
     /// Performs cascading cut on parent if it's marked
@@ -501,6 +699,21 @@ impl<T, P: Ord> FibonacciHeap<T, P> {
     /// **Fibonacci Property**: This maintains the property that a tree with root
     /// degree k has at least F_{k+2} nodes, which bounds the maximum degree.
     unsafe fn cascading_cut(&mut self, parent_opt: Option<NonNull<Node<T, P>>>) {
+        self.cascading_cut_impl(parent_opt, 0);
+    }
+
+    /// Internal implementation of cascading cut with depth tracking
+    #[cfg(kani)]
+    unsafe fn cascading_cut_impl(&mut self, parent_opt: Option<NonNull<Node<T, P>>>, depth: usize) {
+        const MAX_CASCADE_DEPTH: usize = 100; // Reasonable bound for Kani verification
+
+        kani::assert!(
+            depth <= MAX_CASCADE_DEPTH,
+            "Cascade depth exceeded maximum: {} > {}",
+            depth,
+            MAX_CASCADE_DEPTH
+        );
+
         if let Some(parent_ptr) = parent_opt {
             let parent = parent_ptr.as_ptr();
 
@@ -516,7 +729,36 @@ impl<T, P: Ord> FibonacciHeap<T, P> {
                     self.cut(parent_ptr);
                     // Continue cascading upward (recursive)
                     // The cascade stops at roots (they can't be marked)
-                    self.cascading_cut((*parent).parent);
+                    self.cascading_cut_impl((*parent).parent, depth + 1);
+                }
+            }
+            // If parent is root, no cascading needed (roots can't be marked)
+        }
+    }
+
+    /// Internal implementation of cascading cut without depth tracking
+    #[cfg(not(kani))]
+    unsafe fn cascading_cut_impl(
+        &mut self,
+        parent_opt: Option<NonNull<Node<T, P>>>,
+        _depth: usize,
+    ) {
+        if let Some(parent_ptr) = parent_opt {
+            let parent = parent_ptr.as_ptr();
+
+            if (*parent).parent.is_some() {
+                // Parent is not a root (only non-roots can be marked)
+                if !(*parent).marked {
+                    // Parent hasn't lost a child yet: mark it
+                    // Next time it loses a child, it will be cut (cascade)
+                    (*parent).marked = true;
+                } else {
+                    // Parent already marked (has lost a child): cut it now (cascade)
+                    // This prevents nodes from losing too many children
+                    self.cut(parent_ptr);
+                    // Continue cascading upward (recursive)
+                    // The cascade stops at roots (they can't be marked)
+                    self.cascading_cut_impl((*parent).parent, 0);
                 }
             }
             // If parent is root, no cascading needed (roots can't be marked)
