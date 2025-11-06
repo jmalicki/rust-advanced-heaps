@@ -42,25 +42,7 @@ See `tests/kani_proofs.rs` for examples including:
 - `verify_find_min_correct` - verifies find_min returns minimum
 - `verify_decrease_key_decreases` - verifies decrease_key correctness
 
-### 2. Creusot
-
-**Creusot** uses Why3 for verification of Rust programs.
-
-- ✅ Mathematical proofs via Why3
-- ⚠️ Requires significant code annotations
-- ⚠️ May need refactoring for unsafe pointer code
-
-#### Creusot Installation
-
-See [Creusot documentation](https://github.com/creusot-rs/creusot) for setup.
-
-#### Creusot Usage
-
-```bash
-cargo creusot
-```
-
-### 3. Big-O Empirical Complexity Tests
+### 2. Big-O Empirical Complexity Tests
 
 **Big-O Tests** empirically verify that heap operations meet their theoretical
 time complexity bounds by measuring actual runtime with varying input sizes.
@@ -101,14 +83,13 @@ See `tests/big_o_proofs.rs` for implementation details.
 | Tool | Setup Difficulty | Code Changes | Strengths |
 |------|------------------|--------------|-----------|
 | **Kani** | ⭐ Easy | Minimal | Model checking, easy to start |
-| **Creusot** | ⭐⭐⭐ Hard | Significant changes | Mathematical proofs via Why3 |
+| **Creusot** | ⭐⭐⭐ Hard | Significant changes | Mathematical proofs via Why3 (not used) |
 | **Verus** | ⭐⭐⭐⭐ Very Hard | Rewrite needed | Full verification, new language (not used) |
 | **Big-O Tests** | ⭐ Easy | None | Empirical performance validation |
 
 ## Recommended Approach
 
 1. **Start with Kani** - easiest to set up, works with existing code
-2. **Consider Creusot** - for deeper verification, but requires more effort
 
 ## Running Proofs
 
@@ -174,7 +155,6 @@ jobs:
 ## Configuration
 
 - `kani.toml` - Kani configuration (unwind limits, timeouts)
-- `.creusot.toml` - Creusot configuration
 
 ## Notes
 
@@ -188,6 +168,11 @@ jobs:
 
 - **Performance**: Verification can be slow for complex invariants. Start with
   simple properties and build up.
+
+- **Creusot**: Creusot uses Why3 for mathematical proofs but requires
+  significant code annotations and refactoring for unsafe pointer code. The
+  annotation burden made it less suitable for this project compared to Kani's
+  model-checking approach.
 
 - **Verus**: Verus is a verified Rust language variant that requires rewriting
   code in a Verus dialect. While it provides full functional verification, the

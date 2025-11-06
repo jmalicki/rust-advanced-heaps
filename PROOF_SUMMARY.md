@@ -53,7 +53,6 @@ Verify the specific invariants of each heap implementation:
 - `tests/kani_proofs.rs` - Legacy simple examples (updated)
 - `build.rs` - Allows `cfg(kani)` attributes
 - `kani.toml` - Kani configuration
-- `.creusot.toml` - Creusot configuration
 - `PROOF_SETUP.md` - Quick reference guide
 - `PROOF_SYSTEMS.md` - Comprehensive documentation (updated)
 
