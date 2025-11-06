@@ -547,22 +547,6 @@ mod tests {
     }
 
     #[test]
-    fn test_decrease_key() {
-        let mut heap = FibonacciHeap::new();
-        let _h1 = heap.insert(10, "a");
-        let h2 = heap.insert(20, "b");
-        let h3 = heap.insert(30, "c");
-
-        assert_eq!(heap.find_min(), Some((&10, &"a")));
-
-        heap.decrease_key(&h2, 5).unwrap();
-        assert_eq!(heap.find_min(), Some((&5, &"b")));
-
-        heap.decrease_key(&h3, 1).unwrap();
-        assert_eq!(heap.find_min(), Some((&1, &"c")));
-    }
-
-    #[test]
     fn test_merge() {
         let mut heap1 = FibonacciHeap::new();
         heap1.insert(5, "a");

@@ -28,8 +28,8 @@ jobs:
           # Note: Using || echo allows CI to pass during development while proofs are being refined
           # TODO: Remove fallback once all proofs are stable and passing
           echo "Running basic trait-level proofs..."
-          cargo kani --tests trait_level_proofs --harness verify_push_increments_len_binomial || echo "Proof failed - this is expected during development"
+          cargo kani proofs/kani/trait_level_proofs.rs --harness verify_push_increments_len_binomial || echo "Proof failed - this is expected during development"
           echo "Running implementation-specific proofs..."
-          cargo kani --tests implementation_proofs --harness verify_binomial_heap_property_after_decrease_key || echo "Proof failed - this is expected during development"
+          cargo kani proofs/kani/implementation_proofs.rs --harness verify_binomial_heap_property_after_decrease_key || echo "Proof failed - this is expected during development"
           echo "Running legacy proofs..."
-          cargo kani --tests kani_proofs --harness verify_insert_increments_len || echo "Proof failed - this is expected during development"
+          cargo kani proofs/kani/kani_proofs.rs --harness verify_insert_increments_len || echo "Proof failed - this is expected during development"

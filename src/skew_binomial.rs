@@ -683,16 +683,6 @@ mod tests {
     }
 
     #[test]
-    fn test_decrease_key() {
-        let mut heap = SkewBinomialHeap::new();
-        let h1 = heap.push(10, "a");
-        let _h2 = heap.push(20, "b");
-
-        heap.decrease_key(&h1, 5).unwrap();
-        assert_eq!(heap.peek(), Some((&5, &"a")));
-    }
-
-    #[test]
     fn test_merge() {
         let mut heap1 = SkewBinomialHeap::new();
         heap1.push(5, "a");

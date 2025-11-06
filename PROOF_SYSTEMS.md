@@ -35,7 +35,7 @@ cargo kani
 
 #### Example Proofs
 
-See `tests/kani_proofs.rs` for examples including:
+See `proofs/kani/kani_proofs.rs` for examples including:
 
 - `verify_insert_increments_len` - ensures insert always increments length
 - `verify_pop_decrements_len` - ensures pop decrements length
@@ -101,34 +101,34 @@ cargo install --locked kani-verifier
 cargo kani setup
 
 # Run trait-level proofs (verify Heap trait contract)
-cargo kani --tests trait_level_proofs
+cargo kani proofs/kani/trait_level_proofs.rs
 
 # Run implementation-specific proofs (verify heap invariants)
-cargo kani --tests implementation_proofs
+cargo kani proofs/kani/implementation_proofs.rs
 
 # Run all proofs
-cargo kani --tests kani_proofs --tests trait_level_proofs --tests implementation_proofs
+cargo kani proofs/kani/*.rs
 
 # With more unwind iterations (for complex operations)
-cargo kani --tests trait_level_proofs -- --unwind 20
+cargo kani proofs/kani/trait_level_proofs.rs -- --unwind 20
 ```
 
 ### Proof Structure
 
-1. **Trait-Level Proofs** (`tests/trait_level_proofs.rs`):
+1. **Trait-Level Proofs** (`proofs/kani/trait_level_proofs.rs` and `proofs/kani/generic_trait_proofs.rs`):
    - Verify that ALL heap implementations satisfy the Heap trait contract
    - Properties like: push increments length, pop decrements length,
      find_min is correct
    - Tests BinomialHeap, FibonacciHeap, and PairingHeap
 
-2. **Implementation-Specific Proofs** (`tests/implementation_proofs.rs`):
+2. **Implementation-Specific Proofs** (`proofs/kani/implementation_proofs.rs`):
    - Verify specific invariants of each heap implementation
    - Binomial Heap: Degree invariant, heap property
    - Fibonacci Heap: Heap property, cascading cuts, consolidation
    - Pairing Heap: Heap property, structure maintenance
    - Cross-implementation consistency
 
-3. **Legacy Proofs** (`tests/kani_proofs.rs`):
+3. **Legacy Proofs** (`proofs/kani/kani_proofs.rs`):
    - Simpler examples for getting started
 
 ## CI Integration
@@ -149,7 +149,7 @@ jobs:
           cargo install --locked kani-verifier
           cargo kani setup
       - name: Run Kani proofs
-        run: cargo kani --tests kani_proofs
+        run: cargo kani proofs/kani/*.rs
 ```
 
 ## Configuration

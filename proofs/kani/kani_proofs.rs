@@ -4,8 +4,8 @@
 //! by checking all possible executions up to certain bounds.
 //!
 //! For comprehensive proofs, see:
-//! - tests/trait_level_proofs.rs - Heap trait interface proofs
-//! - tests/implementation_proofs.rs - Implementation-specific invariant proofs
+//! - proofs/kani/generic_trait_proofs.rs - Heap trait interface proofs
+//! - proofs/kani/implementation_proofs.rs - Implementation-specific invariant proofs
 //!
 //! To run these proofs:
 //!   cargo kani

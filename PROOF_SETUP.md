@@ -5,7 +5,7 @@ finding bugs in the heap implementations.
 
 ## Structure
 
-### 1. Trait-Level Proofs (`tests/trait_level_proofs.rs`)
+### 1. Trait-Level Proofs (`proofs/kani/trait_level_proofs.rs` and `proofs/kani/generic_trait_proofs.rs`)
 
 These proofs verify that **ALL** heap implementations satisfy the `Heap` trait contract:
 
@@ -20,7 +20,7 @@ These proofs verify that **ALL** heap implementations satisfy the `Heap` trait c
 
 **Tested implementations**: BinomialHeap, FibonacciHeap, PairingHeap
 
-### 2. Implementation-Specific Proofs (`tests/implementation_proofs.rs`)
+### 2. Implementation-Specific Proofs (`proofs/kani/implementation_proofs.rs`)
 
 These proofs verify the specific invariants of each heap implementation:
 
@@ -72,7 +72,7 @@ cargo kani --tests kani_proofs --tests trait_level_proofs --tests implementation
 
 ```bash
 # Example: Verify binomial heap push increments length
-cargo kani --tests --harness verify_push_increments_len_binomial
+cargo kani proofs/kani/trait_level_proofs.rs --harness verify_push_increments_len_binomial
 ```
 
 ## Configuration

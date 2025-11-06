@@ -4,7 +4,7 @@
 
 ✅ **Two-level proof structure** for finding bugs:
 
-### 1. Trait-Level Proofs (`tests/trait_level_proofs.rs`)
+### 1. Trait-Level Proofs (`proofs/kani/trait_level_proofs.rs` and `proofs/kani/generic_trait_proofs.rs`)
 
 Verify that **ALL** heap implementations satisfy the Heap trait contract:
 
@@ -20,7 +20,7 @@ Verify that **ALL** heap implementations satisfy the Heap trait contract:
 **Coverage**: Tests BinomialHeap, FibonacciHeap, and PairingHeap for each
 property.
 
-### 2. Implementation-Specific Proofs (`tests/implementation_proofs.rs`)
+### 2. Implementation-Specific Proofs (`proofs/kani/implementation_proofs.rs`)
 
 Verify the specific invariants of each heap implementation:
 
@@ -48,9 +48,10 @@ Verify the specific invariants of each heap implementation:
 
 ## Files Created
 
-- `tests/trait_level_proofs.rs` - Trait-level proofs for Heap interface
-- `tests/implementation_proofs.rs` - Implementation-specific invariant proofs
-- `tests/kani_proofs.rs` - Legacy simple examples (updated)
+- `proofs/kani/trait_level_proofs.rs` - Trait-level proofs for Heap interface
+- `proofs/kani/generic_trait_proofs.rs` - Generic trait-level proofs
+- `proofs/kani/implementation_proofs.rs` - Implementation-specific invariant proofs
+- `proofs/kani/kani_proofs.rs` - Legacy simple examples
 - `build.rs` - Allows `cfg(kani)` attributes
 - `kani.toml` - Kani configuration
 - `PROOF_SETUP.md` - Quick reference guide
@@ -69,13 +70,13 @@ cargo kani setup
 
 ```bash
 # Run trait-level proofs (verify Heap trait contract)
-cargo kani --tests trait_level_proofs
+cargo kani proofs/kani/trait_level_proofs.rs
 
 # Run implementation-specific proofs (verify heap invariants)
-cargo kani --tests implementation_proofs
+cargo kani proofs/kani/implementation_proofs.rs
 
 # Run all proofs
-cargo kani --tests kani_proofs --tests trait_level_proofs --tests implementation_proofs
+cargo kani proofs/kani/*.rs
 ```
 
 ### If Proofs Fail
