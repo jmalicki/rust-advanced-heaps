@@ -32,34 +32,38 @@ jobs:
 
       - name: Kani codegen sanity (fast compile)
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           date
           # Quick compile-only pass to surface build errors fast
-          cargo kani --tests --harness verify_push_increments_len_binomial --only-codegen 2>&1 | tee kani_codegen.log
+          # Capture full output to log, show only summary in console
+          cargo kani --tests --harness verify_push_increments_len_binomial --only-codegen 2>&1 | tee kani_codegen.log | tail -n 50
           date
 
       - name: Run Kani – basic trait-level proof
         timeout-minutes: 30
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           date
-          cargo kani --tests --harness verify_push_increments_len_binomial 2>&1 | tee kani_basic.log
+          # Capture full output to log, show only summary in console
+          cargo kani --tests --harness verify_push_increments_len_binomial 2>&1 | tee kani_basic.log | tail -n 50
           date
 
       - name: Run Kani – implementation-specific proof (binomial decrease_key)
         timeout-minutes: 30
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           date
-          cargo kani --tests --harness verify_binomial_heap_property_after_decrease_key 2>&1 | tee kani_impl.log
+          # Capture full output to log, show only summary in console
+          cargo kani --tests --harness verify_binomial_heap_property_after_decrease_key 2>&1 | tee kani_impl.log | tail -n 50
           date
 
       - name: Run Kani – legacy simple proof
         timeout-minutes: 30
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           date
-          cargo kani --tests --harness verify_insert_increments_len 2>&1 | tee kani_legacy.log
+          # Capture full output to log, show only summary in console
+          cargo kani --tests --harness verify_insert_increments_len 2>&1 | tee kani_legacy.log | tail -n 50
           date
 
       - name: Upload Kani logs
