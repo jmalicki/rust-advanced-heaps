@@ -411,7 +411,7 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
         // 2-3 Property: Each internal node has 2 or 3 children (leaves have 0)
         if num_children > 0 {
             // Internal node: must have 2 or 3 children
-            kani::assert!(
+            assert!(
                 num_children == 2 || num_children == 3,
                 "2-3 property violated: internal node has {} children (must be 2 or 3)",
                 num_children
@@ -434,13 +434,13 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
                 let child_ptr = child.as_ptr();
 
                 // Parent-child consistency: if A is child of B, then B is parent of A
-                kani::assert!(
+                assert!(
                     (*child_ptr).parent == Some(node),
                     "Parent-child consistency violated: child's parent does not match"
                 );
 
                 // Heap Property: parent priority <= child priority
-                kani::assert!(
+                assert!(
                     (*node_ptr).priority <= (*child_ptr).priority,
                     "Heap property violated: parent priority {} > child priority {}",
                     (*node_ptr).priority,
@@ -463,7 +463,7 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
                 if num_children == 2 {
                     // Parent has degree 2: children should be roots of T(1) trees (degree 1)
                     // This enforces the paper's hierarchical structure
-                    kani::assert!(
+                    assert!(
                         child_degree == 1,
                         "Degree constraint violated (paper): parent has degree 2, but child has degree {} (should be 1 for T(1) tree)",
                         child_degree
@@ -471,7 +471,7 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
                 } else if num_children == 3 {
                     // Parent has degree 3: children should be roots of T(2) trees (degree 2)
                     // This enforces the paper's hierarchical structure
-                    kani::assert!(
+                    assert!(
                         child_degree == 2,
                         "Degree constraint violated (paper): parent has degree 3, but child has degree {} (should be 2 for T(2) tree)",
                         child_degree
@@ -491,7 +491,7 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
         {
             // Verify that all non-None children are accounted for
             let actual_siblings = (*node_ptr).children.iter().filter(|c| c.is_some()).count();
-            kani::assert!(
+            assert!(
                 actual_siblings == sibling_count,
                 "Degree constraint violated: sibling count mismatch (actual: {}, expected: {})",
                 actual_siblings,
@@ -501,7 +501,7 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
             // Degree Constraint (from paper): For a node with degree d (2 or 3), all children
             // should be valid and follow the degree i-1 pattern
             if num_children > 0 {
-                kani::assert!(
+                assert!(
                     sibling_count == num_children,
                     "Degree constraint violated: node has {} children but {} are valid siblings",
                     num_children,
@@ -648,7 +648,7 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
             let num_children_after = (*node_ptr).children.iter().filter(|c| c.is_some()).count();
             if num_children_after > 0 {
                 // Internal node: must have 2 or 3 children
-                kani::assert!(
+                assert!(
                     num_children_after == 2 || num_children_after == 3,
                     "2-3 property violated after maintain_structure: node has {} children",
                     num_children_after
@@ -704,7 +704,7 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
             #[cfg(kani)]
             {
                 path_length += 1;
-                kani::assert!(
+                assert!(
                     path_length <= MAX_WORKSPACE_SIZE,
                     "Workspace constraint violated in bubble_up: path length {} exceeds bound {}",
                     path_length,
@@ -731,7 +731,7 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
                 // So after swap: node.priority >= parent.priority (heap property satisfied)
                 let node_priority_after = (*node_ptr).priority;
                 let parent_priority_after = (*parent_ptr).priority;
-                kani::assert!(
+                assert!(
                     parent_priority_after <= node_priority_after,
                     "Workspace constraint violated: heap property not maintained after swap in bubble_up"
                 );
@@ -760,7 +760,7 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
             if let Some(parent) = (*node.as_ptr()).parent {
                 let node_priority = (*node.as_ptr()).priority;
                 let parent_priority = (*parent.as_ptr()).priority;
-                kani::assert!(
+                assert!(
                     parent_priority <= node_priority,
                     "Heap property violated after bubble_up: parent {} > child {}",
                     parent_priority,

@@ -379,7 +379,7 @@ impl<T, P: Ord> FibonacciHeap<T, P> {
 
         loop {
             // Verify node is a root (no parent)
-            kani::assert!(
+            assert!(
                 (*current.as_ptr()).parent.is_none(),
                 "Root list contains non-root node"
             );
@@ -387,7 +387,7 @@ impl<T, P: Ord> FibonacciHeap<T, P> {
             // Verify circular list consistency
             let left = (*current.as_ptr()).left;
             let right = (*current.as_ptr()).right;
-            kani::assert!(
+            assert!(
                 (*left.as_ptr()).right == current && (*right.as_ptr()).left == current,
                 "Root list circular links are inconsistent"
             );
@@ -415,7 +415,7 @@ impl<T, P: Ord> FibonacciHeap<T, P> {
         loop {
             // Heap property: parent <= child
             let child_priority = (*current.as_ptr()).priority;
-            kani::assert!(
+            assert!(
                 parent_priority <= child_priority,
                 "Heap property violated: parent priority {} > child priority {}",
                 parent_priority,
@@ -423,7 +423,7 @@ impl<T, P: Ord> FibonacciHeap<T, P> {
             );
 
             // Parent-child consistency
-            kani::assert!(
+            assert!(
                 (*current.as_ptr()).parent == Some(parent),
                 "Parent-child consistency violated: child's parent does not match"
             );
@@ -431,14 +431,14 @@ impl<T, P: Ord> FibonacciHeap<T, P> {
             // Circular list consistency
             let left = (*current.as_ptr()).left;
             let right = (*current.as_ptr()).right;
-            kani::assert!(
+            assert!(
                 (*left.as_ptr()).right == current && (*right.as_ptr()).left == current,
                 "Child list circular links are inconsistent"
             );
 
             // Marking rule: If node is marked, it must have a parent (non-root)
             if (*current.as_ptr()).marked {
-                kani::assert!(
+                assert!(
                     (*current.as_ptr()).parent.is_some(),
                     "Marked node must have a parent (roots cannot be marked)"
                 );
@@ -458,7 +458,7 @@ impl<T, P: Ord> FibonacciHeap<T, P> {
         }
 
         // Verify degree field matches actual number of children
-        kani::assert!(
+        assert!(
             (*parent.as_ptr()).degree == child_count,
             "Degree field mismatch: stored degree {} != actual child count {}",
             (*parent.as_ptr()).degree,
@@ -475,7 +475,7 @@ impl<T, P: Ord> FibonacciHeap<T, P> {
 
         loop {
             let degree = (*current.as_ptr()).degree;
-            kani::assert!(
+            assert!(
                 !degrees_seen.contains(&degree),
                 "Degree invariant violated: multiple trees with degree {}",
                 degree
@@ -617,7 +617,7 @@ impl<T, P: Ord> FibonacciHeap<T, P> {
         #[cfg(kani)]
         {
             // Verify heap property after linking
-            kani::assert!(
+            assert!(
                 (*y.as_ptr()).priority >= (*x.as_ptr()).priority,
                 "Heap property violated after link: child priority {} < parent priority {}",
                 (*y.as_ptr()).priority,
@@ -670,11 +670,11 @@ impl<T, P: Ord> FibonacciHeap<T, P> {
         #[cfg(kani)]
         {
             // Verify node is now a root after cut
-            kani::assert!(
+            assert!(
                 (*node.as_ptr()).parent.is_none(),
                 "Node should be root after cut"
             );
-            kani::assert!(
+            assert!(
                 !(*node.as_ptr()).marked,
                 "Node should not be marked after cut (roots cannot be marked)"
             );
@@ -707,7 +707,7 @@ impl<T, P: Ord> FibonacciHeap<T, P> {
     unsafe fn cascading_cut_impl(&mut self, parent_opt: Option<NonNull<Node<T, P>>>, depth: usize) {
         const MAX_CASCADE_DEPTH: usize = 100; // Reasonable bound for Kani verification
 
-        kani::assert!(
+        assert!(
             depth <= MAX_CASCADE_DEPTH,
             "Cascade depth exceeded maximum: {} > {}",
             depth,
