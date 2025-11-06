@@ -598,3 +598,6 @@ impl<T, P: Ord> PairingHeap<T, P> {
         drop(Box::from_raw(node_ptr));
     }
 }
+
+// Note: Most tests are in tests/generic_heap_tests.rs which provides comprehensive
+// test coverage for all heap implementations.

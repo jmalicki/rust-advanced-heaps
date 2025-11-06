@@ -10,6 +10,9 @@
 use crate::traits::{Handle, Heap, HeapError};
 use std::ptr::{self, NonNull};
 
+/// Type alias for compact node pointer storage
+type NodePtr<T, P> = Option<NonNull<Node<T, P>>>;
+
 /// Handle to an element in a 2-3 heap
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct TwoThreeHandle {
@@ -18,26 +21,11 @@ pub struct TwoThreeHandle {
 
 impl Handle for TwoThreeHandle {}
 
-// Type alias for children array to avoid clippy type-complexity warnings
-//
-// Capacity choice (4):
-// - In a 2-3 heap, each internal node has exactly 2 or 3 children (hence the name)
-// - Capacity 4 is needed for splits: when a node would have 4 children, it splits into two nodes
-// - Each node with 4 children is split into two nodes with 2 children each
-// - Stack allocation (4 slots) is sufficient since nodes never have >4 children before splitting
-//
-// Performance considerations:
-// - 4 is the minimum needed for correct operation (splits require temporarily holding 4 children)
-// - Stack allocation is fast and avoids heap allocation for this small, fixed-size array
-// - The choice of 4 is optimal: any less would cause incorrect behavior, any more wastes stack space
-// - With only 4 elements, finding the first None slot is fast (linear scan is O(1) for fixed size)
-type ChildrenArray<T, P> = [Option<NonNull<Node<T, P>>>; 4];
-
 struct Node<T, P> {
     item: T,
     priority: P,
-    parent: Option<NonNull<Node<T, P>>>,
-    children: ChildrenArray<T, P>, // 2 or 3 children typically, capacity 4 for splits
+    parent: NodePtr<T, P>,
+    children: Vec<NodePtr<T, P>>, // 2 or 3 children
 }
 
 /// 2-3 Heap
@@ -129,7 +117,7 @@ impl<T, P: Ord> Heap<T, P> for TwoThreeHeap<T, P> {
             item,
             priority,
             parent: None,
-            children: [None; 4], // Leaf node has no children (all slots None)
+            children: Vec::new(), // Leaf node has no children
         }));
 
         let node_ptr = unsafe { NonNull::new_unchecked(node) };
@@ -142,13 +130,7 @@ impl<T, P: Ord> Heap<T, P> for TwoThreeHeap<T, P> {
                     // Case 1: New node has smaller priority
                     // Make new node the root, old root becomes its child
                     // This maintains heap property: parent <= child
-                    // Find first None slot and insert there (fast for 4 elements)
-                    for slot in (*node_ptr.as_ptr()).children.iter_mut() {
-                        if slot.is_none() {
-                            *slot = Some(root_ptr);
-                            break;
-                        }
-                    }
+                    (*node_ptr.as_ptr()).children.push(Some(root_ptr));
                     (*root_ptr.as_ptr()).parent = Some(node_ptr);
                     self.root = Some(node_ptr);
                     self.min = Some(node_ptr);
@@ -377,13 +359,7 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
     unsafe fn insert_as_child(&mut self, parent: NonNull<Node<T, P>>, child: NonNull<Node<T, P>>) {
         let parent_ptr = parent.as_ptr();
         (*child.as_ptr()).parent = Some(parent);
-        // Find first None slot and insert there (fast for 4 elements)
-        for slot in (*parent_ptr).children.iter_mut() {
-            if slot.is_none() {
-                *slot = Some(child);
-                break;
-            }
-        }
+        (*parent_ptr).children.push(Some(child));
 
         // Maintain 2-3 structure (each internal node should have 2 or 3 children)
         self.maintain_structure(parent);
@@ -454,15 +430,11 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
                     let new_priority = ptr::read(&(*node_ptr).priority);
 
                     // Create new node with last 2 children
-                    let mut new_children_array = [None; 4];
-                    for (i, child) in new_children.into_iter().enumerate() {
-                        new_children_array[i] = Some(child);
-                    }
                     let new_node = Box::into_raw(Box::new(Node {
                         item: new_item,
                         priority: new_priority,
                         parent: (*node_ptr).parent, // Same parent initially
-                        children: new_children_array,
+                        children: new_children.into_iter().map(Some).collect(),
                     }));
 
                     let new_node_ptr = NonNull::new_unchecked(new_node);
@@ -473,11 +445,8 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
                     }
 
                     // Update original node to have 2 children (first 2)
-                    let mut updated_children = [None; 4];
-                    for (i, child) in children_vec.into_iter().enumerate() {
-                        updated_children[i] = Some(child);
-                    }
-                    (*node_ptr).children = updated_children;
+                    (*node_ptr).children = children_vec.into_iter().map(Some).collect();
+
                     // Add new node as sibling (child of original node's parent)
                     // This may cause parent to have 4 children, triggering cascade
                     if let Some(parent) = (*node_ptr).parent {
@@ -494,7 +463,7 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
                             item: root_item,
                             priority: root_priority,
                             parent: None,
-                            children: [Some(node), Some(new_node_ptr), None, None], // Both nodes as children
+                            children: vec![Some(node), Some(new_node_ptr)], // Both nodes as children
                         }));
                         let new_root_ptr = NonNull::new_unchecked(new_root);
                         (*node_ptr).parent = Some(new_root_ptr);
@@ -642,3 +611,6 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
         drop(Box::from_raw(node_ptr));
     }
 }
+
+// Note: Most tests are in tests/generic_heap_tests.rs which provides comprehensive
+// test coverage for all heap implementations.

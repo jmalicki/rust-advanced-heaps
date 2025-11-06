@@ -523,3 +523,6 @@ impl<T, P: Ord> FibonacciHeap<T, P> {
         }
     }
 }
+
+// Note: Most tests are in tests/generic_heap_tests.rs which provides comprehensive
+// test coverage for all heap implementations.
