@@ -32,6 +32,9 @@
 use crate::traits::{Handle, Heap, HeapError};
 use std::ptr::{self, NonNull};
 
+/// Type alias for compact node pointer storage
+type NodePtr<T, P> = Option<NonNull<Node<T, P>>>;
+
 /// Handle to an element in a Binomial heap
 ///
 /// Note: This handle is tied to a specific heap instance. Using it with a different
@@ -82,8 +85,8 @@ struct Node<T, P> {
 /// assert_eq!(heap.find_min(), Some((&1, &"item")));
 /// ```
 pub struct BinomialHeap<T, P: Ord> {
-    trees: Vec<Option<NonNull<Node<T, P>>>>, // Array indexed by degree
-    min: Option<NonNull<Node<T, P>>>,
+    trees: Vec<NodePtr<T, P>>, // Array indexed by degree
+    min: NodePtr<T, P>,
     len: usize,
     _phantom: std::marker::PhantomData<T>,
 }
