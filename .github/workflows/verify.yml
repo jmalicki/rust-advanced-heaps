@@ -10,6 +10,12 @@ jobs:
   kani:
     name: Kani Verification
     runs-on: ubuntu-latest
+    # Prevent auto-cancel on new pushes to the same ref while we diagnose
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: false
+    # Put an explicit cap so failures show as timeout rather than cancellation
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -24,14 +30,34 @@ jobs:
       - name: Build crate
         run: cargo build
 
-      - name: Run Kani proofs
+      - name: Kani codegen sanity (fast compile)
         run: |
-          # Run a sample of key proofs to verify the system works
-          # Proof files are now in tests/kani/ as integration tests
-          # Full proof suite can be run locally with: cargo kani --tests
-          echo "Running basic trait-level proofs..."
-          cargo kani --tests --harness verify_push_increments_len_binomial
-          echo "Running implementation-specific proofs..."
-          cargo kani --tests --harness verify_binomial_heap_property_after_decrease_key
-          echo "Running legacy proofs..."
-          cargo kani --tests --harness verify_insert_increments_len
+          set -euxo pipefail
+          date
+          # Quick compile-only pass to surface build errors fast
+          cargo kani --tests --harness verify_push_increments_len_binomial --only-codegen --verbose
+          date
+
+      - name: Run Kani – basic trait-level proof
+        timeout-minutes: 30
+        run: |
+          set -euxo pipefail
+          date
+          cargo kani --tests --harness verify_push_increments_len_binomial --verbose
+          date
+
+      - name: Run Kani – implementation-specific proof (binomial decrease_key)
+        timeout-minutes: 30
+        run: |
+          set -euxo pipefail
+          date
+          cargo kani --tests --harness verify_binomial_heap_property_after_decrease_key --verbose
+          date
+
+      - name: Run Kani – legacy simple proof
+        timeout-minutes: 30
+        run: |
+          set -euxo pipefail
+          date
+          cargo kani --tests --harness verify_insert_increments_len --verbose
+          date
