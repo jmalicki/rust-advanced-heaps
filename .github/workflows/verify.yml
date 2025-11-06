@@ -35,8 +35,7 @@ jobs:
           set -euxo pipefail
           date
           # Quick compile-only pass to surface build errors fast
-          # Capture full output to log, show only summary in console
-          cargo kani --tests --harness verify_push_increments_len_binomial --only-codegen 2>&1 | tee kani_codegen.log | tail -n 50
+          cargo kani --tests --harness verify_push_increments_len_binomial --only-codegen 2>&1 | tee kani_codegen.log
           date
 
       - name: Run Kani – basic trait-level proof
@@ -44,8 +43,7 @@ jobs:
         run: |
           set -euxo pipefail
           date
-          # Capture full output to log, show only summary in console
-          cargo kani --tests --harness verify_push_increments_len_binomial 2>&1 | tee kani_basic.log | tail -n 50
+          cargo kani --tests --harness verify_push_increments_len_binomial 2>&1 | tee kani_basic.log
           date
 
       - name: Run Kani – implementation-specific proof (binomial decrease_key)
@@ -53,8 +51,7 @@ jobs:
         run: |
           set -euxo pipefail
           date
-          # Capture full output to log, show only summary in console
-          cargo kani --tests --harness verify_binomial_heap_property_after_decrease_key 2>&1 | tee kani_impl.log | tail -n 50
+          cargo kani --tests --harness verify_binomial_heap_property_after_decrease_key 2>&1 | tee kani_impl.log
           date
 
       - name: Run Kani – legacy simple proof
@@ -62,8 +59,7 @@ jobs:
         run: |
           set -euxo pipefail
           date
-          # Capture full output to log, show only summary in console
-          cargo kani --tests --harness verify_insert_increments_len 2>&1 | tee kani_legacy.log | tail -n 50
+          cargo kani --tests --harness verify_insert_increments_len 2>&1 | tee kani_legacy.log
           date
 
       - name: Upload Kani logs
