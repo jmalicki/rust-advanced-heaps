@@ -210,17 +210,6 @@ impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
         }
     }
 
-    fn peek(&self) -> Option<(&P, &T)> {
-        self.find_min()
-    }
-
-    fn find_min(&self) -> Option<(&P, &T)> {
-        self.min.map(|min_ptr| unsafe {
-            let node = min_ptr.as_ptr();
-            (&(*node).priority, &(*node).item)
-        })
-    }
-
     fn pop(&mut self) -> Option<(P, T)> {
         self.delete_min()
     }

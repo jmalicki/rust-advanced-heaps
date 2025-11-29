@@ -21,13 +21,12 @@
 //! heap.push(5);
 //! heap.push(3);
 //! heap.push(7);
-//! assert_eq!(heap.peek(), Some(&3)); // min-heap, unlike BinaryHeap's max-heap
 //! assert_eq!(heap.pop(), Some(3));
 //!
 //! // But with decrease_key support!
 //! let handle = heap.push_with_handle(10);
 //! heap.decrease_key(&handle.0, 1);
-//! assert_eq!(heap.peek(), Some(&1));
+//! assert_eq!(heap.pop(), Some(1));
 //! ```
 
 use crate::Heap;
@@ -81,13 +80,6 @@ impl<T: Ord + Clone, H: Heap<T, T>> StdHeap<T, H> {
     pub fn push_with_handle(&mut self, item: T) -> (H::Handle, T) {
         let handle = self.push(item.clone());
         (handle, item)
-    }
-
-    /// Returns a reference to the smallest item without removing it
-    ///
-    /// This is equivalent to `BinaryHeap::peek`, but returns the minimum (not maximum).
-    pub fn peek(&self) -> Option<&T> {
-        self.heap.peek().map(|(_, item)| item)
     }
 
     /// Removes and returns the smallest item

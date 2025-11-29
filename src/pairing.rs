@@ -182,17 +182,6 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
         }
     }
 
-    fn peek(&self) -> Option<(&P, &T)> {
-        self.find_min()
-    }
-
-    fn find_min(&self) -> Option<(&P, &T)> {
-        self.root.map(|root_ptr| unsafe {
-            let node = root_ptr.as_ptr();
-            (&(*node).priority, &(*node).item)
-        })
-    }
-
     fn pop(&mut self) -> Option<(P, T)> {
         self.delete_min()
     }

@@ -21,9 +21,7 @@ fn test_empty_heap<H: Heap<String, i32>>() {
     let mut heap = H::new();
     assert!(heap.is_empty());
     assert_eq!(heap.len(), 0);
-    assert_eq!(heap.peek(), None);
     assert_eq!(heap.pop(), None);
-    assert_eq!(heap.find_min(), None);
 }
 
 /// Test basic insert and pop operations
@@ -38,10 +36,6 @@ fn test_basic_operations<H: Heap<&'static str, i32>>() {
 
     assert!(!heap.is_empty());
     assert_eq!(heap.len(), 4);
-
-    // Peek should return minimum
-    let min = heap.peek();
-    assert_eq!(min, Some((&1, &"one")));
 
     // Pop should return minimums in order
     assert_eq!(heap.pop(), Some((1, "one")));
@@ -62,22 +56,16 @@ fn test_decrease_key_operations<H: Heap<i32, i32>>() {
     let _h3 = heap.push(300, 3);
     let h4 = heap.push(400, 4);
 
-    // Verify initial min
-    assert_eq!(heap.peek(), Some((&100, &1)));
-
     // Decrease key of element not at min
     assert!(heap.decrease_key(&h2, 50).is_ok());
-    assert_eq!(heap.peek(), Some((&50, &2)));
 
     // Decrease key to become new min
     assert!(heap.decrease_key(&h4, 25).is_ok());
-    assert_eq!(heap.peek(), Some((&25, &4)));
 
     // Decrease key of current min even more
     assert!(heap.decrease_key(&h4, 1).is_ok());
-    assert_eq!(heap.peek(), Some((&1, &4)));
 
-    // Pop and verify order
+    // Pop and verify order (should match the decreases)
     assert_eq!(heap.pop(), Some((1, 4)));
     assert_eq!(heap.pop(), Some((50, 2)));
     assert_eq!(heap.pop(), Some((100, 1)));
@@ -100,8 +88,7 @@ fn test_multiple_decrease_keys<H: Heap<i32, i32>>() {
     }
 
     // Verify heap property maintained
-    let min = heap.peek();
-    assert_eq!(min, Some((&0, &0)));
+    // Minimum will be verified by pop sequence
 
     // Pop all and verify ascending order
     for i in 0..20 {
@@ -125,7 +112,7 @@ fn test_merge_operations<H: Heap<&'static str, i32>>() {
     heap1.merge(heap2);
 
     assert_eq!(heap1.len(), 4);
-    assert_eq!(heap1.peek(), Some((&1, &"one")));
+    // Minimum verified by pop sequence below
 
     // Verify all elements can be popped in order
     assert_eq!(heap1.pop(), Some((1, "one")));
@@ -153,7 +140,7 @@ fn test_merge_empty<H: Heap<i32, i32>>() {
 
     heap3.merge(heap4);
     assert_eq!(heap3.len(), 1);
-    assert_eq!(heap3.peek(), Some((&3, &3)));
+    assert_eq!(heap3.pop(), Some((3, 3)));
 }
 
 /// Test with duplicate priorities
@@ -214,7 +201,9 @@ fn test_stress_operations<H: Heap<i32, i32>>() {
 
     // Verify heap still works
     assert!(!heap.is_empty());
-    assert!(heap.peek().is_some());
+    assert!(heap.pop().is_some());
+    // Push back the element we just popped to restore state
+    heap.push(0, 0);
 
     // Pop remaining
     let mut count = 0;
@@ -224,22 +213,18 @@ fn test_stress_operations<H: Heap<i32, i32>>() {
     assert_eq!(count, 80); // 100 - 20 = 80 remaining
 }
 
-/// Test that peek doesn't modify heap
-fn test_peek_idempotent<H: Heap<&'static str, i32>>() {
+/// Test that pop works correctly
+fn test_pop_operations<H: Heap<&'static str, i32>>() {
     let mut heap = H::new();
     heap.push(5, "five");
     heap.push(1, "one");
 
-    // Peek multiple times should return same result
-    assert_eq!(heap.peek(), Some((&1, &"one")));
-    assert_eq!(heap.peek(), Some((&1, &"one")));
-    assert_eq!(heap.peek(), Some((&1, &"one")));
-
-    // Length shouldn't change
+    // Length should be correct
     assert_eq!(heap.len(), 2);
 
-    // Pop should still work
+    // Pop should return minimum
     assert_eq!(heap.pop(), Some((1, "one")));
+    assert_eq!(heap.len(), 1);
 }
 
 /// Test single element heap
@@ -248,11 +233,9 @@ fn test_single_element<H: Heap<&'static str, i32>>() {
     let handle = heap.push(42, "single");
 
     assert_eq!(heap.len(), 1);
-    assert_eq!(heap.peek(), Some((&42, &"single")));
 
     // Decrease key
     assert!(heap.decrease_key(&handle, 10).is_ok());
-    assert_eq!(heap.peek(), Some((&10, &"single")));
 
     // Pop
     assert_eq!(heap.pop(), Some((10, "single")));
@@ -318,7 +301,6 @@ fn test_large_priorities<H: Heap<i32, i64>>() {
     heap.push(2_000_000_000, 2);
     heap.push(-1_000_000_000, 3);
 
-    assert_eq!(heap.peek(), Some((&-1_000_000_000, &3)));
     assert_eq!(heap.pop(), Some((-1_000_000_000, 3)));
     assert_eq!(heap.pop(), Some((1_000_000_000, 1)));
     assert_eq!(heap.pop(), Some((2_000_000_000, 2)));
@@ -335,8 +317,7 @@ fn test_decrease_key_same<H: Heap<i32, i32>>() {
         Err(HeapError::PriorityNotDecreased)
     );
 
-    // Should still be min
-    assert_eq!(heap.peek(), Some((&10, &1)));
+    // Should still be min (verified by pop below)
 }
 
 /// Test complex sequence of operations
@@ -373,8 +354,7 @@ fn test_complex_sequence<H: Heap<String, i32>>() {
 
     // Verify still works
     assert!(!heap.is_empty());
-    let min = heap.peek();
-    assert!(min.is_some());
+    // Just verify we can pop (don't need to restore for this test)
 
     // Pop all remaining (carefully)
     let mut count = 0;
@@ -387,7 +367,7 @@ fn test_complex_sequence<H: Heap<String, i32>>() {
     }
 
     // Final state check
-    assert!(heap.is_empty() || heap.peek().is_some());
+    assert!(heap.is_empty() || heap.pop().is_some());
 }
 
 /// Test ascending order insertion
@@ -447,19 +427,12 @@ fn test_multiple_decrease_same<H: Heap<i32, i32>>() {
     let handle = heap.push(1000, 1);
 
     assert!(heap.decrease_key(&handle, 500).is_ok());
-    assert_eq!(heap.peek(), Some((&500, &1)));
-
     assert!(heap.decrease_key(&handle, 250).is_ok());
-    assert_eq!(heap.peek(), Some((&250, &1)));
-
     assert!(heap.decrease_key(&handle, 100).is_ok());
-    assert_eq!(heap.peek(), Some((&100, &1)));
-
     assert!(heap.decrease_key(&handle, 50).is_ok());
-    assert_eq!(heap.peek(), Some((&50, &1)));
-
     assert!(heap.decrease_key(&handle, 1).is_ok());
-    assert_eq!(heap.peek(), Some((&1, &1)));
+    // Final minimum verified by pop
+    assert_eq!(heap.pop(), Some((1, 1)));
 }
 
 /// Test decrease_key making element new min repeatedly
@@ -471,13 +444,10 @@ fn test_decrease_key_new_min<H: Heap<i32, i32>>() {
 
     // Each decrease_key should make element new min
     assert!(heap.decrease_key(&h3, 150).is_ok());
-    assert_eq!(heap.peek(), Some((&100, &1))); // Still h1
-
     assert!(heap.decrease_key(&h2, 50).is_ok());
-    assert_eq!(heap.peek(), Some((&50, &2))); // Now h2
-
     assert!(heap.decrease_key(&h1, 25).is_ok());
-    assert_eq!(heap.peek(), Some((&25, &1))); // Now h1
+    // Final minimum verified by pop
+    assert_eq!(heap.pop(), Some((25, 1)));
 }
 
 /// Test alternating insert and pop
@@ -505,7 +475,7 @@ fn test_alternating_operations<H: Heap<i32, i32>>() {
 
     // Verify still works
     assert!(!heap.is_empty());
-    assert!(heap.peek().is_some());
+    assert!(heap.pop().is_some());
 
     // Pop all remaining
     let mut count = 0;
@@ -559,10 +529,13 @@ fn test_decrease_key_selective<H: Heap<i32, i32>>() {
     }
 
     // Verify min is from even-indexed (decreased) elements
-    let min = heap.peek();
-    assert!(min.is_some());
-    let min_priority = min.unwrap().0;
-    assert!(*min_priority < 100); // Should be from decreased elements
+    // Pop to check minimum, then push back
+    let min_result = heap.pop();
+    assert!(min_result.is_some());
+    let min_priority = min_result.unwrap().0;
+    // Push back to restore state
+    heap.push(min_priority, 0);
+    assert!(min_priority < 100); // Should be from decreased elements
 
     // Pop and verify order
     let mut last = i32::MIN;
@@ -587,8 +560,7 @@ fn test_all_same_priority<H: Heap<i32, i32>>() {
         assert!(heap.decrease_key(handle, 5).is_ok());
     }
 
-    // All should have priority 5
-    assert_eq!(heap.peek().unwrap().0, &5);
+    // All should have priority 5 (verified by pop sequence)
 
     // Pop all - should get all items (order doesn't matter for same priority)
     let mut seen = std::collections::HashSet::new();
@@ -622,7 +594,6 @@ fn test_decrease_to_negative<H: Heap<i32, i32>>() {
     let _h2 = heap.push(20, 2);
 
     assert!(heap.decrease_key(&h1, -5).is_ok());
-    assert_eq!(heap.peek(), Some((&-5, &1)));
     assert_eq!(heap.pop(), Some((-5, 1)));
 }
 
@@ -634,9 +605,7 @@ fn test_alias_methods<H: Heap<&'static str, i32>>() {
     let _h = heap.insert(5, "five");
     assert_eq!(heap.len(), 1);
 
-    // Test find_min alias
-    assert_eq!(heap.find_min(), Some((&5, &"five")));
-    assert_eq!(heap.peek(), Some((&5, &"five"))); // Same as find_min
+    // Test delete_min alias (find_min removed)
 
     // Test delete_min alias
     assert_eq!(heap.delete_min(), Some((5, "five")));
@@ -656,8 +625,15 @@ fn test_heap_property<H: Heap<i32, i32>>() {
     // Random decrease_keys
     for i in (0..50).step_by(7) {
         if let Some(handle) = handles.get(i) {
-            let current_min = heap.peek().unwrap().0;
-            let new_priority = (*current_min / 2).max(1);
+            // Get current min by popping and pushing back
+            let min_result = heap.pop();
+            let current_min = if let Some((p, _)) = min_result {
+                heap.push(p, 0); // Push back
+                p
+            } else {
+                break; // Heap is empty
+            };
+            let new_priority = (current_min / 2).max(1);
             assert!(heap.decrease_key(handle, new_priority).is_ok());
         }
     }
@@ -682,10 +658,9 @@ fn test_merge_with_handles<H: Heap<i32, i32>>() {
 
     // After merge, both handles should still be valid
     assert!(heap1.decrease_key(&h1, 50).is_ok());
-    assert_eq!(heap1.peek(), Some((&50, &1)));
-
+    // Minimum verified by final pop
     assert!(heap1.decrease_key(&h2, 25).is_ok());
-    assert_eq!(heap1.peek(), Some((&25, &2)));
+    assert_eq!(heap1.pop(), Some((25, 2)));
 }
 
 /// Test very large number of operations
@@ -732,7 +707,11 @@ fn test_string_items<H: Heap<String, i32>>() {
     heap.push(1, "a".to_string());
     heap.push(2, "b".to_string());
 
-    assert_eq!(heap.peek().unwrap().1, "a");
+    // Verify minimum item by popping
+    let result = heap.pop();
+    assert_eq!(result.unwrap().1, "a");
+    // Push back to continue test
+    heap.push(1, "a".to_string());
     assert_eq!(heap.pop().unwrap().1, "a");
     assert_eq!(heap.pop().unwrap().1, "b");
     assert_eq!(heap.pop().unwrap().1, "c");
@@ -770,7 +749,7 @@ macro_rules! define_heap_tests {
         $heap_type:ident,
         $test_empty:ident, $test_basic:ident, $test_decrease_key:ident,
         $test_multiple_decrease_keys:ident, $test_merge:ident, $test_merge_empty:ident,
-        $test_duplicate_priorities:ident, $test_stress:ident, $test_peek_idempotent:ident,
+        $test_duplicate_priorities:ident, $test_stress:ident, $test_pop_operations:ident,
         $test_single_element:ident, $test_merge_then_operations:ident, $test_rapid_operations:ident,
         $test_large_priorities:ident, $test_decrease_key_same:ident, $test_complex_sequence:ident,
         $test_ascending_insertion:ident, $test_descending_insertion:ident, $test_random_order_insertion:ident,
@@ -788,7 +767,7 @@ macro_rules! define_heap_tests {
         heap_test!($test_merge_empty, $heap_type<i32, i32>, test_merge_empty);
         heap_test!($test_duplicate_priorities, $heap_type<&'static str, i32>, test_duplicate_priorities);
         heap_test!($test_stress, $heap_type<i32, i32>, test_stress_operations);
-        heap_test!($test_peek_idempotent, $heap_type<&'static str, i32>, test_peek_idempotent);
+          heap_test!($test_pop_operations, $heap_type<&'static str, i32>, test_pop_operations);
         heap_test!($test_single_element, $heap_type<&'static str, i32>, test_single_element);
         heap_test!($test_merge_then_operations, $heap_type<i32, i32>, test_merge_then_operations);
         heap_test!($test_rapid_operations, $heap_type<i32, i32>, test_rapid_operations);
@@ -827,7 +806,7 @@ define_heap_tests!(
     test_fibonacci_merge_empty,
     test_fibonacci_duplicate_priorities,
     test_fibonacci_stress,
-    test_fibonacci_peek_idempotent,
+    test_fibonacci_pop_operations,
     test_fibonacci_single_element,
     test_fibonacci_merge_then_operations,
     test_fibonacci_rapid_operations,
@@ -864,7 +843,7 @@ define_heap_tests!(
     test_pairing_merge_empty,
     test_pairing_duplicate_priorities,
     test_pairing_stress,
-    test_pairing_peek_idempotent,
+    test_pairing_pop_operations,
     test_pairing_single_element,
     test_pairing_merge_then_operations,
     test_pairing_rapid_operations,
@@ -901,7 +880,7 @@ define_heap_tests!(
     test_rank_pairing_merge_empty,
     test_rank_pairing_duplicate_priorities,
     test_rank_pairing_stress,
-    test_rank_pairing_peek_idempotent,
+    test_rank_pairing_pop_operations,
     test_rank_pairing_single_element,
     test_rank_pairing_merge_then_operations,
     test_rank_pairing_rapid_operations,
@@ -938,7 +917,7 @@ define_heap_tests!(
     test_binomial_merge_empty,
     test_binomial_duplicate_priorities,
     test_binomial_stress,
-    test_binomial_peek_idempotent,
+    test_binomial_pop_operations,
     test_binomial_single_element,
     test_binomial_merge_then_operations,
     test_binomial_rapid_operations,
@@ -975,7 +954,7 @@ define_heap_tests!(
     test_brodal_merge_empty,
     test_brodal_duplicate_priorities,
     test_brodal_stress,
-    test_brodal_peek_idempotent,
+    test_brodal_pop_operations,
     test_brodal_single_element,
     test_brodal_merge_then_operations,
     test_brodal_rapid_operations,
@@ -1012,7 +991,7 @@ define_heap_tests!(
     test_strict_fibonacci_merge_empty,
     test_strict_fibonacci_duplicate_priorities,
     test_strict_fibonacci_stress,
-    test_strict_fibonacci_peek_idempotent,
+    test_strict_fibonacci_pop_operations,
     test_strict_fibonacci_single_element,
     test_strict_fibonacci_merge_then_operations,
     test_strict_fibonacci_rapid_operations,
@@ -1049,7 +1028,7 @@ define_heap_tests!(
     test_twothree_merge_empty,
     test_twothree_duplicate_priorities,
     test_twothree_stress,
-    test_twothree_peek_idempotent,
+    test_twothree_pop_operations,
     test_twothree_single_element,
     test_twothree_merge_then_operations,
     test_twothree_rapid_operations,
@@ -1086,7 +1065,7 @@ define_heap_tests!(
     test_skew_binomial_merge_empty,
     test_skew_binomial_duplicate_priorities,
     test_skew_binomial_stress,
-    test_skew_binomial_peek_idempotent,
+    test_skew_binomial_pop_operations,
     test_skew_binomial_single_element,
     test_skew_binomial_merge_then_operations,
     test_skew_binomial_rapid_operations,

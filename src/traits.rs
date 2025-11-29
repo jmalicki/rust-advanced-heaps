@@ -28,7 +28,7 @@ impl std::error::Error for HeapError {}
 ///
 /// This is an opaque type that identifies a specific element in the heap.
 /// The exact implementation varies by heap type.
-pub trait Handle: Clone + Copy + PartialEq + Eq {}
+pub trait Handle: Clone + PartialEq + Eq {}
 
 /// Common operations for heap/priority queue data structures
 ///
@@ -73,24 +73,6 @@ pub trait Heap<T, P: Ord> {
     #[inline]
     fn insert(&mut self, priority: P, item: T) -> Self::Handle {
         self.push(priority, item)
-    }
-
-    /// Returns the minimum priority and associated item without removing it
-    ///
-    /// Equivalent to `BinaryHeap::peek`. Note that `BinaryHeap` is a max-heap,
-    /// while these heaps are min-heaps.
-    ///
-    /// # Time Complexity
-    /// All implementations: O(1)
-    fn peek(&self) -> Option<(&P, &T)>;
-
-    /// Returns the minimum priority and associated item without removing it
-    ///
-    /// Alias for `peek` for consistency with older API.
-    /// Prefer using `peek` for compatibility with standard Rust heaps.
-    #[inline]
-    fn find_min(&self) -> Option<(&P, &T)> {
-        self.peek()
     }
 
     /// Removes and returns the minimum priority and associated item

@@ -6,17 +6,20 @@
 //! - O(log n) amortized delete_min
 //!
 //! The 2-3 structure ensures balance while allowing efficient decrease_key operations.
+//!
+//! This implementation uses Rc/Weak for safe memory management without unsafe code.
 
 use crate::traits::{Handle, Heap, HeapError};
-use std::ptr::{self, NonNull};
-
-/// Type alias for compact node pointer storage
-type NodePtr<T, P> = Option<NonNull<Node<T, P>>>;
+use std::cell::RefCell;
+use std::rc::{Rc, Weak};
 
 /// Handle to an element in a 2-3 heap
+///
+/// The handle is an index into the heap's node registry, allowing safe access
+/// to nodes without raw pointers.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct TwoThreeHandle {
-    node: *const (), // Type-erased pointer to Node<T, P>
+    index: usize, // Index into the heap's node registry
 }
 
 impl Handle for TwoThreeHandle {}
@@ -24,14 +27,17 @@ impl Handle for TwoThreeHandle {}
 struct Node<T, P> {
     item: T,
     priority: P,
-    parent: NodePtr<T, P>,
-    children: Vec<NodePtr<T, P>>, // 2 or 3 children
+    parent: Option<Weak<RefCell<Node<T, P>>>>,
+    children: Vec<Rc<RefCell<Node<T, P>>>>, // 2 or 3 children
 }
 
 /// 2-3 Heap
 ///
 /// Each internal node has exactly 2 or 3 children, maintaining balance
 /// while allowing efficient decrease_key operations.
+///
+/// This implementation uses Rc/Weak for safe memory management. Nodes are
+/// stored in a registry to allow handles to be Copy-compatible indices.
 ///
 /// # Example
 ///
@@ -44,30 +50,29 @@ struct Node<T, P> {
 /// heap.decrease_key(&handle, 1);
 /// assert_eq!(heap.peek(), Some((&1, &"item")));
 /// ```
-pub struct TwoThreeHeap<T, P: Ord> {
-    root: Option<NonNull<Node<T, P>>>,
-    min: Option<NonNull<Node<T, P>>>, // Track minimum for O(1) peek
+pub struct TwoThreeHeap<T: Clone, P: Ord + Clone> {
+    root: Option<Rc<RefCell<Node<T, P>>>>,
+    min: Option<Rc<RefCell<Node<T, P>>>>, // Track minimum for O(1) peek
+    nodes: Vec<Rc<RefCell<Node<T, P>>>>,  // Registry of all nodes (for handles)
     len: usize,
     _phantom: std::marker::PhantomData<T>,
 }
 
-impl<T, P: Ord> Drop for TwoThreeHeap<T, P> {
+impl<T: Clone, P: Ord + Clone> Drop for TwoThreeHeap<T, P> {
     fn drop(&mut self) {
-        if let Some(root) = self.root {
-            unsafe {
-                Self::free_tree(root);
-            }
-        }
+        // Rc will automatically clean up when the last reference is dropped
+        // No manual cleanup needed
     }
 }
 
-impl<T, P: Ord> Heap<T, P> for TwoThreeHeap<T, P> {
+impl<T: Clone, P: Ord + Clone> Heap<T, P> for TwoThreeHeap<T, P> {
     type Handle = TwoThreeHandle;
 
     fn new() -> Self {
         Self {
             root: None,
             min: None,
+            nodes: Vec::new(),
             len: 0,
             _phantom: std::marker::PhantomData,
         }
@@ -113,66 +118,57 @@ impl<T, P: Ord> Heap<T, P> for TwoThreeHeap<T, P> {
     /// - This allows efficient operations while maintaining heap property
     fn insert(&mut self, priority: P, item: T) -> Self::Handle {
         // Create new leaf node (no children yet)
-        let node = Box::into_raw(Box::new(Node {
+        let node = Rc::new(RefCell::new(Node {
             item,
             priority,
             parent: None,
             children: Vec::new(), // Leaf node has no children
         }));
 
-        let node_ptr = unsafe { NonNull::new_unchecked(node) };
+        // Add to registry and get index for handle
+        let index = self.nodes.len();
+        self.nodes.push(node.clone());
 
-        unsafe {
-            // Link new node into the tree structure
-            if let Some(root_ptr) = self.root {
-                // Compare priority with current root
-                if (*node).priority < (*root_ptr.as_ptr()).priority {
-                    // Case 1: New node has smaller priority
-                    // Make new node the root, old root becomes its child
-                    // This maintains heap property: parent <= child
-                    (*node_ptr.as_ptr()).children.push(Some(root_ptr));
-                    (*root_ptr.as_ptr()).parent = Some(node_ptr);
-                    self.root = Some(node_ptr);
-                    self.min = Some(node_ptr);
-                } else {
-                    // Case 2: Current root has smaller or equal priority
-                    // Insert node as child of root
-                    // Heap property maintained: new node >= root
-                    self.insert_as_child(root_ptr, node_ptr);
-                    // Update min if necessary (new node might be smaller than tracked min)
-                    if self.min.is_none()
-                        || (*node_ptr.as_ptr()).priority < (*self.min.unwrap().as_ptr()).priority
-                    {
-                        self.min = Some(node_ptr);
-                    }
-                }
+        // Link new node into the tree structure
+        if let Some(root) = self.root.take() {
+            // Compare priority with current root
+            let node_priority = node.borrow().priority.clone();
+            let root_priority = root.borrow().priority.clone();
+
+            if node_priority < root_priority {
+                // Case 1: New node has smaller priority
+                // Make new node the root, old root becomes its child
+                // This maintains heap property: parent <= child
+                node.borrow_mut().children.push(root.clone());
+                root.borrow_mut().parent = Some(Rc::downgrade(&node));
+                self.root = Some(node.clone());
+                self.min = Some(node.clone());
             } else {
-                // Empty heap: new node becomes root
-                self.root = Some(node_ptr);
-                self.min = Some(node_ptr);
+                // Case 2: Current root has smaller or equal priority
+                // Insert node as child of root
+                // Heap property maintained: new node >= root
+                self.root = Some(root.clone());
+                self.insert_as_child(root.clone(), node.clone());
+                // Update min if necessary (new node might be smaller than tracked min)
+                if self.min.is_none()
+                    || node_priority < self.min.as_ref().unwrap().borrow().priority.clone()
+                {
+                    self.min = Some(node.clone());
+                }
             }
-
-            // Maintain 2-3 structure: ensure each internal node has 2 or 3 children
-            // If a node has 4 children, split it (may cascade upward)
-            self.maintain_structure(node_ptr);
-
-            self.len += 1;
+        } else {
+            // Empty heap: new node becomes root
+            self.root = Some(node.clone());
+            self.min = Some(node.clone());
         }
 
-        TwoThreeHandle {
-            node: node_ptr.as_ptr() as *const (),
-        }
-    }
+        // Maintain 2-3 structure: ensure each internal node has 2 or 3 children
+        // If a node has 4 children, split it (may cascade upward)
+        self.maintain_structure(node);
 
-    fn peek(&self) -> Option<(&P, &T)> {
-        self.find_min()
-    }
+        self.len += 1;
 
-    fn find_min(&self) -> Option<(&P, &T)> {
-        self.min.map(|min_ptr| unsafe {
-            let node = min_ptr.as_ptr();
-            (&(*node).priority, &(*node).item)
-        })
+        TwoThreeHandle { index }
     }
 
     fn pop(&mut self) -> Option<(P, T)> {
@@ -205,38 +201,37 @@ impl<T, P: Ord> Heap<T, P> for TwoThreeHeap<T, P> {
     /// - Tree height stays O(log n) after deletion
     /// - This bounds the cost of all operations
     fn delete_min(&mut self) -> Option<(P, T)> {
-        let root_ptr = self.root?;
+        let root_rc = self.root.take()?;
 
-        unsafe {
-            let node = root_ptr.as_ptr();
-            // Read out item and priority before freeing the node
-            let (priority, item) = (ptr::read(&(*node).priority), ptr::read(&(*node).item));
+        // Extract item and priority from the root node
+        // Since the node might be referenced elsewhere (e.g., in the registry),
+        // we'll clone the values. The node will be dropped when all Rc references are gone.
+        let (priority, item, children) = {
+            let root_borrow = root_rc.borrow();
+            let priority = root_borrow.priority.clone();
+            let item = root_borrow.item.clone();
+            let children = root_borrow.children.clone();
+            (priority, item, children)
+        };
 
-            // Collect all children of the root
-            // Each child is a root of a subtree (parent links will be cleared)
-            let children: Vec<_> = (*node)
-                .children
-                .iter()
-                .filter_map(|&child_opt| child_opt)
-                .collect();
+        // Clear parent links from children (they become roots)
+        for child in &children {
+            child.borrow_mut().parent = None;
+        }
 
-            // Free the root node (children have been collected)
-            drop(Box::from_raw(node));
-            self.len -= 1;
+        self.len -= 1;
 
-            if children.is_empty() {
-                // No children: heap becomes empty
-                self.root = None;
-                self.min = None;
-            } else {
-                // Rebuild heap from children, maintaining 2-3 structure
-                // This operation ensures the heap structure is valid after deletion
-                // and maintains the 2-3 balance property
-                self.root = Some(self.rebuild_from_children(children));
-                // Find new minimum after rebuilding
-                self.find_new_min();
-            }
-
+        if children.is_empty() {
+            // No children: heap becomes empty
+            self.min = None;
+            Some((priority, item))
+        } else {
+            // Rebuild heap from children, maintaining 2-3 structure
+            // This operation ensures the heap structure is valid after deletion
+            // and maintains the 2-3 balance property
+            self.root = Some(self.rebuild_from_children(children));
+            // Find new minimum after rebuilding
+            self.find_new_min();
             Some((priority, item))
         }
     }
@@ -269,25 +264,30 @@ impl<T, P: Ord> Heap<T, P> for TwoThreeHeap<T, P> {
     /// - This prevents deep bubbles: most bubbles are near leaves
     /// - Amortized analysis shows average bubble depth is O(1)
     fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) -> Result<(), HeapError> {
-        let node_ptr = unsafe { NonNull::new_unchecked(handle.node as *mut Node<T, P>) };
+        // Get the node from the registry using the handle's index
+        let node_rc = self
+            .nodes
+            .get(handle.index)
+            .ok_or(HeapError::PriorityNotDecreased)? // Invalid handle
+            .clone();
 
-        unsafe {
-            let node = node_ptr.as_ptr();
-
-            // Safety check: new priority must actually be less
-            if new_priority >= (*node).priority {
+        // Check: new priority must actually be less
+        {
+            let node_borrow = node_rc.borrow();
+            if new_priority >= node_borrow.priority {
                 return Err(HeapError::PriorityNotDecreased);
             }
-
-            // Update the priority value
-            (*node).priority = new_priority;
-
-            // Bubble up: swap with parent if heap property is violated
-            // This maintains heap property by moving smaller priorities upward
-            // Unlike Fibonacci/pairing heaps, we don't cut - we swap values
-            // The 2-3 structure maintains balance, keeping most bubbles shallow
-            self.bubble_up(node_ptr);
         }
+
+        // Update the priority value
+        node_rc.borrow_mut().priority = new_priority;
+
+        // Bubble up: swap with parent if heap property is violated
+        // This maintains heap property by moving smaller priorities upward
+        // Unlike Fibonacci/pairing heaps, we don't cut - we swap values
+        // The 2-3 structure maintains balance, keeping most bubbles shallow
+        self.bubble_up(node_rc);
+
         Ok(())
     }
 
@@ -327,39 +327,44 @@ impl<T, P: Ord> Heap<T, P> for TwoThreeHeap<T, P> {
         }
 
         // Both heaps are non-empty: need to link them
-        unsafe {
-            let self_root = self.root.unwrap();
-            let other_root = other.root.unwrap();
+        let self_root = self.root.as_ref().unwrap().clone();
+        let other_root = other.root.as_ref().unwrap().clone();
 
-            // Compare roots: smaller priority becomes parent (heap property)
-            if (*other_root.as_ptr()).priority < (*self_root.as_ptr()).priority {
-                // Other root has smaller priority: it becomes the new root
-                // Self root becomes a child of other root
-                self.insert_as_child(other_root, self_root);
-                self.root = Some(other_root);
-                self.min = Some(other_root);
-            } else {
-                // Self root has smaller or equal priority: it stays root
-                // Other root becomes a child of self root
-                self.insert_as_child(self_root, other_root);
-                // Min stays the same (self root was smaller)
-            }
+        // Compare roots: smaller priority becomes parent (heap property)
+        let self_priority = self_root.borrow().priority.clone();
+        let other_priority = other_root.borrow().priority.clone();
 
-            // Update length and mark other as empty (prevent double-free)
-            self.len += other.len;
-
-            other.root = None;
-            other.len = 0;
+        if other_priority < self_priority {
+            // Other root has smaller priority: it becomes the new root
+            // Self root becomes a child of other root
+            self.insert_as_child(other_root.clone(), self_root.clone());
+            self.root = Some(other_root.clone());
+            self.min = Some(other_root);
+        } else {
+            // Self root has smaller or equal priority: it stays root
+            // Other root becomes a child of self root
+            self.insert_as_child(self_root.clone(), other_root.clone());
+            // Min stays the same (self root was smaller)
         }
+
+        // Merge node registries
+        self.nodes.append(&mut other.nodes);
+
+        // Update length
+        self.len += other.len;
+
+        // Clear other heap (nodes are now in self's registry)
+        other.root = None;
+        other.min = None;
+        other.len = 0;
     }
 }
 
-impl<T, P: Ord> TwoThreeHeap<T, P> {
+impl<T: Clone, P: Ord + Clone> TwoThreeHeap<T, P> {
     /// Inserts a node as a child, maintaining 2-3 structure
-    unsafe fn insert_as_child(&mut self, parent: NonNull<Node<T, P>>, child: NonNull<Node<T, P>>) {
-        let parent_ptr = parent.as_ptr();
-        (*child.as_ptr()).parent = Some(parent);
-        (*parent_ptr).children.push(Some(child));
+    fn insert_as_child(&mut self, parent: Rc<RefCell<Node<T, P>>>, child: Rc<RefCell<Node<T, P>>>) {
+        child.borrow_mut().parent = Some(Rc::downgrade(&parent));
+        parent.borrow_mut().children.push(child.clone());
 
         // Maintain 2-3 structure (each internal node should have 2 or 3 children)
         self.maintain_structure(parent);
@@ -399,9 +404,11 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
     /// - Splitting maintains the 2-3 property
     /// - Tree height remains O(log n) after splits
     /// - This bounds the cost of all operations
-    unsafe fn maintain_structure(&mut self, node: NonNull<Node<T, P>>) {
-        let node_ptr = node.as_ptr();
-        let num_children = (*node_ptr).children.iter().filter(|c| c.is_some()).count();
+    fn maintain_structure(&mut self, node: Rc<RefCell<Node<T, P>>>) {
+        let num_children = {
+            let node_borrow = node.borrow();
+            node_borrow.children.len()
+        };
 
         // Check if node violates 2-3 property (has more than 3 children)
         if num_children > 3 {
@@ -412,69 +419,76 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
 
             // If we have 4 children, split into two nodes with 2 children each
             if num_children == 4 {
-                let mut children_vec: Vec<_> = (*node_ptr)
-                    .children
-                    .iter()
-                    .filter_map(|c| c.as_ref())
-                    .copied()
-                    .collect();
+                let (new_children, item, priority, parent_weak) = {
+                    let mut node_borrow = node.borrow_mut();
+                    let mut children = std::mem::take(&mut node_borrow.children);
+                    let new_children = children.split_off(2); // Split off last 2
 
-                // Split children: keep first 2, move last 2 to new node
-                // This maintains 2-3 property: both nodes have 2 children
-                if children_vec.len() >= 4 {
-                    let new_children = children_vec.split_off(2); // Split off last 2
-
-                    // Clone item and priority for new node (simplified)
-                    // In a full 2-3 heap, this would be handled differently
-                    let new_item = ptr::read(&(*node_ptr).item);
-                    let new_priority = ptr::read(&(*node_ptr).priority);
-
-                    // Create new node with last 2 children
-                    let new_node = Box::into_raw(Box::new(Node {
-                        item: new_item,
-                        priority: new_priority,
-                        parent: (*node_ptr).parent, // Same parent initially
-                        children: new_children.into_iter().map(Some).collect(),
-                    }));
-
-                    let new_node_ptr = NonNull::new_unchecked(new_node);
-
-                    // Update parent links for new children (they now belong to new node)
-                    for child in (*new_node_ptr.as_ptr()).children.iter().flatten() {
-                        (*child.as_ptr()).parent = Some(new_node_ptr);
-                    }
+                    // Clone item and priority for new node
+                    let item = node_borrow.item.clone();
+                    let priority = node_borrow.priority.clone();
+                    let parent_weak = node_borrow.parent.clone();
 
                     // Update original node to have 2 children (first 2)
-                    (*node_ptr).children = children_vec.into_iter().map(Some).collect();
+                    node_borrow.children = children;
 
-                    // Add new node as sibling (child of original node's parent)
-                    // This may cause parent to have 4 children, triggering cascade
-                    if let Some(parent) = (*node_ptr).parent {
+                    (new_children, item, priority, parent_weak)
+                };
+
+                // Create new node with last 2 children
+                let new_node = Rc::new(RefCell::new(Node {
+                    item,
+                    priority,
+                    parent: parent_weak.clone(),
+                    children: new_children.clone(),
+                }));
+
+                // Add to registry
+                self.nodes.push(new_node.clone());
+
+                // Update parent links for new children (they now belong to new node)
+                for child in &new_children {
+                    child.borrow_mut().parent = Some(Rc::downgrade(&new_node));
+                }
+
+                // Add new node as sibling (child of original node's parent)
+                // This may cause parent to have 4 children, triggering cascade
+                if let Some(parent_weak) = parent_weak {
+                    if let Some(parent) = parent_weak.upgrade() {
                         // Original node has a parent: add new node as child of parent
                         // This may cause parent to split if it now has 4 children
-                        self.insert_as_child(parent, new_node_ptr);
+                        self.insert_as_child(parent, new_node);
                         // This may cascade upward (handled recursively)
-                    } else {
-                        // Original node is root: create new root with both nodes as children
-                        // This creates a new level in the tree
-                        let root_item = ptr::read(&(*node_ptr).item);
-                        let root_priority = ptr::read(&(*node_ptr).priority);
-                        let new_root = Box::into_raw(Box::new(Node {
-                            item: root_item,
-                            priority: root_priority,
-                            parent: None,
-                            children: vec![Some(node), Some(new_node_ptr)], // Both nodes as children
-                        }));
-                        let new_root_ptr = NonNull::new_unchecked(new_root);
-                        (*node_ptr).parent = Some(new_root_ptr);
-                        (*new_node_ptr.as_ptr()).parent = Some(new_root_ptr);
-                        self.root = Some(new_root_ptr);
-                        // Update min to point to new root if it's smaller
-                        if let Some(min_ptr) = self.min {
-                            if (*new_root_ptr.as_ptr()).priority < (*min_ptr.as_ptr()).priority {
-                                self.min = Some(new_root_ptr);
-                            }
+                    }
+                } else {
+                    // Original node is root: create new root with both nodes as children
+                    // This creates a new level in the tree
+                    let (root_item, root_priority) = {
+                        let node_borrow = node.borrow();
+                        (node_borrow.item.clone(), node_borrow.priority.clone())
+                    };
+
+                    let new_root = Rc::new(RefCell::new(Node {
+                        item: root_item,
+                        priority: root_priority,
+                        parent: None,
+                        children: vec![node.clone(), new_node.clone()], // Both nodes as children
+                    }));
+
+                    // Add to registry
+                    self.nodes.push(new_root.clone());
+
+                    node.borrow_mut().parent = Some(Rc::downgrade(&new_root));
+                    new_node.borrow_mut().parent = Some(Rc::downgrade(&new_root));
+                    self.root = Some(new_root.clone());
+
+                    // Update min to point to new root if it's smaller
+                    if let Some(min) = &self.min {
+                        if new_root.borrow().priority < min.borrow().priority {
+                            self.min = Some(new_root);
                         }
+                    } else {
+                        self.min = Some(new_root);
                     }
                 }
             }
@@ -510,23 +524,38 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
     ///
     /// **Note**: We swap priorities and items, not pointers. This maintains the
     /// 2-3 tree structure while fixing heap property violations.
-    unsafe fn bubble_up(&mut self, mut node: NonNull<Node<T, P>>) {
+    fn bubble_up(&mut self, mut node: Rc<RefCell<Node<T, P>>>) {
         // Bubble up: swap with parent if heap property is violated
-        while let Some(parent) = (*node.as_ptr()).parent {
+        loop {
+            let parent_opt = {
+                let node_borrow = node.borrow();
+                node_borrow.parent.as_ref().and_then(|w| w.upgrade())
+            };
+
+            let Some(parent) = parent_opt else {
+                break; // Reached root, stop bubbling
+            };
+
             // Check if heap property is satisfied
-            if (*node.as_ptr()).priority >= (*parent.as_ptr()).priority {
+            let should_swap = {
+                let node_borrow = node.borrow();
+                let parent_borrow = parent.borrow();
+                node_borrow.priority < parent_borrow.priority
+            };
+
+            if !should_swap {
                 break; // Heap property satisfied: stop bubbling
             }
 
             // Heap property violated: swap node with parent
-            // Simplified - full 2-3 heap has more complex swapping
-            let node_ptr = node.as_ptr();
-            let parent_ptr = parent.as_ptr();
-
             // Swap priorities and items (not pointers!)
             // This maintains tree structure while fixing heap property
-            ptr::swap(&mut (*node_ptr).priority, &mut (*parent_ptr).priority);
-            ptr::swap(&mut (*node_ptr).item, &mut (*parent_ptr).item);
+            {
+                let mut node_borrow = node.borrow_mut();
+                let mut parent_borrow = parent.borrow_mut();
+                std::mem::swap(&mut node_borrow.priority, &mut parent_borrow.priority);
+                std::mem::swap(&mut node_borrow.item, &mut parent_borrow.item);
+            }
 
             // Move up to parent (continue bubbling)
             node = parent;
@@ -534,9 +563,9 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
 
         // After bubbling, node may have reached the root
         // Update minimum pointer if node became root and has smaller priority
-        if let Some(min_ptr) = self.min {
-            if (*node.as_ptr()).priority < (*min_ptr.as_ptr()).priority {
-                self.min = Some(node);
+        if let Some(min) = &self.min {
+            if node.borrow().priority < min.borrow().priority {
+                self.min = Some(node.clone());
             }
         } else {
             // No minimum tracked yet: this node is the minimum
@@ -545,9 +574,9 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
     }
 
     /// Finds new minimum after deletion
-    unsafe fn find_new_min(&mut self) {
-        if let Some(root) = self.root {
-            self.min = Some(self.find_min_recursive(root));
+    fn find_new_min(&mut self) {
+        if let Some(root) = &self.root {
+            self.min = Some(self.find_min_recursive(root.clone()));
         } else {
             self.min = None;
         }
@@ -555,14 +584,18 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
 
     /// Recursively finds minimum node
     #[allow(clippy::only_used_in_recursion)]
-    unsafe fn find_min_recursive(&self, node: NonNull<Node<T, P>>) -> NonNull<Node<T, P>> {
-        let node_ptr = node.as_ptr();
-        let mut min_node = node;
-        let mut min_priority = &(*node_ptr).priority;
+    fn find_min_recursive(&self, node: Rc<RefCell<Node<T, P>>>) -> Rc<RefCell<Node<T, P>>> {
+        let mut min_node = node.clone();
+        let mut min_priority = node.borrow().priority.clone();
 
-        for child in (*node_ptr).children.iter().flatten() {
-            let child_min = self.find_min_recursive(*child);
-            let child_priority = &(*child_min.as_ptr()).priority;
+        let children = {
+            let node_borrow = node.borrow();
+            node_borrow.children.clone()
+        };
+
+        for child in children {
+            let child_min = self.find_min_recursive(child);
+            let child_priority = child_min.borrow().priority.clone();
             if child_priority < min_priority {
                 min_priority = child_priority;
                 min_node = child_min;
@@ -573,42 +606,36 @@ impl<T, P: Ord> TwoThreeHeap<T, P> {
     }
 
     /// Rebuilds heap from children
-    unsafe fn rebuild_from_children(
+    fn rebuild_from_children(
         &mut self,
-        children: Vec<NonNull<Node<T, P>>>,
-    ) -> NonNull<Node<T, P>> {
+        children: Vec<Rc<RefCell<Node<T, P>>>>,
+    ) -> Rc<RefCell<Node<T, P>>> {
         if children.len() == 1 {
-            (*children[0].as_ptr()).parent = None;
-            return children[0];
+            children[0].borrow_mut().parent = None;
+            return children[0].clone();
         }
 
         // Find minimum
-        let mut min = children[0];
-        for &child in children.iter().skip(1) {
-            if (*child.as_ptr()).priority < (*min.as_ptr()).priority {
-                min = child;
+        let mut min = children[0].clone();
+        let mut min_priority = min.borrow().priority.clone();
+        for child in children.iter().skip(1) {
+            let child_priority = child.borrow().priority.clone();
+            if child_priority < min_priority {
+                min_priority = child_priority;
+                min = child.clone();
             }
         }
 
         // Make others children of min
-        for &child in &children {
-            if child != min {
-                (*child.as_ptr()).parent = None;
-                self.insert_as_child(min, child);
+        for child in &children {
+            if !Rc::ptr_eq(child, &min) {
+                child.borrow_mut().parent = None;
+                self.insert_as_child(min.clone(), child.clone());
             }
         }
 
-        (*min.as_ptr()).parent = None;
+        min.borrow_mut().parent = None;
         min
-    }
-
-    /// Recursively frees a tree
-    unsafe fn free_tree(node: NonNull<Node<T, P>>) {
-        let node_ptr = node.as_ptr();
-        for child in (*node_ptr).children.iter().flatten() {
-            Self::free_tree(*child);
-        }
-        drop(Box::from_raw(node_ptr));
     }
 }
 
