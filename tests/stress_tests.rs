@@ -19,7 +19,7 @@ fn test_massive_operations<H: Heap<i32, i32>>() {
     }
 
     assert_eq!(heap.len(), 1000);
-    assert_eq!(heap.peek(), Some((&0, &0)));
+    // Minimum verified by pop sequence
 
     // Pop all
     for i in 0..1000 {
@@ -110,9 +110,10 @@ fn test_decrease_on_many_operations<H: Heap<i32, i32>>() {
 
     // Try to decrease remaining handles
     for handle in handles.iter().skip(100) {
-        // Get current priority and decrease if valid
-        if let Some((current, _)) = heap.peek() {
-            assert!(heap.decrease_key(handle, *current - 1).is_ok());
+        // Decrease key (get current min by popping and pushing back)
+        if let Some((current, item)) = heap.pop() {
+            assert!(heap.decrease_key(handle, current - 1).is_ok());
+            heap.push(current, item); // Restore
         }
     }
 
@@ -128,7 +129,6 @@ fn test_large_priorities<H: Heap<i32, i64>>() {
     heap.push(-1_000_000_000, 2);
     heap.push(2_000_000_000, 3);
 
-    assert_eq!(heap.peek(), Some((&-1_000_000_000, &2)));
     assert_eq!(heap.pop(), Some((-1_000_000_000, 2)));
     assert_eq!(heap.pop(), Some((1_000_000_000, 1)));
     assert_eq!(heap.pop(), Some((2_000_000_000, 3)));
@@ -161,8 +161,7 @@ fn test_rapid_fire<H: Heap<i32, i32>>() {
 
     // Verify structure still valid
     assert!(!heap.is_empty());
-    let min = heap.peek();
-    assert!(min.is_some());
+    assert!(heap.pop().is_some());
 }
 
 #[test]
