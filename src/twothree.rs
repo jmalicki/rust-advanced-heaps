@@ -14,7 +14,7 @@ use std::ptr::{self, NonNull};
 type NodePtr<T, P> = Option<NonNull<Node<T, P>>>;
 
 /// Handle to an element in a 2-3 heap
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct TwoThreeHandle {
     node: *const (), // Type-erased pointer to Node<T, P>
 }

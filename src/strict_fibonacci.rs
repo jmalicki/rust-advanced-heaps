@@ -12,7 +12,7 @@ use crate::traits::{Handle, Heap, HeapError};
 use std::ptr::{self, NonNull};
 
 /// Handle to an element in a Strict Fibonacci heap
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct StrictFibonacciHandle {
     node: *const (), // Type-erased pointer to Node<T, P>
 }
