@@ -698,8 +698,8 @@ fn test_very_large_sequence<H: Heap<i32, i32>>() {
         handles.push(heap.push(i * 10, i));
     }
 
-    // Decrease keys of every 10th element
-    for i in (0..1000).step_by(10) {
+    // Decrease keys of every 10th element (starting from 10, since i=0 would be 0->0)
+    for i in (10..1000).step_by(10) {
         assert!(heap.decrease_key(&handles[i], i as i32).is_ok());
     }
 
