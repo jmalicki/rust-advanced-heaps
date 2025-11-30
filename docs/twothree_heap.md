@@ -32,7 +32,7 @@ operations while maintaining good performance for decrease_key operations.
 ## Asymptotic Complexity
 
 | Operation | Time Complexity | Notes |
-|-----------|----------------|-------|
+| --------- | -------------- | ----- |
 | `insert` | **O(1)** amortized | Constant time amortized insertion |
 | `find_min` | **O(1)** | Direct access to minimum |
 | `delete_min` | **O(log n)** amortized | Tree height is O(log n) |
@@ -152,7 +152,7 @@ These operations maintain the 2-3 invariant.
 ## Comparison to Other Heaps
 
 | Feature | 2-3 Heap | Binary Heap | Fibonacci Heap |
-|---------|----------|-------------|----------------|
+| ------- | -------- | ----------- | -------------- |
 | Insert | O(1) am. | O(log n) | O(1) am. |
 | Delete-min | O(log n) am. | O(log n) | O(log n) am. |
 | Decrease-key | O(1) am. | O(log n) | O(1) am. |

@@ -31,7 +31,7 @@ heaps.
 ## Asymptotic Complexity
 
 | Operation | Time Complexity | Notes |
-|-----------|----------------|-------|
+| --------- | -------------- | ----- |
 | `insert` | **O(1)** amortized | Constant time insertion |
 | `find_min` | **O(1)** | Direct access to minimum |
 | `delete_min` | **O(log n)** amortized | Rank-based merging |

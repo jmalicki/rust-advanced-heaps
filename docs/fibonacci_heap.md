@@ -38,7 +38,7 @@ analysis and is often used as a building block for advanced algorithms.
 ## Asymptotic Complexity
 
 | Operation | Time Complexity | Notes |
-|-----------|----------------|-------|
+| --------- | -------------- | ----- |
 | `insert` | **O(1)** amortized | Constant time insertion |
 | `find_min` | **O(1)** | Direct pointer to minimum |
 | `delete_min` | **O(log n)** amortized | Consolidation step |

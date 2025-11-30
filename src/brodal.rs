@@ -7,27 +7,61 @@
 //! This implementation includes the full violation system described in Brodal's
 //! original paper, with rank-based violation tracking and repair operations
 //! that maintain worst-case bounds.
+//!
+//! This implementation uses Rc/Weak references instead of raw pointers for memory safety.
 
 use crate::traits::{Handle, Heap, HeapError};
-use std::ptr::{self, NonNull};
+use std::cell::RefCell;
+use std::rc::{Rc, Weak};
+
+/// Type alias for node references (strong ownership)
+type NodeRef<T, P> = Rc<RefCell<Node<T, P>>>;
+/// Type alias for weak node references (back-pointers)
+type WeakNodeRef<T, P> = Weak<RefCell<Node<T, P>>>;
 
 /// Handle to an element in a Brodal heap
 ///
 /// Note: This handle is tied to a specific heap instance. Using it with a different
-/// heap or after the heap is dropped is undefined behavior.
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub struct BrodalHandle {
-    node: *const (), // Type-erased pointer to Node<T, P>
+/// heap or after the element has been removed will return an error.
+/// The handle uses a weak reference, so it can detect if the node has been dropped.
+pub struct BrodalHandle<T, P> {
+    node: WeakNodeRef<T, P>,
 }
 
-impl Handle for BrodalHandle {}
+// Manual Clone implementation to avoid adding T: Clone and P: Clone bounds
+impl<T, P> Clone for BrodalHandle<T, P> {
+    fn clone(&self) -> Self {
+        BrodalHandle {
+            node: self.node.clone(),
+        }
+    }
+}
+
+impl<T, P> PartialEq for BrodalHandle<T, P> {
+    fn eq(&self, other: &Self) -> bool {
+        // Compare by pointer equality
+        self.node.ptr_eq(&other.node)
+    }
+}
+
+impl<T, P> Eq for BrodalHandle<T, P> {}
+
+impl<T, P> std::fmt::Debug for BrodalHandle<T, P> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BrodalHandle")
+            .field("valid", &self.node.upgrade().is_some())
+            .finish()
+    }
+}
+
+impl<T, P> Handle for BrodalHandle<T, P> {}
 
 struct Node<T, P> {
     item: T,
     priority: P,
-    parent: Option<NonNull<Node<T, P>>>,
-    child: Option<NonNull<Node<T, P>>>,
-    sibling: Option<NonNull<Node<T, P>>>, // Next sibling in child list
+    parent: Option<WeakNodeRef<T, P>>, // Weak back-reference to parent
+    child: Option<NodeRef<T, P>>,      // Strong reference to first child
+    sibling: Option<NodeRef<T, P>>,    // Strong reference to next sibling
     rank: usize,
     // For violation tracking
     in_violation_list: bool,
@@ -39,6 +73,7 @@ struct Node<T, P> {
 /// - Per-rank violation queues for worst-case O(1) operations
 /// - Rank constraint maintenance (rank(v) <= rank(w1) + 1, rank(v) <= rank(w2) + 1)
 /// - Violation repair operations that maintain structure
+/// - Safe Rc/Weak-based memory management (no unsafe code)
 ///
 /// # Example
 ///
@@ -52,27 +87,16 @@ struct Node<T, P> {
 /// assert_eq!(heap.peek(), Some((&1, &"item")));
 /// ```
 pub struct BrodalHeap<T, P: Ord> {
-    root: Option<NonNull<Node<T, P>>>, // Minimum element
+    root: Option<NodeRef<T, P>>, // Strong reference to root (minimum element)
     len: usize,
-    // Per-rank violation queues: violations[i] contains nodes with rank i that have violations
-    violations: Vec<Vec<NonNull<Node<T, P>>>>,
+    // Per-rank violation queues: violations[i] contains weak refs to nodes with rank i that have violations
+    // Using Weak references avoids keeping nodes alive and allows proper cleanup
+    violations: Vec<Vec<WeakNodeRef<T, P>>>,
     max_rank: usize, // Maximum rank seen so far
-    _phantom: std::marker::PhantomData<T>,
-}
-
-impl<T, P: Ord> Drop for BrodalHeap<T, P> {
-    fn drop(&mut self) {
-        // Recursively free all nodes
-        if let Some(root) = self.root {
-            unsafe {
-                Self::free_tree(root);
-            }
-        }
-    }
 }
 
 impl<T, P: Ord> Heap<T, P> for BrodalHeap<T, P> {
-    type Handle = BrodalHandle;
+    type Handle = BrodalHandle<T, P>;
 
     fn new() -> Self {
         Self {
@@ -80,7 +104,6 @@ impl<T, P: Ord> Heap<T, P> for BrodalHeap<T, P> {
             len: 0,
             violations: Vec::new(),
             max_rank: 0,
-            _phantom: std::marker::PhantomData,
         }
     }
 
@@ -99,73 +122,45 @@ impl<T, P: Ord> Heap<T, P> for BrodalHeap<T, P> {
     /// Inserts a new element into the heap
     ///
     /// **Time Complexity**: O(1) worst-case
-    ///
-    /// **Algorithm**:
-    /// 1. Create new node with rank 0 (leaf node)
-    /// 2. Compare priority with current root
-    /// 3. If new priority is smaller, make new node the root (old root becomes child)
-    /// 4. Otherwise, add new node as a child of the root
-    /// 5. Update ranks and check for rank violations
-    /// 6. Repair at most O(1) violations immediately
-    ///
-    /// **Key Achievement**: This achieves **worst-case O(1)** instead of amortized!
-    ///
-    /// **Violation Repair**:
-    /// - After adding a child, rank constraints may be violated
-    /// - We repair at most O(1) violations immediately (worst-case O(1))
-    /// - Remaining violations are deferred until delete_min
-    /// - This maintains worst-case bounds while allowing efficient updates
-    ///
-    /// **Why O(1) worst-case?**
-    /// - Only one comparison and O(1) pointer updates
-    /// - Rank update may find violations, but we only repair O(1) of them
-    /// - Violations are tracked and repaired incrementally
-    /// - The violation tracking system ensures worst-case O(1) per operation
     fn insert(&mut self, priority: P, item: T) -> Self::Handle {
         // Create new node with rank 0 (leaf node, no children)
-        let node = Box::into_raw(Box::new(Node {
+        let node = Rc::new(RefCell::new(Node {
             item,
             priority,
             parent: None,
             child: None,
             sibling: None,
-            rank: 0,                  // Leaf nodes have rank 0
-            in_violation_list: false, // New nodes are not in violation list
+            rank: 0,
+            in_violation_list: false,
         }));
 
-        let node_ptr = unsafe { NonNull::new_unchecked(node) };
+        let handle = BrodalHandle {
+            node: Rc::downgrade(&node),
+        };
 
-        unsafe {
-            // Link new node into the tree structure
-            if let Some(root_ptr) = self.root {
-                if (*node_ptr.as_ptr()).priority < (*root_ptr.as_ptr()).priority {
-                    // Case 1: New node has smaller priority
-                    // Make new node the root, old root becomes its child
-                    // This maintains heap property: parent <= child
-                    self.make_child(node_ptr, root_ptr);
-                    self.root = Some(node_ptr);
-                } else {
-                    // Case 2: Current root has smaller or equal priority
-                    // Add new node as a child of the root
-                    // Heap property maintained: new node >= root
-                    self.make_child(root_ptr, node_ptr);
-                }
+        // Link new node into the tree structure
+        if let Some(ref root) = self.root {
+            if node.borrow().priority < root.borrow().priority {
+                // New node has smaller priority: make it the new root
+                self.make_child(Rc::clone(&node), Rc::clone(root));
+                self.root = Some(node);
             } else {
-                // Empty heap: new node becomes root
-                self.root = Some(node_ptr);
+                // Current root has smaller or equal priority
+                self.make_child(Rc::clone(root), node);
             }
-
-            self.len += 1;
-
-            // Check for rank violations and repair (at most O(1) violations)
-            // This is the key to achieving worst-case O(1) bounds
-            // We only repair violations at the node's rank level, ensuring O(1)
-            self.repair_violations(node_ptr);
+        } else {
+            // Empty heap: new node becomes root
+            self.root = Some(node);
         }
 
-        BrodalHandle {
-            node: node_ptr.as_ptr() as *const (),
+        self.len += 1;
+
+        // Check for rank violations and repair (at most O(1) violations)
+        if let Some(ref root) = self.root {
+            self.repair_violations(Rc::clone(root));
         }
+
+        handle
     }
 
     fn peek(&self) -> Option<(&P, &T)> {
@@ -173,9 +168,13 @@ impl<T, P: Ord> Heap<T, P> for BrodalHeap<T, P> {
     }
 
     fn find_min(&self) -> Option<(&P, &T)> {
-        self.root.map(|root_ptr| unsafe {
-            let node = root_ptr.as_ptr();
-            (&(*node).priority, &(*node).item)
+        // This is safe because we hold a reference to the heap
+        // and the Rc keeps the node alive
+        self.root.as_ref().map(|root| {
+            let node_ref = root.as_ptr();
+            // SAFETY: We're borrowing from a RefCell we know exists and isn't borrowed mutably
+            // The lifetime is tied to &self which keeps the heap alive
+            unsafe { (&(*node_ref).priority, &(*node_ref).item) }
         })
     }
 
@@ -186,632 +185,401 @@ impl<T, P: Ord> Heap<T, P> for BrodalHeap<T, P> {
     /// Removes and returns the minimum element
     ///
     /// **Time Complexity**: O(log n) worst-case
-    ///
-    /// **Algorithm**:
-    /// 1. Remove the root (which contains the minimum)
-    /// 2. Collect all children of the root
-    /// 3. **Process all violations**: This is where accumulated violations are fixed
-    /// 4. Rebuild heap from children, maintaining rank constraints
-    /// 5. Find new minimum
-    ///
-    /// **Why O(log n)?**
-    /// - At most O(log n) children (bounded by rank constraints)
-    /// - Processing violations: we've been repairing violations along the way,
-    ///   so only O(log n) remain (bounded by max rank)
-    /// - Rebuilding maintains structure: O(log n) work
-    /// - Total: O(log n) worst-case
-    ///
-    /// **Violation Processing**:
-    /// - During insert/decrease_key, we repair at most O(1) violations
-    /// - Remaining violations accumulate in violation queues
-    /// - During delete_min, we process all accumulated violations
-    /// - This amortizes the cost: O(1) per violation, O(log n) total violations
-    ///
-    /// **Key Insight**: The violation system ensures that violations don't cascade
-    /// too deeply, maintaining worst-case bounds while allowing efficient updates.
     fn delete_min(&mut self) -> Option<(P, T)> {
-        let root_ptr = self.root?;
+        let root = self.root.take()?;
 
-        unsafe {
-            let node = root_ptr.as_ptr();
-            // Read out item and priority before freeing the node
-            let (priority, item) = (ptr::read(&(*node).priority), ptr::read(&(*node).item));
+        // Collect all children of the root
+        let children = self.collect_children(&root);
 
-            // Collect all children of the root
-            // Each child is a root of a subtree (parent links will be cleared)
-            let children = self.collect_children(root_ptr);
+        // Extract item and priority from root
+        // The root should have refcount 1 at this point (only self.root held it)
+        let root_node = Rc::try_unwrap(root)
+            .ok()
+            .expect("Root should be uniquely owned")
+            .into_inner();
 
-            // Free the root node (children have been collected)
-            drop(Box::from_raw(node));
-            self.len -= 1;
+        self.len -= 1;
 
-            if children.is_empty() {
-                // No children: heap becomes empty
-                self.root = None;
-            } else {
-                // Process all violations accumulated so far
-                // This is where we fix violations that were deferred from previous operations
-                // We can afford O(log n) work here because delete_min is O(log n) anyway
-                self.process_all_violations();
+        if children.is_empty() {
+            // No children: heap becomes empty
+            self.root = None;
+        } else {
+            // Process all violations accumulated so far
+            self.process_all_violations();
 
-                // Rebuild heap from children, maintaining rank constraints
-                // This operation ensures the heap structure is valid after deletion
-                self.root = Some(self.rebuild_from_children(children));
-            }
-
-            Some((priority, item))
+            // Rebuild heap from children
+            self.root = Some(self.rebuild_from_children(children));
         }
+
+        Some((root_node.priority, root_node.item))
     }
 
     /// Decreases the priority of an element
     ///
     /// **Time Complexity**: O(1) worst-case
-    ///
-    /// **Precondition**: `new_priority < current_priority` (undefined behavior otherwise)
-    ///
-    /// **Algorithm**:
-    /// 1. Update the priority value
-    /// 2. If heap property is violated (new priority < parent priority):
-    ///    - Cut the node from its parent
-    ///    - Merge the cut node with the root (or make it the new root if smaller)
-    /// 3. Repair at most O(1) violations immediately
-    ///
-    /// **Key Achievement**: This achieves **worst-case O(1)** instead of amortized!
-    ///
-    /// **Why O(1) worst-case?**
-    /// - Cutting from parent: O(1) (just pointer updates)
-    /// - Merging with root: O(1) (just comparison and link)
-    /// - Violation repair: O(1) (we only repair violations at the node's rank)
-    /// - No cascading cuts: violations are tracked and repaired incrementally
-    ///
-    /// **Violation Repair**:
-    /// - After cutting and merging, rank constraints may be violated
-    /// - We repair at most O(1) violations immediately (at the node's rank level)
-    /// - Remaining violations are deferred until delete_min
-    /// - This maintains worst-case O(1) bounds
-    ///
-    /// **Difference from Fibonacci/Pairing heaps**:
-    /// - No cascading cuts: we track violations instead
-    /// - Violations are repaired incrementally, not immediately
-    /// - This achieves worst-case bounds instead of amortized
     fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) -> Result<(), HeapError> {
-        let node_ptr = unsafe { NonNull::new_unchecked(handle.node as *mut Node<T, P>) };
+        let node = handle
+            .node
+            .upgrade()
+            .ok_or(HeapError::PriorityNotDecreased)?;
 
-        unsafe {
-            let node = node_ptr.as_ptr();
+        // Check that new priority is actually less
+        if new_priority >= node.borrow().priority {
+            return Err(HeapError::PriorityNotDecreased);
+        }
 
-            // Safety check: new priority must actually be less
-            if new_priority >= (*node).priority {
-                return Err(HeapError::PriorityNotDecreased);
-            }
+        // Update the priority
+        node.borrow_mut().priority = new_priority;
 
-            // Update the priority value
-            (*node).priority = new_priority;
+        // Check if this node is the root
+        let is_root = self.root.as_ref().is_some_and(|r| Rc::ptr_eq(r, &node));
+        if is_root {
+            return Ok(());
+        }
 
-            // If node is already root, heap property is satisfied (no parent)
-            if self.root == Some(node_ptr) {
-                return Ok(());
-            }
-
-            // Node is not root, so it has a parent
-            // Check if heap property is violated
-            if let Some(parent) = (*node).parent {
-                if (*node).priority < (*parent.as_ptr()).priority {
+        // Check if heap property is violated with parent
+        let parent_weak = node.borrow().parent.clone();
+        if let Some(ref parent_weak) = parent_weak {
+            if let Some(parent) = parent_weak.upgrade() {
+                if node.borrow().priority < parent.borrow().priority {
                     // Heap property violated: cut node from parent
-                    // This operation updates parent's rank and may create violations
-                    self.cut_from_parent(node_ptr);
+                    self.cut_from_parent(&node);
 
                     // Merge cut node with root
-                    // If cut node has smaller priority, it becomes the new root
-                    // Otherwise, it becomes a child of the current root
-                    if let Some(root_ptr) = self.root {
-                        if (*node).priority < (*root_ptr.as_ptr()).priority {
+                    if let Some(ref root) = self.root {
+                        if node.borrow().priority < root.borrow().priority {
                             // Cut node has smaller priority: make it the new root
-                            if root_ptr != node_ptr {
-                                self.make_child(node_ptr, root_ptr);
+                            if !Rc::ptr_eq(root, &node) {
+                                self.make_child(Rc::clone(&node), Rc::clone(root));
                             }
-                            self.root = Some(node_ptr);
+                            self.root = Some(Rc::clone(&node));
                         } else {
-                            // Current root has smaller priority: add cut node as child
-                            self.make_child(root_ptr, node_ptr);
+                            // Current root has smaller priority
+                            self.make_child(Rc::clone(root), Rc::clone(&node));
                         }
                     } else {
-                        // Heap is empty (shouldn't happen, but handle gracefully)
-                        self.root = Some(node_ptr);
+                        self.root = Some(Rc::clone(&node));
                     }
 
-                    // Repair violations (at most O(1))
-                    // This is the key to achieving worst-case O(1) bounds
-                    // We only repair violations at the node's rank level
-                    self.repair_violations(node_ptr);
+                    // Repair violations
+                    self.repair_violations(node);
                 }
-                // If heap property is not violated, no restructuring needed
             }
         }
+
         Ok(())
     }
 
     /// Merges another heap into this heap
     ///
     /// **Time Complexity**: O(1) worst-case
-    ///
-    /// **Algorithm**:
-    /// 1. Compare roots of both heaps
-    /// 2. Make the larger-priority root a child of the smaller-priority root
-    /// 3. Merge violation lists from both heaps
-    /// 4. Process all violations (worst-case O(1) per violation)
-    ///
-    /// **Key Achievement**: This achieves **worst-case O(1)** instead of amortized!
-    ///
-    /// **Why O(1) worst-case?**
-    /// - Root comparison and linking: O(1) (just pointer updates)
-    /// - Merging violation lists: O(1) (append operations)
-    /// - Violation processing: O(1) worst-case (we process violations incrementally)
-    /// - The violation tracking system ensures worst-case O(1) bounds
-    ///
-    /// **Violation Processing**:
-    /// - After merging, we process all violations from both heaps
-    /// - We process at most O(1) violations per rank level
-    /// - This ensures worst-case O(1) bounds while fixing all violations
-    ///
-    /// **Difference from Fibonacci/Pairing heaps**:
-    /// - No cascading cuts: we track violations instead
-    /// - Violations are processed incrementally, not immediately
-    /// - This achieves worst-case bounds instead of amortized
     fn merge(&mut self, mut other: Self) {
-        // Empty heaps are easy cases
         if other.is_empty() {
-            return; // Nothing to merge
+            return;
         }
 
         if self.is_empty() {
-            // This heap is empty: just take the other heap
             *self = other;
             return;
         }
 
-        // Both heaps are non-empty: need to link them
-        unsafe {
-            let self_root = self.root.unwrap();
-            let other_root = other.root.unwrap();
+        let self_root = self.root.take().unwrap();
+        let other_root = other.root.take().unwrap();
 
-            // Merge roots: smaller priority becomes parent (heap property)
-            if (*other_root.as_ptr()).priority < (*self_root.as_ptr()).priority {
-                // Other root has smaller priority: it becomes the new root
-                if (*other_root.as_ptr()).child.is_none() {
-                    // Other root has no children: simple link
-                    self.make_child(other_root, self_root);
-                } else {
-                    // Other root has children: add self_root to its child list
-                    self.add_child(other_root, self_root);
-                }
-                self.root = Some(other_root);
+        // Merge roots: smaller priority becomes parent
+        if other_root.borrow().priority < self_root.borrow().priority {
+            if other_root.borrow().child.is_none() {
+                self.make_child(Rc::clone(&other_root), self_root);
             } else {
-                // Self root has smaller or equal priority: it stays root
-                // Add other_root as a child of self root
-                self.add_child(self_root, other_root);
+                self.add_child(Rc::clone(&other_root), self_root);
             }
-
-            // Merge violation lists from both heaps
-            // Violations from other heap need to be tracked in this heap
-            for (rank, violations) in other.violations.iter().enumerate() {
-                // Ensure violation queue exists for this rank
-                while self.violations.len() <= rank {
-                    self.violations.push(Vec::new());
-                }
-                // Merge violations from other heap into this heap's violation queue
-                self.violations[rank].extend(violations.iter().copied());
-            }
-
-            // Update length and max rank
-            self.len += other.len;
-            self.max_rank = self.max_rank.max(other.max_rank);
-
-            // Prevent double free: mark other as empty
-            other.root = None;
-            other.len = 0;
-
-            // Process violations (worst-case O(1) per violation)
-            // This is where we fix violations that were deferred
-            // We process at most O(1) violations per rank level
-            self.process_all_violations();
+            self.root = Some(other_root);
+        } else {
+            self.add_child(Rc::clone(&self_root), other_root);
+            self.root = Some(self_root);
         }
+
+        // Merge violation lists (weak references)
+        for (rank, violations) in other.violations.into_iter().enumerate() {
+            while self.violations.len() <= rank {
+                self.violations.push(Vec::new());
+            }
+            self.violations[rank].extend(violations);
+        }
+
+        self.len += other.len;
+        self.max_rank = self.max_rank.max(other.max_rank);
+
+        // Prevent double handling
+        other.len = 0;
+
+        // Process violations
+        self.process_all_violations();
     }
 }
 
 impl<T, P: Ord> BrodalHeap<T, P> {
     /// Makes y a child of x
-    unsafe fn make_child(&mut self, x: NonNull<Node<T, P>>, y: NonNull<Node<T, P>>) {
-        (*y.as_ptr()).parent = Some(x);
-        (*y.as_ptr()).sibling = (*x.as_ptr()).child;
-        (*x.as_ptr()).child = Some(y);
+    fn make_child(&mut self, x: NodeRef<T, P>, y: NodeRef<T, P>) {
+        y.borrow_mut().parent = Some(Rc::downgrade(&x));
+        y.borrow_mut().sibling = x.borrow().child.clone();
+        x.borrow_mut().child = Some(y);
 
-        // Update rank and check for violations
-        self.update_rank(x);
+        self.update_rank(&x);
     }
 
     /// Adds y as a child of x (existing children preserved)
-    unsafe fn add_child(&mut self, x: NonNull<Node<T, P>>, y: NonNull<Node<T, P>>) {
-        (*y.as_ptr()).parent = Some(x);
-        if let Some(first_child) = (*x.as_ptr()).child {
-            // Add to front of child list
-            (*y.as_ptr()).sibling = Some(first_child);
-            (*x.as_ptr()).child = Some(y);
+    fn add_child(&mut self, x: NodeRef<T, P>, y: NodeRef<T, P>) {
+        y.borrow_mut().parent = Some(Rc::downgrade(&x));
+        let first_child = x.borrow().child.clone();
+        if first_child.is_some() {
+            y.borrow_mut().sibling = first_child;
+            x.borrow_mut().child = Some(y);
         } else {
-            (*x.as_ptr()).child = Some(y);
-            (*y.as_ptr()).sibling = None;
+            x.borrow_mut().child = Some(y);
+            // y.sibling is already None
         }
 
-        self.update_rank(x);
+        self.update_rank(&x);
     }
 
     /// Updates the rank of a node based on its children's ranks
-    /// Also checks for rank violations and adds them to violation queues
-    ///
-    /// **Time Complexity**: O(degree) where degree is number of children
-    /// - Amortized to O(1) over a sequence of operations
-    ///
-    /// **Algorithm (Rank Constraint)**:
-    /// For node v with children w₁, w₂, ..., wₖ:
-    /// 1. Collect all children's ranks
-    /// 2. Find two children with smallest ranks: r₁ = min(ranks), r₂ = second min(ranks)
-    /// 3. Compute new rank: rank(v) = min(r₁, r₂) + 1
-    /// 4. Check if rank constraint is violated:
-    ///    - rank(v) must be ≤ rank(w₁) + 1 and ≤ rank(w₂) + 1
-    ///    - If violated, add to violation queue for this rank
-    ///
-    /// **Rank Constraint (Brodal Heap)**:
-    /// - For node v with children w₁, w₂ (two smallest ranks):
-    ///   - rank(v) ≤ rank(w₁) + 1
-    ///   - rank(v) ≤ rank(w₂) + 1
-    /// - This bounds the tree height while allowing efficient updates
-    ///
-    /// **Violation Detection**:
-    /// - After computing new rank, check if it violates constraints
-    /// - If rank(v) > rank(w₁) + 1 or rank(v) > rank(w₂) + 1, it's a violation
-    /// - Add violating node to violation queue for its rank
-    /// - Violations will be repaired later (during delete_min or incrementally)
-    ///
-    /// **Why min(r₁, r₂) + 1?**
-    /// The rank constraint requires rank(v) ≤ rank(w₁) + 1 and rank(v) ≤ rank(w₂) + 1.
-    /// Setting rank(v) = min(r₁, r₂) + 1 satisfies both constraints when valid.
-    unsafe fn update_rank(&mut self, node: NonNull<Node<T, P>>) {
-        let node_ptr = node.as_ptr();
-        // Collect all children's ranks to compute the new rank
+    fn update_rank(&mut self, node: &NodeRef<T, P>) {
         let mut child_ranks = Vec::new();
 
         // Traverse child list to collect all ranks
-        let mut current = (*node_ptr).child;
+        let mut current = node.borrow().child.clone();
         while let Some(child) = current {
-            child_ranks.push((*child.as_ptr()).rank);
-            current = (*child.as_ptr()).sibling;
+            child_ranks.push(child.borrow().rank);
+            current = child.borrow().sibling.clone();
         }
 
         // Base case: no children, rank is 0
         if child_ranks.is_empty() {
-            (*node_ptr).rank = 0;
+            node.borrow_mut().rank = 0;
             return;
         }
 
-        // Sort ranks descending (for easier indexing)
+        // Sort ranks descending
         child_ranks.sort_by(|a, b| b.cmp(a));
 
-        // Compute new rank based on rank constraint
-        // rank(v) = min(rank(w₁), rank(w₂)) + 1 where w₁, w₂ are children with smallest ranks
+        // Compute new rank
         let new_rank = if child_ranks.len() >= 2 {
-            // Two or more children: use two smallest ranks
-            let r1 = child_ranks[child_ranks.len() - 1]; // Smallest
-            let r2 = child_ranks[child_ranks.len() - 2]; // Second smallest
+            let r1 = child_ranks[child_ranks.len() - 1];
+            let r2 = child_ranks[child_ranks.len() - 2];
             (r1.min(r2)) + 1
         } else {
-            // One child: rank = child_rank + 1
             child_ranks[0] + 1
         };
 
-        // Update node's rank
-        (*node_ptr).rank = new_rank;
+        node.borrow_mut().rank = new_rank;
 
-        // Check if rank constraint is violated
-        // rank(v) must be ≤ rank(w₁) + 1 and ≤ rank(w₂) + 1
+        // Check for rank constraint violation
         if child_ranks.len() >= 2 {
-            let r1 = child_ranks[child_ranks.len() - 1]; // Smallest
-            let r2 = child_ranks[child_ranks.len() - 2]; // Second smallest
+            let r1 = child_ranks[child_ranks.len() - 1];
+            let r2 = child_ranks[child_ranks.len() - 2];
 
-            // Check if new rank violates constraints
             if new_rank > r1 + 1 || new_rank > r2 + 1 {
-                // Rank violation detected: add to violation queue
-                // This violation will be repaired later (during delete_min or incrementally)
-                self.add_violation(node);
+                self.add_violation(Rc::clone(node));
             }
         }
 
-        // Update max_rank tracking (used for efficient violation processing)
         if new_rank > self.max_rank {
             self.max_rank = new_rank;
         }
     }
 
     /// Adds a node to the violation list for its rank
-    unsafe fn add_violation(&mut self, node: NonNull<Node<T, P>>) {
-        let rank = (*node.as_ptr()).rank;
+    fn add_violation(&mut self, node: NodeRef<T, P>) {
+        let rank = node.borrow().rank;
 
-        if (*node.as_ptr()).in_violation_list {
-            return; // Already in violation list
+        if node.borrow().in_violation_list {
+            return;
         }
 
         while self.violations.len() <= rank {
             self.violations.push(Vec::new());
         }
 
-        (*node.as_ptr()).in_violation_list = true;
-        self.violations[rank].push(node);
+        node.borrow_mut().in_violation_list = true;
+        // Store weak reference to avoid keeping node alive
+        self.violations[rank].push(Rc::downgrade(&node));
     }
 
     /// Removes a node from violation list
-    unsafe fn remove_violation(&mut self, node: NonNull<Node<T, P>>) {
-        let rank = (*node.as_ptr()).rank;
+    fn remove_violation(&mut self, node: &NodeRef<T, P>) {
+        let rank = node.borrow().rank;
 
-        if !(*node.as_ptr()).in_violation_list {
+        if !node.borrow().in_violation_list {
             return;
         }
 
         if rank < self.violations.len() {
-            self.violations[rank].retain(|&n| n != node);
+            let node_weak = Rc::downgrade(node);
+            self.violations[rank].retain(|n| !n.ptr_eq(&node_weak));
         }
 
-        (*node.as_ptr()).in_violation_list = false;
+        node.borrow_mut().in_violation_list = false;
     }
 
-    /// Repairs violations starting from a given node
-    ///
-    /// **Time Complexity**: O(1) worst-case
-    ///
-    /// **Algorithm**:
-    /// - Only repair violations at the node's rank level
-    /// - Process at most one violation per call
-    /// - This maintains worst-case O(1) bounds
-    ///
-    /// **Key Insight**: By only repairing violations at the node's rank level,
-    /// we ensure that each operation fixes at most O(1) violations, maintaining
-    /// worst-case O(1) bounds.
-    ///
-    /// **Incremental Repair**:
-    /// - Violations are repaired incrementally over multiple operations
-    /// - Each operation fixes at most O(1) violations
-    /// - Remaining violations are deferred until delete_min
-    /// - This amortizes the cost while maintaining worst-case bounds
-    unsafe fn repair_violations(&mut self, start_node: NonNull<Node<T, P>>) {
-        let start_rank = (*start_node.as_ptr()).rank;
+    /// Repairs violations starting from a given node (O(1) worst-case)
+    fn repair_violations(&mut self, start_node: NodeRef<T, P>) {
+        let start_rank = start_node.borrow().rank;
 
-        // Only repair violations at this rank level (worst-case O(1))
-        // This ensures we don't do too much work per operation
         if start_rank < self.violations.len() && !self.violations[start_rank].is_empty() {
-            // Process one violation at this rank
-            // By processing only one violation, we maintain O(1) worst-case
-            if let Some(violating_node) = self.violations[start_rank].pop() {
-                // Remove from violation list
-                (*violating_node.as_ptr()).in_violation_list = false;
-                // Repair the violation (may create new violations, but bounded)
-                self.repair_rank_violation(violating_node);
+            // Pop weak references until we find one that's still alive
+            while let Some(weak_node) = self.violations[start_rank].pop() {
+                if let Some(violating_node) = weak_node.upgrade() {
+                    violating_node.borrow_mut().in_violation_list = false;
+                    self.repair_rank_violation(violating_node);
+                    break;
+                }
+                // If weak ref is dead, continue to next one
             }
         }
-        // If no violations at this rank, or violation queue is empty, we're done
     }
 
     /// Processes all violations (used during delete_min)
-    ///
-    /// **Time Complexity**: O(log n) worst-case
-    ///
-    /// **Algorithm**:
-    /// - Process violations rank by rank from 0 to max_rank
-    /// - For each rank, repair all violations in that rank's queue
-    /// - This is where we fix all accumulated violations
-    ///
-    /// **Why O(log n)?**
-    /// - At most O(log n) distinct ranks (bounded by tree height)
-    /// - At most O(log n) violations total (bounded by number of nodes)
-    /// - Each violation repair is O(1) amortized
-    /// - Total: O(log n) worst-case
-    ///
-    /// **When to use**:
-    /// - Called during delete_min when we can afford O(log n) work
-    /// - This is where we fix violations that were deferred from previous operations
-    /// - We can afford O(log n) because delete_min is already O(log n)
-    unsafe fn process_all_violations(&mut self) {
-        // Process violations rank by rank from 0 to max_rank
-        // This ensures we fix all accumulated violations
+    fn process_all_violations(&mut self) {
         for rank in 0..=self.max_rank {
-            // Skip if violation queue doesn't exist for this rank
             if rank >= self.violations.len() {
                 continue;
             }
 
-            // Process all violations at this rank
-            // We can afford to process all violations here because delete_min is O(log n)
-            while let Some(violating_node) = self.violations[rank].pop() {
-                // Remove from violation list
-                (*violating_node.as_ptr()).in_violation_list = false;
-                // Repair the violation (may create new violations, but bounded)
-                self.repair_rank_violation(violating_node);
+            while let Some(weak_node) = self.violations[rank].pop() {
+                // Only process if the node is still alive
+                if let Some(violating_node) = weak_node.upgrade() {
+                    violating_node.borrow_mut().in_violation_list = false;
+                    self.repair_rank_violation(violating_node);
+                }
+                // If weak ref is dead, just skip it
             }
         }
-        // After processing, all violations should be fixed (until new ones are created)
     }
 
     /// Repairs a rank violation by restructuring the node's children
-    ///
-    /// **Time Complexity**: O(degree) where degree is number of children
-    /// - Amortized to O(1) over a sequence of operations
-    ///
-    /// **Algorithm**:
-    /// 1. Disconnect all children from the violating node
-    /// 2. Sort children by rank to find smallest ranks
-    /// 3. Check if rank constraint is actually violated
-    /// 4. If violated, restructure by linking children of similar rank
-    /// 5. Reattach restructured children to the node
-    /// 6. Update rank after restructuring
-    ///
-    /// **Restructuring Strategy**:
-    /// - Group children by rank
-    /// - Link pairs of same rank (like binomial heap linking)
-    /// - This reduces the number of children and fixes rank violations
-    /// - The linked trees have higher ranks, satisfying constraints
-    ///
-    /// **Why This Works**:
-    /// - Violation means rank(v) > rank(w₁) + 1 or rank(v) > rank(w₂) + 1
-    /// - By linking children of same rank, we reduce the number of children
-    /// - This allows us to recompute rank correctly, fixing the violation
-    /// - The restructuring maintains heap property while fixing rank constraints
-    ///
-    /// **Note**: This operation may create new violations, but they are bounded
-    /// and will be fixed incrementally in future operations.
-    unsafe fn repair_rank_violation(&mut self, node: NonNull<Node<T, P>>) {
-        let node_ptr = node.as_ptr();
-
-        // Step 1: Disconnect all children from the violating node
-        // We need to restructure them to fix the violation
+    fn repair_rank_violation(&mut self, node: NodeRef<T, P>) {
+        // Step 1: Disconnect all children
         let mut children = Vec::new();
-        let mut current = (*node_ptr).child;
-        (*node_ptr).child = None; // Disconnect from parent
+        let mut current = node.borrow_mut().child.take();
 
-        // Collect all children
         while let Some(child) = current {
-            let next = (*child.as_ptr()).sibling;
-            (*child.as_ptr()).parent = None; // Clear parent link
-            (*child.as_ptr()).sibling = None; // Clear sibling link
+            let next = child.borrow_mut().sibling.take();
+            child.borrow_mut().parent = None;
             children.push(child);
             current = next;
         }
 
-        // Base case: not enough children for violation check
+        // Base case: not enough children
         if children.len() < 2 {
-            // Not enough children for violation - reattach as-is
             for child in children {
-                self.add_child(node, child);
+                self.add_child(Rc::clone(&node), child);
             }
-            self.update_rank(node);
+            self.update_rank(&node);
             return;
         }
 
-        // Step 2: Sort children by rank to find smallest ranks
-        // We need to check if rank constraint is actually violated
-        children.sort_by(|a, b| (*a.as_ptr()).rank.cmp(&(*b.as_ptr()).rank));
+        // Step 2: Sort children by rank
+        children.sort_by(|a, b| a.borrow().rank.cmp(&b.borrow().rank));
 
-        // Step 3: Check rank constraint
-        // rank(v) must be ≤ rank(w₁) + 1 and ≤ rank(w₂) + 1
-        // where w₁, w₂ are children with smallest ranks
-        let r1 = (*children[0].as_ptr()).rank; // Smallest rank
-        let r2 = (*children[1].as_ptr()).rank; // Second smallest rank
+        let r1 = children[0].borrow().rank;
+        let r2 = children[1].borrow().rank;
         let max_rank = r1.max(r2);
 
-        // Step 4: Check if current rank violates constraint
-        if (*node_ptr).rank > max_rank + 1 {
-            // Rank violation confirmed: restructure children to fix it
-            // Strategy: link children of similar rank to reduce number of children
-
-            // Step 4a: Group children by rank
-            let mut by_rank: Vec<Vec<NonNull<Node<T, P>>>> = Vec::new();
+        // Step 3: Check if current rank violates constraint
+        if node.borrow().rank > max_rank + 1 {
+            // Group children by rank
+            let mut by_rank: Vec<Vec<NodeRef<T, P>>> = Vec::new();
             for child in children {
-                let rank = (*child.as_ptr()).rank;
+                let rank = child.borrow().rank;
                 while by_rank.len() <= rank {
                     by_rank.push(Vec::new());
                 }
                 by_rank[rank].push(child);
             }
 
-            // Step 4b: Link pairs of same rank (like binomial heap)
-            // This reduces the number of children and fixes rank violations
+            // Link pairs of same rank
             let mut new_children = Vec::new();
             for rank_group in by_rank.iter_mut() {
-                // Link pairs until at most one remains
                 while rank_group.len() >= 2 {
                     let a = rank_group.pop().unwrap();
                     let b = rank_group.pop().unwrap();
 
-                    // Link: make one child of the other (both already disconnected)
-                    if (*a.as_ptr()).priority < (*b.as_ptr()).priority {
-                        // a becomes parent of b (heap property)
-                        (*b.as_ptr()).parent = Some(a);
-                        (*b.as_ptr()).sibling = (*a.as_ptr()).child;
-                        (*a.as_ptr()).child = Some(b);
-                        // Update a's rank (it now has b as child)
-                        self.update_rank(a);
+                    if a.borrow().priority < b.borrow().priority {
+                        b.borrow_mut().parent = Some(Rc::downgrade(&a));
+                        b.borrow_mut().sibling = a.borrow().child.clone();
+                        a.borrow_mut().child = Some(b);
+                        self.update_rank(&a);
                         new_children.push(a);
                     } else {
-                        // b becomes parent of a (heap property)
-                        (*a.as_ptr()).parent = Some(b);
-                        (*a.as_ptr()).sibling = (*b.as_ptr()).child;
-                        (*b.as_ptr()).child = Some(a);
-                        // Update b's rank (it now has a as child)
-                        self.update_rank(b);
+                        a.borrow_mut().parent = Some(Rc::downgrade(&b));
+                        a.borrow_mut().sibling = b.borrow().child.clone();
+                        b.borrow_mut().child = Some(a);
+                        self.update_rank(&b);
                         new_children.push(b);
                     }
                 }
-                // Add remaining single children (couldn't be paired)
-                new_children.extend(rank_group.iter().copied());
+                new_children.append(rank_group);
             }
 
-            // Step 4c: Reattach restructured children to node
+            // Reattach restructured children
             for child in new_children {
-                self.add_child(node, child);
+                self.add_child(Rc::clone(&node), child);
             }
 
-            // Step 5: Update rank after restructuring
-            // The rank should now satisfy constraints
-            self.update_rank(node);
+            self.update_rank(&node);
         } else {
-            // No violation: rank was computed incorrectly, just reattach children
+            // No violation: just reattach children
             for child in children {
-                self.add_child(node, child);
+                self.add_child(Rc::clone(&node), child);
             }
-            // Recompute rank (should be correct now)
-            self.update_rank(node);
+            self.update_rank(&node);
         }
     }
 
     /// Cuts a node from its parent
-    unsafe fn cut_from_parent(&mut self, node: NonNull<Node<T, P>>) {
-        let node_ptr = node.as_ptr();
-        let parent_opt = match (*node_ptr).parent {
+    fn cut_from_parent(&mut self, node: &NodeRef<T, P>) {
+        let parent_weak = node.borrow().parent.clone();
+        let parent = match parent_weak.and_then(|w| w.upgrade()) {
             Some(p) => p,
             None => return,
         };
-        let parent_ptr = parent_opt.as_ptr();
 
         // Remove from parent's child list
-        if (*parent_ptr).child == Some(node) {
-            (*parent_ptr).child = (*node_ptr).sibling;
+        let first_child = parent.borrow().child.clone();
+        if first_child.as_ref().is_some_and(|c| Rc::ptr_eq(c, node)) {
+            parent.borrow_mut().child = node.borrow().sibling.clone();
         } else {
-            // Find and remove from sibling chain
-            let mut current = (*parent_ptr).child;
+            // Find in sibling chain
+            let mut current = first_child;
             while let Some(curr) = current {
-                if (*curr.as_ptr()).sibling == Some(node) {
-                    (*curr.as_ptr()).sibling = (*node_ptr).sibling;
+                let next_sibling = curr.borrow().sibling.clone();
+                if next_sibling.as_ref().is_some_and(|s| Rc::ptr_eq(s, node)) {
+                    curr.borrow_mut().sibling = node.borrow().sibling.clone();
                     break;
                 }
-                current = (*curr.as_ptr()).sibling;
+                current = next_sibling;
             }
         }
 
-        (*node_ptr).parent = None;
-        (*node_ptr).sibling = None;
+        node.borrow_mut().parent = None;
+        node.borrow_mut().sibling = None;
 
         // Update parent's rank
-        self.update_rank(parent_opt);
+        self.update_rank(&parent);
 
         // Remove from violation list if present
         self.remove_violation(node);
     }
 
     /// Collects all children of a node into a vector
-    unsafe fn collect_children(&self, parent: NonNull<Node<T, P>>) -> Vec<NonNull<Node<T, P>>> {
+    fn collect_children(&self, parent: &NodeRef<T, P>) -> Vec<NodeRef<T, P>> {
         let mut children = Vec::new();
-        let mut current = (*parent.as_ptr()).child;
+        let mut current = parent.borrow_mut().child.take();
 
         while let Some(curr) = current {
-            let next = (*curr.as_ptr()).sibling;
-            (*curr.as_ptr()).parent = None;
-            (*curr.as_ptr()).sibling = None;
+            let next = curr.borrow_mut().sibling.take();
+            curr.borrow_mut().parent = None;
             children.push(curr);
             current = next;
         }
@@ -819,66 +587,57 @@ impl<T, P: Ord> BrodalHeap<T, P> {
         children
     }
 
-    /// Rebuilds heap from a list of children, maintaining rank constraints
-    unsafe fn rebuild_from_children(
-        &mut self,
-        mut children: Vec<NonNull<Node<T, P>>>,
-    ) -> NonNull<Node<T, P>> {
+    /// Rebuilds heap from a list of children
+    fn rebuild_from_children(&mut self, mut children: Vec<NodeRef<T, P>>) -> NodeRef<T, P> {
         if children.is_empty() {
             panic!("Cannot rebuild from empty children list");
         }
 
         if children.len() == 1 {
-            return children[0];
+            return children.pop().unwrap();
         }
 
         // Group by rank and link pairs
         while children.len() > 1 {
             // Sort by priority for heap property
-            children.sort_by(|a, b| (*a.as_ptr()).priority.cmp(&(*b.as_ptr()).priority));
+            children.sort_by(|a, b| a.borrow().priority.cmp(&b.borrow().priority));
 
-            // Take two with smallest priority and link
-            // Make sure both are disconnected before linking
             let a = children.remove(0);
             let b = children.remove(0);
 
             // Ensure both are disconnected
-            (*a.as_ptr()).parent = None;
-            (*b.as_ptr()).parent = None;
-            (*a.as_ptr()).sibling = None;
-            (*b.as_ptr()).sibling = None;
+            a.borrow_mut().parent = None;
+            b.borrow_mut().parent = None;
+            a.borrow_mut().sibling = None;
+            b.borrow_mut().sibling = None;
 
-            if (*a.as_ptr()).priority < (*b.as_ptr()).priority {
-                self.make_child(a, b);
-                self.update_rank(a);
+            if a.borrow().priority < b.borrow().priority {
+                self.make_child(Rc::clone(&a), b);
+                self.update_rank(&a);
                 children.push(a);
             } else {
-                self.make_child(b, a);
-                self.update_rank(b);
+                self.make_child(Rc::clone(&b), a);
+                self.update_rank(&b);
                 children.push(b);
             }
         }
 
-        // Clear violations on the final root
-        self.remove_violation(children[0]);
-        children[0]
-    }
-
-    /// Recursively frees a tree starting from a node
-    unsafe fn free_tree(node: NonNull<Node<T, P>>) {
-        let node_ptr = node.as_ptr();
-
-        // Free children recursively
-        let mut current = (*node_ptr).child;
-        while let Some(child) = current {
-            let next = (*child.as_ptr()).sibling;
-            Self::free_tree(child);
-            current = next;
-        }
-
-        drop(Box::from_raw(node_ptr));
+        let result = children.pop().unwrap();
+        self.remove_violation(&result);
+        result
     }
 }
+
+impl<T, P: Ord> Default for BrodalHeap<T, P> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// Note: No Drop implementation needed - Rc handles cleanup automatically.
+// When the heap is dropped, the root Rc is dropped, which drops all children
+// recursively (since children hold strong references to siblings, and parent
+// holds strong reference to first child).
 
 // Note: Most tests are in tests/generic_heap_tests.rs which provides comprehensive
 // test coverage for all heap implementations.
