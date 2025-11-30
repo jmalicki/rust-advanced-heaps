@@ -21,7 +21,7 @@ science literature that provide better amortized bounds:
 ### Implemented Heaps
 
 | Heap Type | Insert | Delete-min | Decrease-key | Merge | Notes |
-|-----------|--------|------------|--------------|-------|-------|
+| --------- | ------ | ---------- | ------------ | ----- | ----- |
 | **Fibonacci** | O(1) am. | O(log n) am. | **O(1) am.** | O(1) | Complex but optimal |
 | **Pairing** | O(1) am. | O(log n) am. | **o(log n) am.** | O(1) | Simpler than Fibonacci |
 | **Rank-Pairing** | O(1) am. | O(log n) am. | **O(1) am.** | O(1) | Simpler than Fibonacci, optimal bounds |
