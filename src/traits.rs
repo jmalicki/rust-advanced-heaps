@@ -10,6 +10,8 @@ use std::fmt;
 pub enum HeapError {
     /// The new priority is not less than the current priority
     PriorityNotDecreased,
+    /// The handle is no longer valid (element was removed)
+    InvalidHandle,
 }
 
 impl fmt::Display for HeapError {
@@ -17,6 +19,9 @@ impl fmt::Display for HeapError {
         match self {
             HeapError::PriorityNotDecreased => {
                 write!(f, "new priority is not less than current priority")
+            }
+            HeapError::InvalidHandle => {
+                write!(f, "handle is no longer valid (element was removed)")
             }
         }
     }
@@ -28,7 +33,7 @@ impl std::error::Error for HeapError {}
 ///
 /// This is an opaque type that identifies a specific element in the heap.
 /// The exact implementation varies by heap type.
-pub trait Handle: Clone + Copy + PartialEq + Eq {}
+pub trait Handle: Clone + PartialEq + Eq {}
 
 /// Common operations for heap/priority queue data structures
 ///
