@@ -417,6 +417,16 @@ impl<T, P: Ord + Clone> TwoThreeHeap<T, P> {
                 mem::swap(&mut c.priority, &mut p.priority);
             }
 
+            // If current is now structural (no entry), update its priority to min of children
+            if current.borrow().entry.is_none() {
+                let new_priority = current.borrow().children.iter()
+                    .map(|c| c.borrow().priority.clone())
+                    .min();
+                if let Some(p) = new_priority {
+                    current.borrow_mut().priority = p;
+                }
+            }
+
             current = parent;
         }
     }
@@ -519,6 +529,14 @@ impl<T, P: Ord + Clone> TwoThreeHeap<T, P> {
                 // min_child has no entry and couldn't get one - it's a dead branch
                 // Remove it and try again with remaining children
                 node.borrow_mut().children.retain(|c| !Rc::ptr_eq(c, &min_child));
+
+                // Update node's priority to reflect remaining children
+                let new_priority = node.borrow().children.iter()
+                    .map(|c| c.borrow().priority.clone())
+                    .min();
+                if let Some(p) = new_priority {
+                    node.borrow_mut().priority = p;
+                }
             }
         }
     }
