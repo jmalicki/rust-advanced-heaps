@@ -698,9 +698,10 @@ fn test_very_large_sequence<H: Heap<i32, i32>>() {
         handles.push(heap.push(i * 10, i));
     }
 
-    // Decrease keys of every 10th element (starting from 10, since 0->0 is not a decrease)
-    for i in (10..1000).step_by(10) {
-        assert!(heap.decrease_key(&handles[i], i as i32).is_ok());
+    // Decrease keys of every 10th element
+    // New priority must be less than original (i*10), so use (i-1) which is always < i*10
+    for i in (0..1000).step_by(10) {
+        assert!(heap.decrease_key(&handles[i], (i as i32) - 1).is_ok());
     }
 
     // Pop first 100
