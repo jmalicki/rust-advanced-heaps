@@ -32,7 +32,7 @@ choice when decrease_key operations are infrequent.
 ## Asymptotic Complexity
 
 | Operation | Time Complexity | Notes |
-|-----------|----------------|-------|
+| --------- | -------------- | ----- |
 | `insert` | **O(log n)** worst-case | Single-element merge |
 | `find_min` | **O(log n)** worst-case | Must scan all roots |
 | `delete_min` | **O(log n)** worst-case | Root removal + merge |
@@ -139,7 +139,7 @@ This is the key difference from Fibonacci heaps: no cutting, just bubble up.
 ## Comparison to Fibonacci Heaps
 
 | Feature | Binomial Heap | Fibonacci Heap |
-|---------|--------------|----------------|
+| ------- | ------------ | -------------- |
 | Insert | O(log n) worst | O(1) amortized |
 | Delete-min | O(log n) worst | O(log n) amortized |
 | Decrease-key | **O(log n) worst** | **O(1) amortized** |

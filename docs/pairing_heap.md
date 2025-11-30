@@ -38,7 +38,7 @@ while still achieving sub-logarithmic amortized bounds for `decrease_key`.
 ## Asymptotic Complexity
 
 | Operation | Time Complexity | Notes |
-|-----------|----------------|-------|
+| --------- | -------------- | ----- |
 | `insert` | **O(1)** amortized | Constant time amortized insertion |
 | `find_min` | **O(1)** | Direct access to minimum element |
 | `delete_min` | **O(log n)** amortized | Two-pass pairing operation |
@@ -142,7 +142,7 @@ The potential function typically charges:
 ## Comparison to Other Heaps
 
 | Feature | Pairing Heap | Fibonacci Heap | Binary Heap |
-|---------|-------------|----------------|-------------|
+| ------- | ----------- | -------------- | ----------- |
 | Insert | O(1) am. | O(1) am. | O(log n) worst |
 | Delete-min | O(log n) am. | O(log n) am. | O(log n) worst |
 | Decrease-key | **o(log n) am.** | **O(1) am.** | O(log n) worst |

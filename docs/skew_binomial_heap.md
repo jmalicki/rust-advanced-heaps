@@ -32,7 +32,7 @@ delete_min and decrease_key operations.
 ## Asymptotic Complexity
 
 | Operation | Time Complexity | Notes |
-|-----------|----------------|-------|
+| --------- | -------------- | ----- |
 | `insert` | **O(1)** worst-case | Constant time insertion |
 | `find_min` | **O(1)** | Direct access to minimum |
 | `delete_min` | **O(log n)** worst-case | Tree traversal and merging |
@@ -127,7 +127,7 @@ This is the same as binomial heaps - no improvement here.
 ## Comparison to Binomial Heaps
 
 | Feature | Skew Binomial | Standard Binomial |
-|---------|--------------|-------------------|
+| ------- | ------------ | ----------------- |
 | Insert | **O(1)** worst | **O(log n)** worst |
 | Merge | **O(1)** worst | **O(log n)** worst |
 | Delete-min | O(log n) worst | O(log n) worst |
