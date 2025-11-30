@@ -97,6 +97,9 @@ struct Node<T, P> {
     marked: bool,
 }
 
+/// Type alias for a reference-counted node pointer
+type NodeRef<T, P> = Rc<RefCell<Node<T, P>>>;
+
 impl<T, P> Node<T, P> {
     fn new(item: T, priority: P) -> Self {
         Node {
@@ -337,7 +340,7 @@ impl<T, P: Ord> FibonacciHeap<T, P> {
 
         // Max degree is O(log n) due to Fibonacci property
         let max_degree = ((self.len + 1) as f64).log2() as usize + 2;
-        let mut degree_table: Vec<Option<Rc<RefCell<Node<T, P>>>>> = vec![None; max_degree + 1];
+        let mut degree_table: Vec<Option<NodeRef<T, P>>> = vec![None; max_degree + 1];
 
         // Process all current roots
         let roots_to_process: Vec<_> = self.roots.drain(..).collect();
