@@ -38,7 +38,7 @@ n) worst-case delete_min.
 ## Asymptotic Complexity
 
 | Operation | Time Complexity | Notes |
-|-----------|----------------|-------|
+| --------- | -------------- | ----- |
 | `insert` | **O(1)** worst-case | Constant time guaranteed |
 | `find_min` | **O(1)** worst-case | Direct pointer to minimum |
 | `delete_min` | **O(log n)** worst-case | Worst-case logarithmic |
@@ -166,7 +166,7 @@ The repair is **local** - only affects the violating node and its children.
 ## Comparison to Fibonacci Heaps
 
 | Feature | Brodal Heap | Fibonacci Heap |
-|---------|------------|----------------|
+| ------- | ---------- | -------------- |
 | Insert | O(1) **worst** | O(1) **amortized** |
 | Delete-min | O(log n) **worst** | O(log n) **amortized** |
 | Decrease-key | O(1) **worst** | O(1) **amortized** |
