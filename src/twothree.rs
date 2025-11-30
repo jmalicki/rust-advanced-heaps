@@ -141,7 +141,7 @@ impl<T: Clone, P: Ord + Clone> Heap<T, P> for TwoThreeHeap<T, P> {
 
         // Ensure root has an entry after potential restructuring
         if let Some(root) = self.root.clone() {
-            self.ensure_node_has_entry(&root);
+            ensure_node_has_entry(&root);
         }
 
         self.len += 1;
@@ -219,7 +219,7 @@ impl<T: Clone, P: Ord + Clone> Heap<T, P> for TwoThreeHeap<T, P> {
         entry.borrow_mut().priority = new_priority.clone();
 
         if let Some(root) = self.root.clone() {
-            if let Some(node) = self.find_node_with_entry(Rc::clone(&root), &entry) {
+            if let Some(node) = find_node_with_entry(Rc::clone(&root), &entry) {
                 // Also update the node's priority field
                 node.borrow_mut().priority = new_priority;
                 self.bubble_up(node);
@@ -228,7 +228,7 @@ impl<T: Clone, P: Ord + Clone> Heap<T, P> for TwoThreeHeap<T, P> {
 
         // Ensure root has an entry after bubble_up (which may swap entries)
         if let Some(root) = self.root.clone() {
-            self.ensure_node_has_entry(&root);
+            ensure_node_has_entry(&root);
         }
 
         Ok(())
@@ -263,7 +263,7 @@ impl<T: Clone, P: Ord + Clone> Heap<T, P> for TwoThreeHeap<T, P> {
 
         // Ensure root has an entry after potential restructuring
         if let Some(root) = self.root.clone() {
-            self.ensure_node_has_entry(&root);
+            ensure_node_has_entry(&root);
         }
 
         self.len += other.len;
@@ -277,35 +277,32 @@ impl<T: Clone, P: Ord + Clone> Default for TwoThreeHeap<T, P> {
     }
 }
 
-impl<T, P: Ord + Clone> TwoThreeHeap<T, P> {
-    fn find_node_with_entry(
-        &self,
-        node: NodeRef<T, P>,
-        entry: &Entry<T, P>,
-    ) -> Option<NodeRef<T, P>> {
-        let is_match = {
-            let node_ref = node.borrow();
-            if let Some(ref node_entry) = node_ref.entry {
-                Rc::ptr_eq(node_entry, entry)
-            } else {
-                false
-            }
-        };
-
-        if is_match {
-            return Some(node);
+/// Recursively searches for a node containing the given entry
+fn find_node_with_entry<T, P>(node: NodeRef<T, P>, entry: &Entry<T, P>) -> Option<NodeRef<T, P>> {
+    let is_match = {
+        let node_ref = node.borrow();
+        if let Some(ref node_entry) = node_ref.entry {
+            Rc::ptr_eq(node_entry, entry)
+        } else {
+            false
         }
+    };
 
-        let children: Vec<_> = node.borrow().children.iter().cloned().collect();
-        for child in children {
-            if let Some(found) = self.find_node_with_entry(child, entry) {
-                return Some(found);
-            }
-        }
-
-        None
+    if is_match {
+        return Some(node);
     }
 
+    let children: Vec<_> = node.borrow().children.to_vec();
+    for child in children {
+        if let Some(found) = find_node_with_entry(child, entry) {
+            return Some(found);
+        }
+    }
+
+    None
+}
+
+impl<T, P: Ord + Clone> TwoThreeHeap<T, P> {
     fn insert_as_child(&mut self, parent: NodeRef<T, P>, child: NodeRef<T, P>) {
         child.borrow_mut().parent = Rc::downgrade(&parent);
         parent.borrow_mut().children.push(child);
@@ -453,7 +450,7 @@ impl<T, P: Ord + Clone> TwoThreeHeap<T, P> {
             let root = Rc::clone(&children[0]);
             root.borrow_mut().parent = Weak::new();
             // Ensure root has an entry by pulling up from children if needed
-            self.ensure_node_has_entry(&root);
+            ensure_node_has_entry(&root);
             return root;
         }
 
@@ -484,86 +481,86 @@ impl<T, P: Ord + Clone> TwoThreeHeap<T, P> {
         // After all insertions, self.root may have changed due to splits
         // Ensure the actual root has an entry
         let actual_root = self.root.as_ref().unwrap().clone();
-        self.ensure_node_has_entry(&actual_root);
+        ensure_node_has_entry(&actual_root);
 
         actual_root
     }
+}
 
-    /// Ensures a node has an entry by pulling up from its children if needed
-    fn ensure_node_has_entry(&mut self, node: &NodeRef<T, P>) {
-        if node.borrow().entry.is_some() {
-            return; // Already has an entry
+/// Ensures a node has an entry by pulling up from its children if needed
+fn ensure_node_has_entry<T, P: Ord + Clone>(node: &NodeRef<T, P>) {
+    if node.borrow().entry.is_some() {
+        return; // Already has an entry
+    }
+
+    // Try each child until we find one with an entry (or can get one)
+    loop {
+        let children: Vec<_> = node.borrow().children.to_vec();
+        if children.is_empty() {
+            return; // No children to pull from
         }
 
-        // Try each child until we find one with an entry (or can get one)
-        loop {
-            let children: Vec<_> = node.borrow().children.iter().cloned().collect();
-            if children.is_empty() {
-                return; // No children to pull from
+        // Find child with minimum priority
+        let mut min_child = Rc::clone(&children[0]);
+        for child in children.iter().skip(1) {
+            if child.borrow().priority < min_child.borrow().priority {
+                min_child = Rc::clone(child);
+            }
+        }
+
+        // Recursively ensure min_child has an entry
+        ensure_node_has_entry(&min_child);
+
+        // Check if min_child now has an entry
+        if min_child.borrow().entry.is_some() {
+            // Take entry from min_child and put it in this node
+            let min_child_entry = min_child.borrow_mut().entry.take();
+            if let Some(entry) = min_child_entry {
+                let priority = entry.borrow().priority.clone();
+                node.borrow_mut().entry = Some(entry);
+                node.borrow_mut().priority = priority;
             }
 
-            // Find child with minimum priority
-            let mut min_child = Rc::clone(&children[0]);
-            for child in children.iter().skip(1) {
-                if child.borrow().priority < min_child.borrow().priority {
-                    min_child = Rc::clone(child);
-                }
-            }
+            // If min_child is now a leaf with no entry, remove it from our children
+            let min_child_is_empty_leaf = {
+                let mc = min_child.borrow();
+                mc.entry.is_none() && mc.children.is_empty()
+            };
 
-            // Recursively ensure min_child has an entry
-            self.ensure_node_has_entry(&min_child);
-
-            // Check if min_child now has an entry
-            if min_child.borrow().entry.is_some() {
-                // Take entry from min_child and put it in this node
-                let min_child_entry = min_child.borrow_mut().entry.take();
-                if let Some(entry) = min_child_entry {
-                    let priority = entry.borrow().priority.clone();
-                    node.borrow_mut().entry = Some(entry);
-                    node.borrow_mut().priority = priority;
-                }
-
-                // If min_child is now a leaf with no entry, remove it from our children
-                let min_child_is_empty_leaf = {
-                    let mc = min_child.borrow();
-                    mc.entry.is_none() && mc.children.is_empty()
-                };
-
-                if min_child_is_empty_leaf {
-                    node.borrow_mut()
-                        .children
-                        .retain(|c| !Rc::ptr_eq(c, &min_child));
-                } else {
-                    // Update min_child's priority to reflect its subtree minimum
-                    let min_child_new_priority = min_child
-                        .borrow()
-                        .children
-                        .iter()
-                        .map(|c| c.borrow().priority.clone())
-                        .min();
-                    if let Some(p) = min_child_new_priority {
-                        min_child.borrow_mut().priority = p;
-                    }
-                }
-
-                return; // Successfully got an entry
-            } else {
-                // min_child has no entry and couldn't get one - it's a dead branch
-                // Remove it and try again with remaining children
+            if min_child_is_empty_leaf {
                 node.borrow_mut()
                     .children
                     .retain(|c| !Rc::ptr_eq(c, &min_child));
-
-                // Update node's priority to reflect remaining children
-                let new_priority = node
+            } else {
+                // Update min_child's priority to reflect its subtree minimum
+                let min_child_new_priority = min_child
                     .borrow()
                     .children
                     .iter()
                     .map(|c| c.borrow().priority.clone())
                     .min();
-                if let Some(p) = new_priority {
-                    node.borrow_mut().priority = p;
+                if let Some(p) = min_child_new_priority {
+                    min_child.borrow_mut().priority = p;
                 }
+            }
+
+            return; // Successfully got an entry
+        } else {
+            // min_child has no entry and couldn't get one - it's a dead branch
+            // Remove it and try again with remaining children
+            node.borrow_mut()
+                .children
+                .retain(|c| !Rc::ptr_eq(c, &min_child));
+
+            // Update node's priority to reflect remaining children
+            let new_priority = node
+                .borrow()
+                .children
+                .iter()
+                .map(|c| c.borrow().priority.clone())
+                .min();
+            if let Some(p) = new_priority {
+                node.borrow_mut().priority = p;
             }
         }
     }
