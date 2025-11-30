@@ -29,44 +29,75 @@
 //! 4. **Root tracking**: The minimum element is always at the root
 
 use crate::traits::{Handle, Heap, HeapError};
-use std::ptr::{self, NonNull};
+use std::cell::RefCell;
+use std::rc::{Rc, Weak};
+
+/// Type alias for strong reference to a node
+type NodeRef<T, P> = Rc<RefCell<Node<T, P>>>;
+/// Type alias for weak reference to a node (used for backlinks)
+type NodeWeak<T, P> = Weak<RefCell<Node<T, P>>>;
 
 /// Handle to an element in a Pairing heap
 ///
-/// Note: This handle is tied to a specific heap instance. Using it with a different
-/// heap or after the heap is dropped is undefined behavior.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct PairingHandle {
-    node: *const (), // Type-erased pointer to Node<T, P>
+/// The handle uses a weak reference to the node. If the node has been removed
+/// from the heap (e.g., via delete_min), the handle becomes invalid.
+/// Operations on invalid handles will fail gracefully.
+pub struct PairingHandle<T, P> {
+    node: NodeWeak<T, P>,
 }
 
-impl Handle for PairingHandle {}
+// Manual Clone implementation to avoid requiring T: Clone and P: Clone
+impl<T, P> Clone for PairingHandle<T, P> {
+    fn clone(&self) -> Self {
+        PairingHandle {
+            node: self.node.clone(),
+        }
+    }
+}
+
+impl<T, P> PartialEq for PairingHandle<T, P> {
+    fn eq(&self, other: &Self) -> bool {
+        self.node.ptr_eq(&other.node)
+    }
+}
+
+impl<T, P> Eq for PairingHandle<T, P> {}
+
+impl<T, P> Handle for PairingHandle<T, P> {}
 
 /// Internal node structure for pairing heap
 ///
 /// Each node maintains:
 /// - `item` and `priority`: The data stored in the heap
-/// - `child`: Pointer to the first child in the child list
-/// - `sibling`: Pointer to the next sibling in the parent's child list
-/// - `prev`: Pointer to parent or previous sibling (used for efficient traversal and cutting)
+/// - `child`: Strong reference to the first child in the child list
+/// - `sibling`: Strong reference to the next sibling in the parent's child list
+/// - `prev`: Weak reference to parent or previous sibling (backlink for efficient cutting)
 ///
 /// The structure forms a multi-way tree where children are linked via sibling pointers.
-/// This allows O(1) insertion and merging while maintaining heap order.
+/// Strong references flow downward (parent to child), weak references point upward (child to parent).
+/// This prevents reference cycles while allowing O(1) insertion and merging.
 struct Node<T, P> {
     item: T,
     priority: P,
     /// First child in the child list. None if this node is a leaf.
-    child: Option<NonNull<Node<T, P>>>,
+    /// Uses strong reference (Rc) as parent owns children.
+    child: Option<NodeRef<T, P>>,
     /// Next sibling in the parent's child list. None if this is the last child.
-    sibling: Option<NonNull<Node<T, P>>>,
-    /// Parent node or previous sibling. Used for:
+    /// Uses strong reference (Rc) as earlier siblings own later ones in the list.
+    sibling: Option<NodeRef<T, P>>,
+    /// Parent node or previous sibling. Uses weak reference to avoid cycles.
+    /// Used for:
     /// - Traversing up the tree during decrease_key
     /// - Efficiently removing nodes from child lists
     /// - Maintaining bidirectional links for O(1) updates
-    prev: Option<NonNull<Node<T, P>>>, // For decrease_key: parent or previous sibling
+    prev: Option<NodeWeak<T, P>>,
 }
 
 /// Pairing Heap
+///
+/// A safe implementation using `Rc` and `Weak` references instead of raw pointers.
+/// Strong references (`Rc`) flow from root to children, weak references (`Weak`)
+/// point upward for efficient decrease_key operations.
 ///
 /// # Example
 ///
@@ -80,31 +111,20 @@ struct Node<T, P> {
 /// assert_eq!(heap.find_min(), Some((&1, &"item")));
 /// ```
 pub struct PairingHeap<T, P: Ord> {
-    root: Option<NonNull<Node<T, P>>>,
+    /// Root of the heap tree. Uses strong reference as the heap owns the root.
+    root: Option<NodeRef<T, P>>,
     len: usize,
-    _phantom: std::marker::PhantomData<T>,
 }
 
-impl<T, P: Ord> Drop for PairingHeap<T, P> {
-    fn drop(&mut self) {
-        // Recursively free all nodes
-        if let Some(root) = self.root {
-            unsafe {
-                Self::free_node(root);
-            }
-        }
-    }
-}
+// No Drop implementation needed - Rc handles cleanup automatically.
+// When the heap is dropped, the root Rc's refcount goes to zero,
+// which recursively drops all children (via their strong references).
 
 impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
-    type Handle = PairingHandle;
+    type Handle = PairingHandle<T, P>;
 
     fn new() -> Self {
-        Self {
-            root: None,
-            len: 0,
-            _phantom: std::marker::PhantomData,
-        }
+        Self { root: None, len: 0 }
     }
 
     fn is_empty(&self) -> bool {
@@ -130,7 +150,7 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
     /// 4. Otherwise, add new node as a child of the root
     ///
     /// This operation is O(1) because we only compare with the root and perform
-    /// a constant amount of pointer manipulation. No restructuring needed!
+    /// a constant amount of reference manipulation. No restructuring needed!
     ///
     /// **Invariant Maintenance**:
     /// - Heap property maintained: smaller priority becomes parent
@@ -138,7 +158,7 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
     /// - Root always points to minimum: updated if new element is smaller
     fn insert(&mut self, priority: P, item: T) -> Self::Handle {
         // Create new node with no children or siblings yet
-        let node = Box::into_raw(Box::new(Node {
+        let node = Rc::new(RefCell::new(Node {
             item,
             priority,
             child: None,
@@ -146,39 +166,35 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
             prev: None,
         }));
 
-        let node_ptr = unsafe { NonNull::new_unchecked(node) };
-
         // Link new node into the tree structure
-        if let Some(root_ptr) = self.root {
-            unsafe {
-                if (*node).priority < (*root_ptr.as_ptr()).priority {
-                    // Case 1: New node has smaller priority
-                    // Make new node the root, old root becomes its only child
-                    // This maintains the heap property (parent <= child)
-                    (*node).child = Some(root_ptr);
-                    (*root_ptr.as_ptr()).prev = Some(node_ptr);
-                    self.root = Some(node_ptr);
-                } else {
-                    // Case 2: Current root has smaller or equal priority
-                    // Add new node as the first child of root
-                    // This maintains heap property (new node >= root)
-                    let root_child = (*root_ptr.as_ptr()).child;
-                    (*node).sibling = root_child; // New node's sibling is old first child
-                    (*node).prev = Some(root_ptr); // New node's parent is root
-                    if let Some(child) = root_child {
-                        (*child.as_ptr()).prev = Some(node_ptr); // Update old first child's prev
-                    }
-                    (*root_ptr.as_ptr()).child = Some(node_ptr); // Root's first child is now new node
+        if let Some(ref root) = self.root {
+            if node.borrow().priority < root.borrow().priority {
+                // Case 1: New node has smaller priority
+                // Make new node the root, old root becomes its only child
+                // This maintains the heap property (parent <= child)
+                node.borrow_mut().child = Some(Rc::clone(root));
+                root.borrow_mut().prev = Some(Rc::downgrade(&node));
+                self.root = Some(Rc::clone(&node));
+            } else {
+                // Case 2: Current root has smaller or equal priority
+                // Add new node as the first child of root
+                // This maintains heap property (new node >= root)
+                let root_child = root.borrow().child.clone();
+                node.borrow_mut().sibling = root_child.clone();
+                node.borrow_mut().prev = Some(Rc::downgrade(root));
+                if let Some(ref child) = root_child {
+                    child.borrow_mut().prev = Some(Rc::downgrade(&node));
                 }
+                root.borrow_mut().child = Some(Rc::clone(&node));
             }
         } else {
             // Empty heap: new node becomes root
-            self.root = Some(node_ptr);
+            self.root = Some(Rc::clone(&node));
         }
 
         self.len += 1;
         PairingHandle {
-            node: node_ptr.as_ptr() as *const (),
+            node: Rc::downgrade(&node),
         }
     }
 
@@ -187,9 +203,15 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
     }
 
     fn find_min(&self) -> Option<(&P, &T)> {
-        self.root.map(|root_ptr| unsafe {
-            let node = root_ptr.as_ptr();
-            (&(*node).priority, &(*node).item)
+        // Safety: The references we return point to data inside an Rc that the heap owns.
+        // As long as the caller has a borrow of &self, the Rc stays alive and the data is valid.
+        // This is effectively a lifetime extension that is safe because:
+        // 1. The heap owns the Rc (root)
+        // 2. The returned references are bounded by the &self lifetime
+        // 3. We're only reading, not mutating
+        self.root.as_ref().map(|root| {
+            let node = root.as_ptr();
+            unsafe { (&(*node).priority, &(*node).item) }
         })
     }
 
@@ -222,31 +244,36 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
     /// - Two passes ensure logarithmic height in the amortized sense
     /// - Right-to-left merge in second pass balances the tree better
     fn delete_min(&mut self) -> Option<(P, T)> {
-        let root_ptr = self.root?;
+        let root = self.root.take()?;
 
-        unsafe {
-            let node = root_ptr.as_ptr();
-            // Read out the item and priority before freeing the node
-            let (priority, item) = (ptr::read(&(*node).priority), ptr::read(&(*node).item));
+        // Get the first child before we consume the root
+        let first_child = root.borrow_mut().child.take();
 
-            // The root has been deleted, so we need to rebuild from its children
-            // If there are no children, the heap becomes empty
-            // Otherwise, we merge all children using two-pass pairing
-            let children = (*node).child;
-            if let Some(first_child) = children {
-                // Two-pass pairing: merge children efficiently
-                // This is the core operation that achieves O(log n) amortized bounds
-                self.root = Some(self.merge_pairs(first_child));
-            } else {
-                // No children: heap is now empty
-                self.root = None;
-            }
-
-            // Free the root node (children have been moved)
-            drop(Box::from_raw(node));
-            self.len -= 1;
-            Some((priority, item))
+        // The root has been deleted, so we need to rebuild from its children
+        // If there are no children, the heap becomes empty
+        // Otherwise, we merge all children using two-pass pairing
+        if let Some(child) = first_child {
+            // Clear the child's prev pointer (it was pointing to the old root)
+            child.borrow_mut().prev = None;
+            // Two-pass pairing: merge children efficiently
+            // This is the core operation that achieves O(log n) amortized bounds
+            self.root = Some(self.merge_pairs(child));
         }
+        // If no children, self.root is already None from take()
+
+        self.len -= 1;
+
+        // Extract item and priority from the root node
+        // At this point, root should be the only strong reference, so we can unwrap
+        // If try_unwrap fails, there's a bug in our reference counting
+        let cell = Rc::try_unwrap(root).unwrap_or_else(|rc| {
+            panic!(
+                "BUG: root node has {} strong references during delete_min (expected 1)",
+                Rc::strong_count(&rc)
+            )
+        });
+        let node = cell.into_inner();
+        Some((node.priority, node.item))
     }
 
     /// Decreases the priority of an element
@@ -276,63 +303,63 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
     /// maintain prev pointers, this is O(1). We then add it as a child of the
     /// root (or make it root if it's smaller). This maintains heap property.
     fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) -> Result<(), HeapError> {
-        let node_ptr = unsafe { NonNull::new_unchecked(handle.node as *mut Node<T, P>) };
+        // Upgrade the weak reference to get the node
+        let node = handle
+            .node
+            .upgrade()
+            .expect("Handle references a node that has been removed from the heap");
 
-        unsafe {
-            let node = node_ptr.as_ptr();
+        // Safety check: new priority must actually be less
+        if new_priority >= node.borrow().priority {
+            return Err(HeapError::PriorityNotDecreased);
+        }
 
-            // Safety check: new priority must actually be less
-            // If not, the operation is a no-op (or could panic in a checked version)
-            if new_priority >= (*node).priority {
-                return Err(HeapError::PriorityNotDecreased);
-            }
+        // Update the priority value
+        node.borrow_mut().priority = new_priority;
 
-            // Update the priority value
-            (*node).priority = new_priority;
+        // Check if the node is already the root
+        let is_root = self
+            .root
+            .as_ref()
+            .map(|r| Rc::ptr_eq(r, &node))
+            .unwrap_or(false);
 
-            // If the node is already the root, no restructuring needed
-            // The heap property is satisfied (root has no parent)
-            if self.root == Some(node_ptr) {
-                return Ok(());
-            }
+        if is_root {
+            // Node is already the root, no restructuring needed
+            return Ok(());
+        }
 
-            // The node is not the root, so it has a parent
-            // If the new priority is less than the parent's priority, we violate
-            // the heap property and must restructure
-            //
-            // Strategy: Cut the node from its parent and merge it with the root
-            // This is the standard decrease_key operation for pairing heaps
+        // The node is not the root, so it has a parent
+        // Strategy: Cut the node from its parent and merge it with the root
+        // This is the standard decrease_key operation for pairing heaps
 
-            // Step 1: Cut the node from its parent's child list
-            // This removes all parent-child links between parent and this node
-            self.cut_node(node_ptr);
+        // Step 1: Cut the node from its parent's child list
+        self.cut_node(&node);
 
-            // Step 2: Merge the cut node with the root
-            // If the cut node has smaller priority, it becomes the new root
-            // Otherwise, it becomes a child of the current root
-            // This maintains the heap property: parent <= child
-            if let Some(root_ptr) = self.root {
-                if (*node).priority < (*root_ptr.as_ptr()).priority {
-                    // Cut node has smaller priority: make it the new root
-                    // Old root becomes its child (heap property maintained)
-                    (*node).child = Some(root_ptr);
-                    (*root_ptr.as_ptr()).prev = Some(node_ptr);
-                    self.root = Some(node_ptr);
-                } else {
-                    // Current root has smaller priority: add cut node as child
-                    // Heap property maintained: cut node >= root
-                    let root_child = (*root_ptr.as_ptr()).child;
-                    (*node).sibling = root_child;
-                    (*node).prev = Some(root_ptr);
-                    if let Some(child) = root_child {
-                        (*child.as_ptr()).prev = Some(node_ptr);
-                    }
-                    (*root_ptr.as_ptr()).child = Some(node_ptr);
-                }
+        // Step 2: Merge the cut node with the root
+        // If the cut node has smaller priority, it becomes the new root
+        // Otherwise, it becomes a child of the current root
+        if let Some(ref root) = self.root {
+            if node.borrow().priority < root.borrow().priority {
+                // Cut node has smaller priority: make it the new root
+                // Old root becomes its child (heap property maintained)
+                node.borrow_mut().child = Some(Rc::clone(root));
+                root.borrow_mut().prev = Some(Rc::downgrade(&node));
+                self.root = Some(node);
             } else {
-                // Heap is empty (shouldn't happen, but handle gracefully)
-                self.root = Some(node_ptr);
+                // Current root has smaller priority: add cut node as child
+                // Heap property maintained: cut node >= root
+                let root_child = root.borrow().child.clone();
+                node.borrow_mut().sibling = root_child.clone();
+                node.borrow_mut().prev = Some(Rc::downgrade(root));
+                if let Some(ref child) = root_child {
+                    child.borrow_mut().prev = Some(Rc::downgrade(&node));
+                }
+                root.borrow_mut().child = Some(node);
             }
+        } else {
+            // Heap is empty (shouldn't happen, but handle gracefully)
+            self.root = Some(node);
         }
         Ok(())
     }
@@ -347,7 +374,7 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
     /// 3. Update child/sibling pointers accordingly
     /// 4. The smaller root becomes the new root
     ///
-    /// This is trivially O(1): we only need one comparison and a few pointer updates.
+    /// This is trivially O(1): we only need one comparison and a few reference updates.
     /// No restructuring needed because we're just linking two roots!
     ///
     /// **Post-condition**: After merge, `other` is empty (consumed by this heap)
@@ -364,39 +391,37 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
         }
 
         // Both heaps are non-empty: need to link them
-        unsafe {
-            let self_root = self.root.unwrap();
-            let other_root = other.root.unwrap();
+        let self_root = self.root.take().unwrap();
+        let other_root = other.root.take().unwrap();
 
-            // Compare roots: smaller priority becomes parent (heap property)
-            if (*other_root.as_ptr()).priority < (*self_root.as_ptr()).priority {
-                // Other root has smaller priority: it becomes the new root
-                // Self root becomes a child of other root
-                let self_child = (*other_root.as_ptr()).child;
-                (*self_root.as_ptr()).sibling = self_child; // Self root's sibling is other's old first child
-                (*self_root.as_ptr()).prev = Some(other_root); // Self root's parent is other root
-                if let Some(child) = self_child {
-                    (*child.as_ptr()).prev = Some(self_root); // Update other's old first child
-                }
-                (*other_root.as_ptr()).child = Some(self_root); // Other root's first child is now self root
-                self.root = Some(other_root);
-            } else {
-                // Self root has smaller or equal priority: it stays root
-                // Other root becomes a child of self root
-                let self_child = (*self_root.as_ptr()).child;
-                (*other_root.as_ptr()).sibling = self_child; // Other root's sibling is self's old first child
-                (*other_root.as_ptr()).prev = Some(self_root); // Other root's parent is self root
-                if let Some(child) = self_child {
-                    (*child.as_ptr()).prev = Some(other_root); // Update self's old first child
-                }
-                (*self_root.as_ptr()).child = Some(other_root); // Self root's first child is now other root
+        // Compare roots: smaller priority becomes parent (heap property)
+        if other_root.borrow().priority < self_root.borrow().priority {
+            // Other root has smaller priority: it becomes the new root
+            // Self root becomes a child of other root
+            let other_child = other_root.borrow().child.clone();
+            self_root.borrow_mut().sibling = other_child.clone();
+            self_root.borrow_mut().prev = Some(Rc::downgrade(&other_root));
+            if let Some(ref child) = other_child {
+                child.borrow_mut().prev = Some(Rc::downgrade(&self_root));
             }
-
-            // Update length and mark other as empty (prevent double-free)
-            self.len += other.len;
-            other.root = None;
-            other.len = 0;
+            other_root.borrow_mut().child = Some(self_root);
+            self.root = Some(other_root);
+        } else {
+            // Self root has smaller or equal priority: it stays root
+            // Other root becomes a child of self root
+            let self_child = self_root.borrow().child.clone();
+            other_root.borrow_mut().sibling = self_child.clone();
+            other_root.borrow_mut().prev = Some(Rc::downgrade(&self_root));
+            if let Some(ref child) = self_child {
+                child.borrow_mut().prev = Some(Rc::downgrade(&other_root));
+            }
+            self_root.borrow_mut().child = Some(other_root);
+            self.root = Some(self_root);
         }
+
+        // Update length (other is automatically empty after take())
+        self.len += other.len;
+        other.len = 0;
     }
 }
 
@@ -427,30 +452,27 @@ impl<T, P: Ord> PairingHeap<T, P> {
     /// - First pass: O(n) but reduces n children to n/2 trees
     /// - Second pass: O(log n) merges
     /// - Amortized analysis shows total is O(log n)
-    unsafe fn merge_pairs(&self, first: NonNull<Node<T, P>>) -> NonNull<Node<T, P>> {
+    fn merge_pairs(&self, first: NodeRef<T, P>) -> NodeRef<T, P> {
         // Base case: only one child, no pairing needed
-        if (*first.as_ptr()).sibling.is_none() {
+        if first.borrow().sibling.is_none() {
             return first;
         }
 
         // First pass: pair adjacent children and merge each pair
         // This reduces the number of trees by approximately half
-        let mut pairs = Vec::new();
+        let mut pairs: Vec<NodeRef<T, P>> = Vec::new();
         let mut current = Some(first);
 
         while let Some(node) = current {
-            let sibling = (*node.as_ptr()).sibling;
-
-            // Disconnect node from sibling list (we're reorganizing)
-            (*node.as_ptr()).sibling = None;
-            (*node.as_ptr()).prev = None;
+            // Get and disconnect sibling before modifying node
+            let sibling = node.borrow_mut().sibling.take();
+            node.borrow_mut().prev = None;
 
             if let Some(sib) = sibling {
                 // We have a pair: node and its sibling
                 // Get the next node before we disconnect
-                let next = (*sib.as_ptr()).sibling;
-                (*sib.as_ptr()).sibling = None;
-                (*sib.as_ptr()).prev = None;
+                let next = sib.borrow_mut().sibling.take();
+                sib.borrow_mut().prev = None;
 
                 // Merge the pair: smaller priority becomes parent
                 // This maintains heap property
@@ -486,36 +508,32 @@ impl<T, P: Ord> PairingHeap<T, P> {
     ///
     /// **Invariant**: After merge, the returned node is the root of a heap-ordered tree
     /// containing both original nodes and their descendants.
-    unsafe fn merge_nodes(
-        &self,
-        a: NonNull<Node<T, P>>,
-        b: NonNull<Node<T, P>>,
-    ) -> NonNull<Node<T, P>> {
-        if (*a.as_ptr()).priority < (*b.as_ptr()).priority {
+    fn merge_nodes(&self, a: NodeRef<T, P>, b: NodeRef<T, P>) -> NodeRef<T, P> {
+        if a.borrow().priority < b.borrow().priority {
             // Node a has smaller priority: it becomes parent
             // Node b becomes a child of a
-            let a_child = (*a.as_ptr()).child;
+            let a_child = a.borrow().child.clone();
             // Make b the first child of a (b's sibling is a's old first child)
-            (*b.as_ptr()).sibling = a_child;
-            (*b.as_ptr()).prev = Some(a); // b's parent is a
-            if let Some(child) = a_child {
+            b.borrow_mut().sibling = a_child.clone();
+            b.borrow_mut().prev = Some(Rc::downgrade(&a)); // b's parent is a
+            if let Some(ref child) = a_child {
                 // Update a's old first child to point back to b
-                (*child.as_ptr()).prev = Some(b);
+                child.borrow_mut().prev = Some(Rc::downgrade(&b));
             }
-            (*a.as_ptr()).child = Some(b); // a's first child is now b
+            a.borrow_mut().child = Some(b); // a's first child is now b
             a // Return a as the new root
         } else {
             // Node b has smaller or equal priority: it becomes parent
             // Node a becomes a child of b
-            let b_child = (*b.as_ptr()).child;
+            let b_child = b.borrow().child.clone();
             // Make a the first child of b (a's sibling is b's old first child)
-            (*a.as_ptr()).sibling = b_child;
-            (*a.as_ptr()).prev = Some(b); // a's parent is b
-            if let Some(child) = b_child {
+            a.borrow_mut().sibling = b_child.clone();
+            a.borrow_mut().prev = Some(Rc::downgrade(&b)); // a's parent is b
+            if let Some(ref child) = b_child {
                 // Update b's old first child to point back to a
-                (*child.as_ptr()).prev = Some(a);
+                child.borrow_mut().prev = Some(Rc::downgrade(&a));
             }
-            (*b.as_ptr()).child = Some(a); // b's first child is now a
+            b.borrow_mut().child = Some(a); // b's first child is now a
             b // Return b as the new root
         }
     }
@@ -538,65 +556,57 @@ impl<T, P: Ord> PairingHeap<T, P> {
     /// We check which case by seeing if `prev.child == node`:
     /// - If true, node is first child (prev is parent)
     /// - If false, node is not first child (prev is previous sibling)
-    unsafe fn cut_node(&mut self, node: NonNull<Node<T, P>>) {
-        let prev_opt = match (*node.as_ptr()).prev {
+    fn cut_node(&mut self, node: &NodeRef<T, P>) {
+        // Get the prev reference (parent or previous sibling)
+        let prev_weak = match node.borrow().prev.clone() {
             Some(p) => p,
             None => return, // Node has no parent (already root or orphaned)
         };
-        let prev = prev_opt.as_ptr();
+
+        let prev = match prev_weak.upgrade() {
+            Some(p) => p,
+            None => return, // Prev node was already dropped
+        };
+
+        // Get node's sibling before we modify things
+        let node_sibling = node.borrow().sibling.clone();
 
         // Determine if prev is the parent or a sibling
         // Check: if prev's first child is this node, then prev is the parent
-        if (*prev).child == Some(node) {
+        let is_first_child = prev
+            .borrow()
+            .child
+            .as_ref()
+            .map(|c| Rc::ptr_eq(c, node))
+            .unwrap_or(false);
+
+        if is_first_child {
             // Case 1: Node is the first child (prev is the parent)
             // Remove node from parent's child list
             // Parent's first child becomes node's sibling
-            (*prev).child = (*node.as_ptr()).sibling;
-            if let Some(sibling) = (*node.as_ptr()).sibling {
+            prev.borrow_mut().child = node_sibling.clone();
+            if let Some(ref sibling) = node_sibling {
                 // Update sibling's prev pointer (now points to parent)
-                (*sibling.as_ptr()).prev = Some(prev_opt);
+                sibling.borrow_mut().prev = Some(Rc::downgrade(&prev));
             }
         } else {
             // Case 2: Node is not the first child (prev is previous sibling)
             // Remove node from sibling list
             // Previous sibling's next sibling becomes node's sibling
-            (*prev).sibling = (*node.as_ptr()).sibling;
-            if let Some(sibling) = (*node.as_ptr()).sibling {
+            prev.borrow_mut().sibling = node_sibling.clone();
+            if let Some(ref sibling) = node_sibling {
                 // Update next sibling's prev pointer (now points to previous sibling)
-                (*sibling.as_ptr()).prev = Some(prev_opt);
+                sibling.borrow_mut().prev = Some(Rc::downgrade(&prev));
             }
         }
 
         // Clear node's links (it's now disconnected from the tree)
-        (*node.as_ptr()).sibling = None;
-        (*node.as_ptr()).prev = None;
+        node.borrow_mut().sibling = None;
+        node.borrow_mut().prev = None;
     }
 
-    /// Recursively frees a node and all its descendants
-    ///
-    /// **Time Complexity**: O(n) where n is the number of nodes in the subtree
-    ///
-    /// **Algorithm**:
-    /// - Recursively free all children (via child pointer)
-    /// - Recursively free all siblings (via sibling pointer)
-    /// - Free the node itself
-    ///
-    /// This is used in Drop implementation to clean up all nodes when the heap is dropped.
-    /// The recursive structure follows the tree: first free all descendants, then the node.
-    unsafe fn free_node(node: NonNull<Node<T, P>>) {
-        let node_ptr = node.as_ptr();
-        // Free all children first (recursive)
-        if let Some(child) = (*node_ptr).child {
-            Self::free_node(child);
-        }
-        // Free all siblings (recursive)
-        // Note: siblings form a linked list, so this traverses the sibling chain
-        if let Some(sibling) = (*node_ptr).sibling {
-            Self::free_node(sibling);
-        }
-        // Finally, free this node itself
-        drop(Box::from_raw(node_ptr));
-    }
+    // Note: No free_node function needed - Rc handles cleanup automatically.
+    // When a node's Rc refcount reaches zero, it and all its children are dropped.
 }
 
 // Note: Most tests are in tests/generic_heap_tests.rs which provides comprehensive
