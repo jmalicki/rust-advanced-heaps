@@ -59,9 +59,9 @@ impl<T, P> Handle for BrodalHandle<T, P> {}
 struct Node<T, P> {
     item: T,
     priority: P,
-    parent: Option<WeakNodeRef<T, P>>,  // Weak back-reference to parent
-    child: Option<NodeRef<T, P>>,        // Strong reference to first child
-    sibling: Option<NodeRef<T, P>>,      // Strong reference to next sibling
+    parent: Option<WeakNodeRef<T, P>>, // Weak back-reference to parent
+    child: Option<NodeRef<T, P>>,      // Strong reference to first child
+    sibling: Option<NodeRef<T, P>>,    // Strong reference to next sibling
     rank: usize,
     // For violation tracking
     in_violation_list: bool,
@@ -87,12 +87,12 @@ struct Node<T, P> {
 /// assert_eq!(heap.peek(), Some((&1, &"item")));
 /// ```
 pub struct BrodalHeap<T, P: Ord> {
-    root: Option<NodeRef<T, P>>,  // Strong reference to root (minimum element)
+    root: Option<NodeRef<T, P>>, // Strong reference to root (minimum element)
     len: usize,
     // Per-rank violation queues: violations[i] contains weak refs to nodes with rank i that have violations
     // Using Weak references avoids keeping nodes alive and allows proper cleanup
     violations: Vec<Vec<WeakNodeRef<T, P>>>,
-    max_rank: usize,  // Maximum rank seen so far
+    max_rank: usize, // Maximum rank seen so far
 }
 
 impl<T, P: Ord> Heap<T, P> for BrodalHeap<T, P> {
@@ -218,7 +218,10 @@ impl<T, P: Ord> Heap<T, P> for BrodalHeap<T, P> {
     ///
     /// **Time Complexity**: O(1) worst-case
     fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) -> Result<(), HeapError> {
-        let node = handle.node.upgrade().ok_or(HeapError::PriorityNotDecreased)?;
+        let node = handle
+            .node
+            .upgrade()
+            .ok_or(HeapError::PriorityNotDecreased)?;
 
         // Check that new priority is actually less
         if new_priority >= node.borrow().priority {
