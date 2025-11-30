@@ -33,6 +33,9 @@ impl std::error::Error for HeapError {}
 ///
 /// This is an opaque type that identifies a specific element in the heap.
 /// The exact implementation varies by heap type.
+///
+/// Note: Handles may be `Clone` but not necessarily `Copy`, depending on
+/// the underlying implementation (e.g., reference-counted vs raw pointer).
 pub trait Handle: Clone + PartialEq + Eq {}
 
 /// Common operations for heap/priority queue data structures

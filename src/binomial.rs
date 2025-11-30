@@ -30,30 +30,64 @@
 //! O(log n) trees total, bounding operation costs.
 
 use crate::traits::{Handle, Heap, HeapError};
-use std::ptr::{self, NonNull};
+use std::cell::RefCell;
+use std::mem;
+use std::rc::{Rc, Weak};
 
-/// Type alias for compact node pointer storage
-type NodePtr<T, P> = Option<NonNull<Node<T, P>>>;
+/// Type alias for node reference (strong reference)
+type NodeRef<T, P> = Rc<RefCell<Node<T, P>>>;
+
+/// Type alias for optional node reference
+type NodePtr<T, P> = Option<NodeRef<T, P>>;
+
+/// Type alias for weak node reference (for parent links and handles)
+type WeakNodeRef<T, P> = Weak<RefCell<Node<T, P>>>;
 
 /// Handle to an element in a Binomial heap
 ///
-/// Note: This handle is tied to a specific heap instance. Using it with a different
-/// heap or after the heap is dropped is undefined behavior.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct BinomialHandle {
-    node: *const (), // Type-erased pointer to Node<T, P>
+/// The handle uses a weak reference to the node, allowing detection
+/// of whether the node has been removed from the heap.
+pub struct BinomialHandle<T, P> {
+    node: WeakNodeRef<T, P>,
 }
 
-impl Handle for BinomialHandle {}
+impl<T, P> Clone for BinomialHandle<T, P> {
+    fn clone(&self) -> Self {
+        BinomialHandle {
+            node: self.node.clone(),
+        }
+    }
+}
+
+impl<T, P> PartialEq for BinomialHandle<T, P> {
+    fn eq(&self, other: &Self) -> bool {
+        self.node.ptr_eq(&other.node)
+    }
+}
+
+impl<T, P> Eq for BinomialHandle<T, P> {}
+
+impl<T, P> std::fmt::Debug for BinomialHandle<T, P> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BinomialHandle")
+            .field("valid", &self.node.strong_count())
+            .finish()
+    }
+}
+
+impl<T, P> Handle for BinomialHandle<T, P> {}
 
 /// Internal node structure for binomial heap
 ///
 /// Each node maintains:
 /// - `item` and `priority`: The data stored in the heap
-/// - `parent`: Pointer to parent node (None if root)
-/// - `child`: Pointer to first child (None if leaf)
-/// - `sibling`: Next sibling in parent's child list (None if last child)
+/// - `parent`: Weak reference to parent node (None if root)
+/// - `child`: Strong reference to first child (None if leaf)
+/// - `sibling`: Strong reference to next sibling in parent's child list (None if last child)
 /// - `degree`: Number of children (critical for merge operations)
+///
+/// **Memory Model**: Strong references flow from roots downward (child, sibling).
+/// Weak references flow upward (parent) to avoid reference cycles.
 ///
 /// **Binomial Tree Structure**: Nodes form binomial trees where a node of degree k
 /// has exactly k children with degrees 0, 1, 2, ..., k-1. This ensures the tree
@@ -61,12 +95,12 @@ impl Handle for BinomialHandle {}
 struct Node<T, P> {
     item: T,
     priority: P,
-    /// Parent node (None if root)
-    parent: Option<NonNull<Node<T, P>>>,
-    /// First child in child list (None if leaf)
-    child: Option<NonNull<Node<T, P>>>,
-    /// Next sibling in parent's child list (None if last child)
-    sibling: Option<NonNull<Node<T, P>>>,
+    /// Parent node - weak reference to avoid cycles (None if root)
+    parent: Option<WeakNodeRef<T, P>>,
+    /// First child in child list - strong reference (None if leaf)
+    child: NodePtr<T, P>,
+    /// Next sibling in parent's child list - strong reference (None if last child)
+    sibling: NodePtr<T, P>,
     /// Degree: number of children. A binomial tree Bₖ has root degree k and 2ᵏ nodes
     degree: usize,
 }
@@ -85,37 +119,29 @@ struct Node<T, P> {
 /// assert_eq!(heap.find_min(), Some((&1, &"item")));
 /// ```
 pub struct BinomialHeap<T, P: Ord> {
-    trees: Vec<NodePtr<T, P>>, // Array indexed by degree
-    min: NodePtr<T, P>,
+    /// Array of binomial trees indexed by degree. Each slot holds at most one tree.
+    trees: Vec<NodePtr<T, P>>,
+    /// Weak reference to the minimum node for O(1) access
+    min: Option<WeakNodeRef<T, P>>,
+    /// Number of elements in the heap
     len: usize,
-    _phantom: std::marker::PhantomData<T>,
 }
 
-impl<T, P: Ord> Drop for BinomialHeap<T, P> {
-    fn drop(&mut self) {
-        // Free all trees
-        for root in self.trees.iter().flatten() {
-            unsafe {
-                Self::free_tree(*root);
-            }
-        }
-    }
-}
+// No manual Drop needed - Rc handles cleanup automatically when strong refs go to 0
 
 impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
-    type Handle = BinomialHandle;
+    type Handle = BinomialHandle<T, P>;
 
     fn new() -> Self {
         Self {
             trees: Vec::new(),
             min: None,
             len: 0,
-            _phantom: std::marker::PhantomData,
         }
     }
 
     fn is_empty(&self) -> bool {
-        self.min.is_none()
+        self.len == 0
     }
 
     fn len(&self) -> usize {
@@ -150,35 +176,40 @@ impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
     /// one bit per position).
     fn insert(&mut self, priority: P, item: T) -> Self::Handle {
         // Create new single-node tree (B₀ tree, degree 0)
-        let node = Box::into_raw(Box::new(Node {
+        let node = Rc::new(RefCell::new(Node {
             item,
             priority,
             parent: None,
             child: None,
             sibling: None,
-            degree: 0, // Single node has degree 0
+            degree: 0,
         }));
 
-        let node_ptr = unsafe { NonNull::new_unchecked(node) };
+        // Create handle (weak reference) before we move node into carry propagation
+        let handle = BinomialHandle {
+            node: Rc::downgrade(&node),
+        };
 
-        // Update minimum pointer (O(1) if we track it separately)
-        if let Some(min_ptr) = self.min {
-            unsafe {
-                if (*node).priority < (*min_ptr.as_ptr()).priority {
-                    self.min = Some(node_ptr);
+        // Update minimum pointer
+        let should_update_min = match &self.min {
+            Some(min_weak) => {
+                if let Some(min_rc) = min_weak.upgrade() {
+                    node.borrow().priority < min_rc.borrow().priority
+                } else {
+                    true // Min was invalid, update it
                 }
             }
-        } else {
-            // First node: it's the minimum
-            self.min = Some(node_ptr);
+            None => true, // No minimum yet
+        };
+
+        if should_update_min {
+            self.min = Some(Rc::downgrade(&node));
         }
 
-        // Merge this single-node tree into the heap
-        // This is like binary addition: if slot[degree] is occupied, link and carry
-        let mut carry = Some(node_ptr); // The tree we're trying to place
-        let mut degree = 0; // Start at degree 0
+        // Merge this single-node tree into the heap using carry propagation
+        let mut carry: NodePtr<T, P> = Some(node);
+        let mut degree = 0;
 
-        // Carry propagation: continue until we place the tree somewhere
         while carry.is_some() {
             // Ensure trees array is large enough
             if degree >= self.trees.len() {
@@ -186,28 +217,20 @@ impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
             }
 
             if self.trees[degree].is_none() {
-                // Slot is empty: place tree here (like placing a bit)
+                // Slot is empty: place tree here
                 self.trees[degree] = carry;
-                carry = None; // Done: no more carry
+                carry = None;
             } else {
-                // Slot is occupied: link the two trees (like adding bits with carry)
-                unsafe {
-                    let existing = self.trees[degree].unwrap();
-                    let new_tree = carry.unwrap();
-                    // Link two trees of same degree to produce tree of degree+1
-                    carry = Some(self.link_trees(existing, new_tree));
-                    // Clear slot (we linked the trees)
-                    self.trees[degree] = None;
-                    // Move to next degree (carry propagation)
-                    degree += 1;
-                }
+                // Slot is occupied: link the two trees
+                let existing = self.trees[degree].take().unwrap();
+                let new_tree = carry.unwrap();
+                carry = Some(self.link_trees(existing, new_tree));
+                degree += 1;
             }
         }
 
         self.len += 1;
-        BinomialHandle {
-            node: node_ptr.as_ptr() as *const (),
-        }
+        handle
     }
 
     fn peek(&self) -> Option<(&P, &T)> {
@@ -215,10 +238,20 @@ impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
     }
 
     fn find_min(&self) -> Option<(&P, &T)> {
-        self.min.map(|min_ptr| unsafe {
-            let node = min_ptr.as_ptr();
-            (&(*node).priority, &(*node).item)
-        })
+        // We need to return references that live as long as self
+        // Since RefCell borrows are temporary, we search the trees array
+        // and use pointer magic to get stable references
+        let min_weak = self.min.as_ref()?;
+        let min_rc = min_weak.upgrade()?;
+
+        // SAFETY: We return references tied to &self lifetime.
+        // The Rc keeps the node alive as long as it's in trees[].
+        // This is safe because:
+        // 1. The node is owned by trees[] (strong ref)
+        // 2. We're borrowing self immutably, so trees[] can't change
+        // 3. RefCell contents won't move while we hold &self
+        let node_ptr = min_rc.as_ptr();
+        unsafe { Some((&(*node_ptr).priority, &(*node_ptr).item)) }
     }
 
     fn pop(&mut self) -> Option<(P, T)> {
@@ -249,51 +282,40 @@ impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
     /// children are Bₖ₋₁, Bₖ₋₂, ..., B₀ trees. This maintains the binomial
     /// tree structure after deletion.
     fn delete_min(&mut self) -> Option<(P, T)> {
-        let min_ptr = self.min?;
+        let min_weak = self.min.take()?;
+        let min_rc = min_weak.upgrade()?;
 
-        // Read out item and priority before freeing the node
-        let (priority, item, degree) = unsafe {
-            let node = min_ptr.as_ptr();
-            (
-                ptr::read(&(*node).priority),
-                ptr::read(&(*node).item),
-                (*node).degree,
-            )
-        };
+        let degree = min_rc.borrow().degree;
 
         // Remove minimum tree from trees array
-        // The minimum root is at trees[degree]
         if degree < self.trees.len() {
-            self.trees[degree] = None; // Remove tree from this degree slot
+            self.trees[degree] = None;
         }
 
-        // Collect children of the minimum root
-        // Each child is itself a binomial tree (smaller degree)
-        let mut child_heap = unsafe { self.collect_children(min_ptr) };
-
-        // Free the minimum node (children have been collected)
-        unsafe {
-            drop(Box::from_raw(min_ptr.as_ptr()));
-        }
+        // Collect children into a temporary heap
+        let mut child_heap = self.collect_children(&min_rc);
 
         // Merge the child heap back into the main heap
-        // This uses the same merge algorithm as regular merge
-        // Carry propagation ensures at most one tree per degree
         self.merge_trees(&mut child_heap);
 
-        // Find new minimum by scanning all root trees
-        // This is O(log n) since there are at most O(log n) trees
+        // Find new minimum
         self.find_and_update_min();
 
         self.len -= 1;
-        Some((priority, item))
+
+        // Extract item and priority from the minimum node
+        // At this point, min_rc should be the only strong reference
+        // (we removed it from trees[] and detached children)
+        let node = Rc::try_unwrap(min_rc)
+            .ok()
+            .expect("min node should have no other strong references")
+            .into_inner();
+        Some((node.priority, node.item))
     }
 
     /// Decreases the priority of an element
     ///
     /// **Time Complexity**: O(log n) worst-case
-    ///
-    /// **Precondition**: `new_priority < current_priority` (undefined behavior otherwise)
     ///
     /// **Algorithm**:
     /// 1. Update the priority value
@@ -313,23 +335,25 @@ impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
     ///
     /// **Trade-off**: Simpler implementation, but worse bound for decrease_key.
     fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) -> Result<(), HeapError> {
-        let node_ptr = unsafe { NonNull::new_unchecked(handle.node as *mut Node<T, P>) };
+        let node_rc = handle
+            .node
+            .upgrade()
+            .ok_or(HeapError::PriorityNotDecreased)?;
 
         // Check: new priority must actually be less
-        unsafe {
-            let node = node_ptr.as_ptr();
-            if new_priority >= (*node).priority {
+        {
+            let node = node_rc.borrow();
+            if new_priority >= node.priority {
                 return Err(HeapError::PriorityNotDecreased);
             }
-
-            // Update the priority value
-            (*node).priority = new_priority;
         }
 
-        // Bubble up: swap with parent if heap property is violated
-        // This maintains heap property by moving smaller priorities upward
-        // Unlike Fibonacci/pairing heaps, we don't cut - we swap values
-        self.bubble_up(node_ptr);
+        // Update the priority
+        node_rc.borrow_mut().priority = new_priority;
+
+        // Bubble up to restore heap property
+        self.bubble_up(node_rc);
+
         Ok(())
     }
 
@@ -362,14 +386,12 @@ impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
     /// per position).
     fn merge(&mut self, mut other: Self) {
         // Merge trees from both heaps
-        // This is the core operation: merge by degree with carry propagation
         self.merge_trees(&mut other);
 
         // Update minimum pointer after merge
-        // Need to scan all roots to find new minimum (O(log n))
         self.find_and_update_min();
 
-        // Update length and mark other as empty (prevent double-free)
+        // Update length
         self.len += other.len;
         other.min = None;
         other.len = 0;
@@ -381,44 +403,36 @@ impl<T, P: Ord> BinomialHeap<T, P> {
     ///
     /// This is a helper function for `delete_min` that extracts all children
     /// of a node and creates a new heap from them.
-    unsafe fn collect_children(&self, node: NonNull<Node<T, P>>) -> BinomialHeap<T, P> {
+    fn collect_children(&self, node: &NodeRef<T, P>) -> BinomialHeap<T, P> {
         let mut child_heap = BinomialHeap::new();
-        let node_ptr = node.as_ptr();
 
-        if let Some(child) = (*node_ptr).child {
-            // Children are linked in a sibling list
-            // We need to reverse the list to get correct order
+        // Take the child from the node
+        let first_child = node.borrow_mut().child.take();
+
+        if let Some(child) = first_child {
+            // Children are linked in a sibling list in decreasing degree order
+            // We need to reverse the list and clear parent links
+            let mut children: Vec<NodeRef<T, P>> = Vec::new();
             let mut current = Some(child);
-            let mut prev: Option<NonNull<Node<T, P>>> = None;
 
-            // Reverse the child list (children are linked in decreasing degree order)
-            // Reversing ensures we process them in correct order
+            // Collect all children, clearing parent links
             while let Some(curr) = current {
-                let next = (*curr.as_ptr()).sibling;
-                (*curr.as_ptr()).parent = None; // Clear parent link
-                (*curr.as_ptr()).sibling = prev; // Reverse link
-                prev = Some(curr);
+                let next = curr.borrow_mut().sibling.take();
+                curr.borrow_mut().parent = None; // Clear parent link
+                children.push(curr);
                 current = next;
             }
 
-            // Add each child tree to the temporary heap
-            // Each child is a root of a binomial tree
-            current = prev; // Now reversed list
-            while let Some(curr) = current {
-                let next = (*curr.as_ptr()).sibling;
-                let child_degree = (*curr.as_ptr()).degree;
-
-                // Reset sibling to break link (each child becomes independent)
-                (*curr.as_ptr()).sibling = None;
+            // Add each child tree to the temporary heap at its degree slot
+            for child_node in children {
+                let child_degree = child_node.borrow().degree;
 
                 // Ensure child_heap.trees array is large enough
                 while child_heap.trees.len() <= child_degree {
                     child_heap.trees.push(None);
                 }
                 // Place child tree at its degree slot
-                child_heap.trees[child_degree] = Some(curr);
-
-                current = next;
+                child_heap.trees[child_degree] = Some(child_node);
             }
         }
 
@@ -446,28 +460,34 @@ impl<T, P: Ord> BinomialHeap<T, P> {
     /// **Invariant**: This operation maintains:
     /// - Heap property: parent priority <= child priority
     /// - Binomial tree structure: exactly 2ᵏ nodes in a Bₖ tree
-    #[allow(clippy::only_used_in_recursion)]
-    unsafe fn link_trees(
-        &self,
-        a: NonNull<Node<T, P>>,
-        b: NonNull<Node<T, P>>,
-    ) -> NonNull<Node<T, P>> {
-        // Ensure smaller priority becomes parent (heap property)
-        // If a has larger priority, swap roles
-        if (*a.as_ptr()).priority > (*b.as_ptr()).priority {
-            return self.link_trees(b, a);
+    fn link_trees(&self, a: NodeRef<T, P>, b: NodeRef<T, P>) -> NodeRef<T, P> {
+        // Determine which should be parent based on priority
+        let a_is_parent = a.borrow().priority <= b.borrow().priority;
+
+        let (parent, child) = if a_is_parent { (a, b) } else { (b, a) };
+
+        // Link child as a new first child of parent
+        {
+            let mut child_ref = child.borrow_mut();
+            let mut parent_ref = parent.borrow_mut();
+
+            // child's parent is now parent
+            child_ref.parent = Some(Rc::downgrade(&parent));
+
+            // child's sibling is parent's old first child
+            child_ref.sibling = parent_ref.child.take();
+
+            // parent's first child is now child
+            parent_ref.child = Some(Rc::clone(&child));
+
+            // parent's degree increased by 1
+            parent_ref.degree += 1;
         }
 
-        // Link b as a child of a (a has smaller priority)
-        // a becomes the root of the new B_{k+1} tree
-        let a_child = (*a.as_ptr()).child;
-        (*b.as_ptr()).parent = Some(a); // b's parent is now a
-        (*b.as_ptr()).sibling = a_child; // b's sibling is a's old first child
-        (*a.as_ptr()).child = Some(b); // a's first child is now b
-        (*a.as_ptr()).degree += 1; // a's degree increased by 1
+        // Drop the child Rc here since we cloned it into parent.child
+        drop(child);
 
-        // Return the root of the new tree (a, since a has smaller priority)
-        a
+        parent
     }
 
     /// Merges trees from another heap into this one
@@ -499,43 +519,37 @@ impl<T, P: Ord> BinomialHeap<T, P> {
         }
 
         // Carry propagation: when we link two trees, we may produce a tree of higher degree
-        let mut carry: Option<NonNull<Node<T, P>>> = None;
+        let mut carry: NodePtr<T, P> = None;
 
         // Process each degree from 0 to max_degree
         for degree in 0..max_degree {
-            let mut trees = Vec::new();
+            let mut trees: Vec<NodeRef<T, P>> = Vec::new();
 
             // Step 1: Collect trees from both heaps at this degree
             if degree < self.trees.len() {
-                if let Some(tree) = self.trees[degree] {
+                if let Some(tree) = self.trees[degree].take() {
                     trees.push(tree);
-                    self.trees[degree] = None; // Remove from slot
                 }
             }
 
             if degree < other.trees.len() {
-                if let Some(tree) = other.trees[degree] {
+                if let Some(tree) = other.trees[degree].take() {
                     trees.push(tree);
-                    other.trees[degree] = None; // Remove from slot
                 }
             }
 
             // Step 2: Add carry from previous degree if present
-            if let Some(c) = carry {
+            if let Some(c) = carry.take() {
                 trees.push(c);
-                carry = None; // Consume carry
             }
 
             // Step 3: Link pairs of trees until at most one remains
-            // This is like adding bits: 0+0=0, 0+1=1, 1+1=10 (carry)
             while trees.len() > 1 {
                 let a = trees.pop().unwrap();
                 let b = trees.pop().unwrap();
-                // Link two trees of same degree to produce tree of degree+1
-                let linked = unsafe { self.link_trees(a, b) };
+                let linked = self.link_trees(a, b);
 
-                // Check if linked tree has correct degree for this slot
-                let linked_degree = unsafe { (*linked.as_ptr()).degree };
+                let linked_degree = linked.borrow().degree;
                 if linked_degree == degree + 1 {
                     // Linked tree has degree+1: it becomes carry for next degree
                     carry = Some(linked);
@@ -547,26 +561,21 @@ impl<T, P: Ord> BinomialHeap<T, P> {
 
             // Step 4: Place remaining tree (if any) at this degree slot
             if let Some(tree) = trees.pop() {
-                let tree_degree = unsafe { (*tree.as_ptr()).degree };
+                let tree_degree = tree.borrow().degree;
                 if tree_degree == degree {
-                    // Tree has correct degree: place it here
                     self.trees[degree] = Some(tree);
                 } else {
-                    // Tree has higher degree: it becomes carry
                     carry = Some(tree);
                 }
             }
         }
 
-        // Step 5: Handle final carry (like overflow in binary addition)
-        // If carry remains after processing all degrees, we need a new slot
+        // Step 5: Handle final carry
         if let Some(c) = carry {
-            let degree = unsafe { (*c.as_ptr()).degree };
-            // Ensure trees array is large enough
+            let degree = c.borrow().degree;
             while self.trees.len() <= degree {
                 self.trees.push(None);
             }
-            // Place carry tree at its degree slot
             self.trees[degree] = Some(c);
         }
     }
@@ -593,88 +602,88 @@ impl<T, P: Ord> BinomialHeap<T, P> {
     ///
     /// **Note**: We swap priorities and items, not pointers. This maintains the
     /// binomial tree structure while fixing heap property violations.
-    fn bubble_up(&mut self, mut node: NonNull<Node<T, P>>) {
-        // Bubble up: swap with parent if heap property is violated
+    fn bubble_up(&mut self, node: NodeRef<T, P>) {
+        let mut current = node;
+
         loop {
-            let parent = unsafe { (*node.as_ptr()).parent };
-            let Some(parent) = parent else {
-                break; // Reached root, stop bubbling
+            // Get parent weak ref
+            let parent_weak = {
+                let node_ref = current.borrow();
+                match &node_ref.parent {
+                    Some(p) => p.clone(),
+                    None => break, // Reached root
+                }
             };
 
-            // Check if heap property is satisfied
-            let should_swap = unsafe { (*node.as_ptr()).priority < (*parent.as_ptr()).priority };
+            // Upgrade to strong ref
+            let parent = match parent_weak.upgrade() {
+                Some(p) => p,
+                None => break, // Parent gone (shouldn't happen)
+            };
+
+            // Check if we should swap
+            let should_swap = current.borrow().priority < parent.borrow().priority;
 
             if !should_swap {
-                break; // Heap property satisfied: stop bubbling
+                break; // Heap property satisfied
             }
 
-            // Heap property violated: swap node with parent
-            unsafe {
-                let node_ptr = node.as_ptr();
-                let parent_ptr = parent.as_ptr();
-
-                // Swap priorities and items (not pointers!)
-                // This maintains tree structure while fixing heap property
-                ptr::swap(&mut (*node_ptr).priority, &mut (*parent_ptr).priority);
-                ptr::swap(&mut (*node_ptr).item, &mut (*parent_ptr).item);
+            // Swap priorities and items between current and parent
+            {
+                let mut current_ref = current.borrow_mut();
+                let mut parent_ref = parent.borrow_mut();
+                mem::swap(&mut current_ref.priority, &mut parent_ref.priority);
+                mem::swap(&mut current_ref.item, &mut parent_ref.item);
             }
 
-            // Move up to parent (continue bubbling)
-            node = parent;
+            // Move up to parent
+            current = parent;
         }
 
-        // After bubbling, node may have reached the root
-        // Update minimum pointer if node became root and has smaller priority
-        self.update_min_if_needed(node);
+        // Update minimum pointer if needed
+        self.update_min_if_needed(&current);
     }
 
     /// Updates the minimum pointer if the given node has a smaller priority
-    fn update_min_if_needed(&mut self, node: NonNull<Node<T, P>>) {
-        unsafe {
-            let node_priority = &(*node.as_ptr()).priority;
+    fn update_min_if_needed(&mut self, node: &NodeRef<T, P>) {
+        let node_priority = &node.borrow().priority;
 
-            if let Some(min_ptr) = self.min {
-                let min_priority = &(*min_ptr.as_ptr()).priority;
-                if node_priority < min_priority {
-                    self.min = Some(node);
+        let should_update = match &self.min {
+            Some(min_weak) => {
+                if let Some(min_rc) = min_weak.upgrade() {
+                    node_priority < &min_rc.borrow().priority
+                } else {
+                    true // Min is invalid
                 }
-            } else {
-                // No minimum tracked yet: this node is the minimum
-                self.min = Some(node);
             }
+            None => true, // No minimum yet
+        };
+
+        if should_update {
+            self.min = Some(Rc::downgrade(node));
         }
     }
 
-    /// Finds and updates the minimum pointer
+    /// Finds and updates the minimum pointer by scanning all roots
     fn find_and_update_min(&mut self) {
         self.min = None;
-        for root in self.trees.iter().flatten() {
-            unsafe {
-                let root_priority = &(*root.as_ptr()).priority;
-                let should_update = if let Some(min_ptr) = self.min {
-                    let min_priority = &(*min_ptr.as_ptr()).priority;
-                    root_priority < min_priority
-                } else {
-                    true
-                };
 
-                if should_update {
-                    self.min = Some(*root);
+        for root in self.trees.iter().flatten() {
+            let should_update = match &self.min {
+                Some(min_weak) => {
+                    if let Some(min_rc) = min_weak.upgrade() {
+                        root.borrow().priority < min_rc.borrow().priority
+                    } else {
+                        true
+                    }
                 }
+                None => true,
+            };
+
+            if should_update {
+                self.min = Some(Rc::downgrade(root));
             }
         }
-    }
-
-    /// Recursively frees a binomial tree
-    unsafe fn free_tree(node: NonNull<Node<T, P>>) {
-        let node_ptr = node.as_ptr();
-        if let Some(child) = (*node_ptr).child {
-            Self::free_tree(child);
-        }
-        if let Some(sibling) = (*node_ptr).sibling {
-            Self::free_tree(sibling);
-        }
-        drop(Box::from_raw(node_ptr));
     }
 }
 
