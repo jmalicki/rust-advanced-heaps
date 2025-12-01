@@ -120,6 +120,12 @@ Choose based on your workload:
 - Mostly inserts/deletes: Binomial heap may be sufficient
 - Small heaps: Binary heap is often faster due to lower constant factors
 
+## Benchmarks
+
+This crate includes benchmarks comparing heap implementations on shortest
+path problems using DIMACS road network graphs. See
+[docs/benchmarks.md](docs/benchmarks.md) for setup instructions and details.
+
 ## Development Setup
 
 This project uses pre-commit hooks for code quality checks. After cloning or
