@@ -13,32 +13,39 @@
 //! Note: Dijkstra and A* are the same algorithm - A* just adds a heuristic to
 //! guide the search. Dijkstra is A* with h(n) = 0.
 //!
+//! The node type carries its own goal context and implements `is_goal()` to
+//! determine when the search should terminate.
+//!
 //! # Example
 //!
 //! ```rust
 //! use rust_advanced_heaps::pathfinding::{SearchNode, dijkstra};
 //! use rust_advanced_heaps::pairing::PairingHeap;
 //!
+//! // Node carries its goal coordinates
 //! #[derive(Clone, PartialEq, Eq, Hash)]
-//! struct GridPos { x: i32, y: i32 }
+//! struct GridPos { x: i32, y: i32, goal_x: i32, goal_y: i32 }
 //!
 //! impl SearchNode for GridPos {
 //!     type Cost = u32;
 //!
 //!     fn successors(&self) -> Vec<(Self, Self::Cost)> {
 //!         vec![
-//!             (GridPos { x: self.x + 1, y: self.y }, 1),
-//!             (GridPos { x: self.x - 1, y: self.y }, 1),
-//!             (GridPos { x: self.x, y: self.y + 1 }, 1),
-//!             (GridPos { x: self.x, y: self.y - 1 }, 1),
+//!             (GridPos { x: self.x + 1, y: self.y, goal_x: self.goal_x, goal_y: self.goal_y }, 1),
+//!             (GridPos { x: self.x - 1, y: self.y, goal_x: self.goal_x, goal_y: self.goal_y }, 1),
+//!             (GridPos { x: self.x, y: self.y + 1, goal_x: self.goal_x, goal_y: self.goal_y }, 1),
+//!             (GridPos { x: self.x, y: self.y - 1, goal_x: self.goal_x, goal_y: self.goal_y }, 1),
 //!         ]
+//!     }
+//!
+//!     fn is_goal(&self) -> bool {
+//!         self.x == self.goal_x && self.y == self.goal_y
 //!     }
 //! }
 //!
-//! let start = GridPos { x: 0, y: 0 };
-//! let goal = GridPos { x: 2, y: 2 };
+//! let start = GridPos { x: 0, y: 0, goal_x: 2, goal_y: 2 };
 //!
-//! let result = dijkstra::<_, PairingHeap<_, _>>(&start, |pos| *pos == goal);
+//! let result = dijkstra::<_, PairingHeap<_, _>>(&start);
 //! assert!(result.is_some());
 //! let (path, cost) = result.unwrap();
 //! assert_eq!(cost, 4); // Manhattan distance
@@ -62,6 +69,11 @@ impl<T> Cost for T where T: Ord + Copy + Add<Output = Self> + Default {}
 ///
 /// Implement this trait for your node type to use Dijkstra's or A* algorithms.
 /// The node type must be hashable and cloneable for efficient storage.
+///
+/// The node carries all context needed to:
+/// - Generate successors
+/// - Check if it's a goal
+/// - (Optionally) compute heuristics for A*
 pub trait SearchNode: Clone + Eq + Hash {
     /// The cost type for edge weights (e.g., u32, u64, f64 wrapped in OrderedFloat)
     type Cost: Cost;
@@ -71,6 +83,12 @@ pub trait SearchNode: Clone + Eq + Hash {
     /// This is where you define your graph structure. Each call should return
     /// all neighbors reachable from this node along with their edge costs.
     fn successors(&self) -> Vec<(Self, Self::Cost)>;
+
+    /// Returns true if this node is a goal state.
+    ///
+    /// The node should carry enough context to determine this (e.g., a reference
+    /// to the goal position, or the problem instance).
+    fn is_goal(&self) -> bool;
 }
 
 /// Trait for nodes that can provide a heuristic estimate for A* search.
@@ -78,14 +96,17 @@ pub trait SearchNode: Clone + Eq + Hash {
 /// The heuristic must be admissible (never overestimate the true cost)
 /// for A* to find optimal paths.
 pub trait AStarNode: SearchNode {
-    /// Returns a heuristic estimate of the cost from this node to the goal.
+    /// Returns a heuristic estimate of the cost from this node to any goal.
     ///
     /// For A* to find optimal paths, this must never overestimate the actual cost.
     /// Common heuristics include:
     /// - Manhattan distance for grid-based movement
     /// - Euclidean distance for arbitrary movement
     /// - Zero (reduces to Dijkstra's algorithm)
-    fn heuristic(&self, goal: &Self) -> Self::Cost;
+    ///
+    /// The node should carry enough context to compute this (e.g., a reference
+    /// to the goal position).
+    fn heuristic(&self) -> Self::Cost;
 }
 
 /// A wrapper for costs in the heap that orders by f-score.
@@ -236,28 +257,91 @@ pub struct PathResult<N: SearchNode> {
     pub cost: N::Cost,
 }
 
-/// Core search algorithm used by both Dijkstra and A*.
+/// Runs Dijkstra's algorithm from the start node until `is_goal()` returns true.
 ///
-/// This is the unified implementation - Dijkstra is just this with h(n) = 0.
+/// # Type Parameters
+/// - `N`: The node type implementing [`SearchNode`]
+/// - `H`: The heap type implementing [`Heap`]
 ///
 /// # Arguments
-/// - `start`: The starting node
-/// - `is_goal`: A function that returns true when a goal node is reached
-/// - `heuristic`: A function returning a heuristic estimate (use |_| 0 for Dijkstra)
+/// - `start`: The starting node (must implement `SearchNode` with `is_goal()`)
 ///
 /// # Returns
 /// - `Some((path, cost))` if a path is found
 /// - `None` if no path exists
-pub fn search<N, H, G, F>(
+///
+/// # Example
+/// ```rust
+/// use rust_advanced_heaps::pathfinding::{SearchNode, dijkstra};
+/// use rust_advanced_heaps::fibonacci::FibonacciHeap;
+///
+/// // Node that carries its own goal
+/// #[derive(Clone, PartialEq, Eq, Hash, Debug)]
+/// struct Node {
+///     value: i32,
+///     goal: i32,
+/// }
+///
+/// impl SearchNode for Node {
+///     type Cost = u32;
+///
+///     fn successors(&self) -> Vec<(Self, u32)> {
+///         if self.value < 100 {
+///             vec![(Node { value: self.value + 1, goal: self.goal }, 1)]
+///         } else {
+///             vec![]
+///         }
+///     }
+///
+///     fn is_goal(&self) -> bool {
+///         self.value == self.goal
+///     }
+/// }
+///
+/// let start = Node { value: 0, goal: 5 };
+/// let result = dijkstra::<_, FibonacciHeap<_, _>>(&start);
+/// assert!(result.is_some());
+/// let (path, cost) = result.unwrap();
+/// assert_eq!(cost, 5);
+/// ```
+pub fn dijkstra<N, H>(start: &N) -> Option<(Vec<N>, N::Cost)>
+where
+    N: SearchNode,
+    H: Heap<NodeIndex, PriorityCost<N::Cost>>,
+{
+    search_impl::<N, H>(start, |_| N::Cost::default())
+}
+
+/// Runs A* search from the start node until `is_goal()` returns true.
+///
+/// Uses the node's `heuristic()` method to guide the search.
+///
+/// # Type Parameters
+/// - `N`: The node type implementing [`AStarNode`]
+/// - `H`: The heap type implementing [`Heap`]
+///
+/// # Arguments
+/// - `start`: The starting node
+///
+/// # Returns
+/// - `Some((path, cost))` if a path is found
+/// - `None` if no path exists
+pub fn astar<N, H>(start: &N) -> Option<(Vec<N>, N::Cost)>
+where
+    N: AStarNode,
+    H: Heap<NodeIndex, PriorityCost<N::Cost>>,
+{
+    search_impl::<N, H>(start, |n| n.heuristic())
+}
+
+/// Internal search implementation.
+fn search_impl<N, H>(
     start: &N,
-    is_goal: G,
-    heuristic: F,
+    heuristic: impl Fn(&N) -> N::Cost,
 ) -> Option<(Vec<N>, N::Cost)>
 where
     N: SearchNode,
     H: Heap<NodeIndex, PriorityCost<N::Cost>>,
-    G: Fn(&N) -> bool,
-    F: Fn(&N) -> N::Cost,
 {
     let mut heap = H::new();
     let mut finder: PathFinder<N, H::Handle, N::Cost> = PathFinder::new();
@@ -284,7 +368,7 @@ where
         let current_node = current_entry.node.clone();
         let current_g = priority.g_score;
 
-        if is_goal(&current_node) {
+        if current_node.is_goal() {
             let path = finder.reconstruct_path(current_index);
             return Some((path, current_g));
         }
@@ -330,150 +414,11 @@ where
     None
 }
 
-/// Runs Dijkstra's algorithm to find the shortest path from start to any goal.
-///
-/// This is equivalent to A* with a zero heuristic.
-///
-/// # Type Parameters
-/// - `N`: The node type implementing [`SearchNode`]
-/// - `H`: The heap type implementing [`Heap`]
-///
-/// # Arguments
-/// - `start`: The starting node
-/// - `is_goal`: A function that returns true when a goal node is reached
-///
-/// # Returns
-/// - `Some((path, cost))` if a path is found
-/// - `None` if no path exists
-///
-/// # Example
-/// ```rust
-/// use rust_advanced_heaps::pathfinding::{SearchNode, dijkstra};
-/// use rust_advanced_heaps::fibonacci::FibonacciHeap;
-///
-/// #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-/// struct Node(i32);
-///
-/// impl SearchNode for Node {
-///     type Cost = u32;
-///     fn successors(&self) -> Vec<(Self, u32)> {
-///         if self.0 < 10 {
-///             vec![(Node(self.0 + 1), 1)]
-///         } else {
-///             vec![]
-///         }
-///     }
-/// }
-///
-/// let result = dijkstra::<_, FibonacciHeap<_, _>>(&Node(0), |n| n.0 == 5);
-/// assert!(result.is_some());
-/// let (path, cost) = result.unwrap();
-/// assert_eq!(cost, 5);
-/// assert_eq!(path.len(), 6); // 0, 1, 2, 3, 4, 5
-/// ```
-#[inline]
-pub fn dijkstra<N, H>(start: &N, is_goal: impl Fn(&N) -> bool) -> Option<(Vec<N>, N::Cost)>
-where
-    N: SearchNode,
-    H: Heap<NodeIndex, PriorityCost<N::Cost>>,
-{
-    search::<N, H, _, _>(start, is_goal, |_| N::Cost::default())
-}
-
-/// Runs A* search to find the shortest path from start to goal.
-///
-/// A* uses a heuristic to guide the search, which can significantly reduce
-/// the number of nodes explored compared to Dijkstra's algorithm.
-///
-/// # Type Parameters
-/// - `N`: The node type implementing [`AStarNode`]
-/// - `H`: The heap type implementing [`Heap`]
-///
-/// # Arguments
-/// - `start`: The starting node
-/// - `goal`: The goal node
-///
-/// # Returns
-/// - `Some((path, cost))` if a path is found
-/// - `None` if no path exists
-///
-/// # Example
-/// ```rust
-/// use rust_advanced_heaps::pathfinding::{SearchNode, AStarNode, astar};
-/// use rust_advanced_heaps::pairing::PairingHeap;
-///
-/// #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-/// struct GridPos { x: i32, y: i32 }
-///
-/// impl SearchNode for GridPos {
-///     type Cost = u32;
-///     fn successors(&self) -> Vec<(Self, u32)> {
-///         vec![
-///             (GridPos { x: self.x + 1, y: self.y }, 1),
-///             (GridPos { x: self.x - 1, y: self.y }, 1),
-///             (GridPos { x: self.x, y: self.y + 1 }, 1),
-///             (GridPos { x: self.x, y: self.y - 1 }, 1),
-///         ]
-///     }
-/// }
-///
-/// impl AStarNode for GridPos {
-///     fn heuristic(&self, goal: &Self) -> u32 {
-///         ((self.x - goal.x).abs() + (self.y - goal.y).abs()) as u32
-///     }
-/// }
-///
-/// let start = GridPos { x: 0, y: 0 };
-/// let goal = GridPos { x: 3, y: 3 };
-/// let result = astar::<_, PairingHeap<_, _>>(&start, &goal);
-/// assert!(result.is_some());
-/// let (path, cost) = result.unwrap();
-/// assert_eq!(cost, 6);
-/// ```
-#[inline]
-pub fn astar<N, H>(start: &N, goal: &N) -> Option<(Vec<N>, N::Cost)>
-where
-    N: AStarNode,
-    H: Heap<NodeIndex, PriorityCost<N::Cost>>,
-{
-    search::<N, H, _, _>(start, |n| n == goal, |n| n.heuristic(goal))
-}
-
-/// Runs A* search with a custom goal predicate and heuristic.
-///
-/// This variant allows finding a path to any node matching a predicate,
-/// not just a specific goal node. The heuristic is provided as a closure.
-///
-/// # Type Parameters
-/// - `N`: The node type implementing [`SearchNode`]
-/// - `H`: The heap type implementing [`Heap`]
-///
-/// # Arguments
-/// - `start`: The starting node
-/// - `is_goal`: A function that returns true when a goal node is reached
-/// - `heuristic`: A function returning a heuristic estimate for a node
-///
-/// # Returns
-/// - `Some((path, cost))` if a path is found
-/// - `None` if no path exists
-#[inline]
-pub fn astar_with<N, H, G, F>(
-    start: &N,
-    is_goal: G,
-    heuristic: F,
-) -> Option<(Vec<N>, N::Cost)>
-where
-    N: SearchNode,
-    H: Heap<NodeIndex, PriorityCost<N::Cost>>,
-    G: Fn(&N) -> bool,
-    F: Fn(&N) -> N::Cost,
-{
-    search::<N, H, _, _>(start, is_goal, heuristic)
-}
 
 /// Builder for pathfinding queries with more configuration options.
 ///
 /// Provides a fluent API for configuring and running pathfinding searches.
+/// The node type's `is_goal()` method determines when to stop.
 pub struct PathFinderBuilder<N: SearchNode> {
     start: N,
     max_cost: Option<N::Cost>,
@@ -502,12 +447,34 @@ impl<N: SearchNode> PathFinderBuilder<N> {
         self
     }
 
-    /// Runs search with the configured settings.
-    pub fn search<H, G, F>(self, is_goal: G, heuristic: F) -> Option<(Vec<N>, N::Cost)>
+    /// Runs Dijkstra's algorithm with the configured settings.
+    ///
+    /// Uses the node's `is_goal()` method to determine when to stop.
+    pub fn dijkstra<H>(self) -> Option<(Vec<N>, N::Cost)>
     where
         H: Heap<NodeIndex, PriorityCost<N::Cost>>,
-        G: Fn(&N) -> bool,
-        F: Fn(&N) -> N::Cost,
+    {
+        self.search_with_heuristic::<H>(|_| N::Cost::default())
+    }
+
+    /// Runs A* search with the configured settings.
+    ///
+    /// Uses the node's `is_goal()` and `heuristic()` methods.
+    pub fn astar<H>(self) -> Option<(Vec<N>, N::Cost)>
+    where
+        N: AStarNode,
+        H: Heap<NodeIndex, PriorityCost<N::Cost>>,
+    {
+        self.search_with_heuristic::<H>(|n| n.heuristic())
+    }
+
+    /// Internal search implementation with configurable heuristic.
+    fn search_with_heuristic<H>(
+        self,
+        heuristic: impl Fn(&N) -> N::Cost,
+    ) -> Option<(Vec<N>, N::Cost)>
+    where
+        H: Heap<NodeIndex, PriorityCost<N::Cost>>,
     {
         let max_cost = self.max_cost;
         let max_nodes = self.max_nodes;
@@ -552,7 +519,7 @@ impl<N: SearchNode> PathFinderBuilder<N> {
                 }
             }
 
-            if is_goal(&current_node) {
+            if current_node.is_goal() {
                 let path = finder.reconstruct_path(current_index);
                 return Some((path, current_g));
             }
@@ -604,15 +571,6 @@ impl<N: SearchNode> PathFinderBuilder<N> {
         }
 
         None
-    }
-
-    /// Runs Dijkstra's algorithm with the configured settings.
-    #[inline]
-    pub fn dijkstra<H>(self, is_goal: impl Fn(&N) -> bool) -> Option<(Vec<N>, N::Cost)>
-    where
-        H: Heap<NodeIndex, PriorityCost<N::Cost>>,
-    {
-        self.search::<H, _, _>(is_goal, |_| N::Cost::default())
     }
 }
 
@@ -703,32 +661,47 @@ mod tests {
     use crate::fibonacci::FibonacciHeap;
     use crate::pairing::PairingHeap;
 
-    // Simple linear graph for basic tests
+    // Simple linear graph node that carries its goal
     #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-    struct LinearNode(i32);
+    struct LinearNode {
+        value: i32,
+        goal: i32,
+    }
+
+    impl LinearNode {
+        fn new(value: i32, goal: i32) -> Self {
+            LinearNode { value, goal }
+        }
+    }
 
     impl SearchNode for LinearNode {
         type Cost = u32;
 
         fn successors(&self) -> Vec<(Self, u32)> {
-            if self.0 < 100 {
-                vec![(LinearNode(self.0 + 1), 1)]
+            if self.value < 100 {
+                vec![(LinearNode::new(self.value + 1, self.goal), 1)]
             } else {
                 vec![]
             }
         }
+
+        fn is_goal(&self) -> bool {
+            self.value == self.goal
+        }
     }
 
-    // Grid-based graph for A* tests
+    // Grid-based graph for A* tests - carries goal coordinates
     #[derive(Clone, PartialEq, Eq, Hash, Debug)]
     struct GridPos {
         x: i32,
         y: i32,
+        goal_x: i32,
+        goal_y: i32,
     }
 
     impl GridPos {
-        fn new(x: i32, y: i32) -> Self {
-            GridPos { x, y }
+        fn new(x: i32, y: i32, goal_x: i32, goal_y: i32) -> Self {
+            GridPos { x, y, goal_x, goal_y }
         }
     }
 
@@ -737,23 +710,36 @@ mod tests {
 
         fn successors(&self) -> Vec<(Self, u32)> {
             vec![
-                (GridPos::new(self.x + 1, self.y), 1),
-                (GridPos::new(self.x - 1, self.y), 1),
-                (GridPos::new(self.x, self.y + 1), 1),
-                (GridPos::new(self.x, self.y - 1), 1),
+                (GridPos::new(self.x + 1, self.y, self.goal_x, self.goal_y), 1),
+                (GridPos::new(self.x - 1, self.y, self.goal_x, self.goal_y), 1),
+                (GridPos::new(self.x, self.y + 1, self.goal_x, self.goal_y), 1),
+                (GridPos::new(self.x, self.y - 1, self.goal_x, self.goal_y), 1),
             ]
+        }
+
+        fn is_goal(&self) -> bool {
+            self.x == self.goal_x && self.y == self.goal_y
         }
     }
 
     impl AStarNode for GridPos {
-        fn heuristic(&self, goal: &Self) -> u32 {
-            ((self.x - goal.x).abs() + (self.y - goal.y).abs()) as u32
+        fn heuristic(&self) -> u32 {
+            ((self.x - self.goal_x).abs() + (self.y - self.goal_y).abs()) as u32
         }
     }
 
-    // Weighted graph for testing decrease_key
+    // Weighted graph node that carries its goal
     #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-    struct WeightedNode(char);
+    struct WeightedNode {
+        id: char,
+        goal: char,
+    }
+
+    impl WeightedNode {
+        fn new(id: char, goal: char) -> Self {
+            WeightedNode { id, goal }
+        }
+    }
 
     impl SearchNode for WeightedNode {
         type Cost = u32;
@@ -769,14 +755,44 @@ mod tests {
             // Path A->D via B costs 2
             // Path A->E via C costs 6
             // Path A->E via B costs 2
-            match self.0 {
-                'A' => vec![(WeightedNode('B'), 1), (WeightedNode('C'), 5)],
-                'B' => vec![(WeightedNode('D'), 1), (WeightedNode('E'), 1)],
-                'C' => vec![(WeightedNode('E'), 1)],
+            match self.id {
+                'A' => vec![
+                    (WeightedNode::new('B', self.goal), 1),
+                    (WeightedNode::new('C', self.goal), 5),
+                ],
+                'B' => vec![
+                    (WeightedNode::new('D', self.goal), 1),
+                    (WeightedNode::new('E', self.goal), 1),
+                ],
+                'C' => vec![(WeightedNode::new('E', self.goal), 1)],
                 'D' => vec![],
                 'E' => vec![],
                 _ => vec![],
             }
+        }
+
+        fn is_goal(&self) -> bool {
+            self.id == self.goal
+        }
+    }
+
+    // Node for reachable_within tests - no goal needed, always returns false
+    #[derive(Clone, PartialEq, Eq, Hash, Debug)]
+    struct ReachableNode(i32);
+
+    impl SearchNode for ReachableNode {
+        type Cost = u32;
+
+        fn successors(&self) -> Vec<(Self, u32)> {
+            if self.0 < 100 {
+                vec![(ReachableNode(self.0 + 1), 1)]
+            } else {
+                vec![]
+            }
+        }
+
+        fn is_goal(&self) -> bool {
+            false // reachable_within doesn't use is_goal
         }
     }
 
@@ -784,18 +800,20 @@ mod tests {
 
     #[test]
     fn test_dijkstra_simple_path_fibonacci() {
-        let result = dijkstra::<_, FibonacciHeap<_, _>>(&LinearNode(0), |n| n.0 == 5);
+        let start = LinearNode::new(0, 5);
+        let result = dijkstra::<_, FibonacciHeap<_, _>>(&start);
         assert!(result.is_some());
         let (path, cost) = result.unwrap();
         assert_eq!(cost, 5);
         assert_eq!(path.len(), 6);
-        assert_eq!(path[0], LinearNode(0));
-        assert_eq!(path[5], LinearNode(5));
+        assert_eq!(path[0].value, 0);
+        assert_eq!(path[5].value, 5);
     }
 
     #[test]
     fn test_dijkstra_simple_path_pairing() {
-        let result = dijkstra::<_, PairingHeap<_, _>>(&LinearNode(0), |n| n.0 == 5);
+        let start = LinearNode::new(0, 5);
+        let result = dijkstra::<_, PairingHeap<_, _>>(&start);
         assert!(result.is_some());
         let (path, cost) = result.unwrap();
         assert_eq!(cost, 5);
@@ -805,64 +823,69 @@ mod tests {
     #[test]
     fn test_dijkstra_no_path() {
         // LinearNode stops at 100, so 200 is unreachable
-        let result = dijkstra::<_, FibonacciHeap<_, _>>(&LinearNode(0), |n| n.0 == 200);
+        let start = LinearNode::new(0, 200);
+        let result = dijkstra::<_, FibonacciHeap<_, _>>(&start);
         assert!(result.is_none());
     }
 
     #[test]
     fn test_dijkstra_start_is_goal() {
-        let result = dijkstra::<_, FibonacciHeap<_, _>>(&LinearNode(5), |n| n.0 == 5);
+        let start = LinearNode::new(5, 5);
+        let result = dijkstra::<_, FibonacciHeap<_, _>>(&start);
         assert!(result.is_some());
         let (path, cost) = result.unwrap();
         assert_eq!(cost, 0);
         assert_eq!(path.len(), 1);
-        assert_eq!(path[0], LinearNode(5));
+        assert_eq!(path[0].value, 5);
     }
 
     #[test]
     fn test_dijkstra_weighted_graph() {
         // Test that Dijkstra finds the shortest path in a weighted graph
-        let result = dijkstra::<_, FibonacciHeap<_, _>>(&WeightedNode('A'), |n| n.0 == 'E');
+        let start = WeightedNode::new('A', 'E');
+        let result = dijkstra::<_, FibonacciHeap<_, _>>(&start);
         assert!(result.is_some());
         let (path, cost) = result.unwrap();
         // Should go A -> B -> E (cost 2) not A -> C -> E (cost 6)
         assert_eq!(cost, 2);
         assert_eq!(path.len(), 3);
-        assert_eq!(path[0], WeightedNode('A'));
-        assert_eq!(path[1], WeightedNode('B'));
-        assert_eq!(path[2], WeightedNode('E'));
+        assert_eq!(path[0].id, 'A');
+        assert_eq!(path[1].id, 'B');
+        assert_eq!(path[2].id, 'E');
     }
 
     #[test]
     fn test_dijkstra_grid() {
-        let start = GridPos::new(0, 0);
-        let result = dijkstra::<_, FibonacciHeap<_, _>>(&start, |n| n.x == 3 && n.y == 3);
+        let start = GridPos::new(0, 0, 3, 3);
+        let result = dijkstra::<_, FibonacciHeap<_, _>>(&start);
         assert!(result.is_some());
         let (path, cost) = result.unwrap();
         // Manhattan distance from (0,0) to (3,3) is 6
         assert_eq!(cost, 6);
-        assert_eq!(path[0], start);
+        assert_eq!(path[0].x, 0);
+        assert_eq!(path[0].y, 0);
     }
 
     // ==================== A* Tests ====================
 
     #[test]
     fn test_astar_grid_fibonacci() {
-        let start = GridPos::new(0, 0);
-        let goal = GridPos::new(5, 5);
-        let result = astar::<_, FibonacciHeap<_, _>>(&start, &goal);
+        let start = GridPos::new(0, 0, 5, 5);
+        let result = astar::<_, FibonacciHeap<_, _>>(&start);
         assert!(result.is_some());
         let (path, cost) = result.unwrap();
         assert_eq!(cost, 10);
-        assert_eq!(path[0], start);
-        assert_eq!(*path.last().unwrap(), goal);
+        assert_eq!(path[0].x, 0);
+        assert_eq!(path[0].y, 0);
+        let last = path.last().unwrap();
+        assert_eq!(last.x, 5);
+        assert_eq!(last.y, 5);
     }
 
     #[test]
     fn test_astar_grid_pairing() {
-        let start = GridPos::new(0, 0);
-        let goal = GridPos::new(5, 5);
-        let result = astar::<_, PairingHeap<_, _>>(&start, &goal);
+        let start = GridPos::new(0, 0, 5, 5);
+        let result = astar::<_, PairingHeap<_, _>>(&start);
         assert!(result.is_some());
         let (_, cost) = result.unwrap();
         assert_eq!(cost, 10);
@@ -870,57 +893,45 @@ mod tests {
 
     #[test]
     fn test_astar_same_start_goal() {
-        let pos = GridPos::new(3, 3);
-        let result = astar::<_, FibonacciHeap<_, _>>(&pos, &pos);
+        let start = GridPos::new(3, 3, 3, 3);
+        let result = astar::<_, FibonacciHeap<_, _>>(&start);
         assert!(result.is_some());
         let (path, cost) = result.unwrap();
         assert_eq!(cost, 0);
         assert_eq!(path.len(), 1);
-        assert_eq!(path[0], pos);
-    }
-
-    #[test]
-    fn test_astar_with_custom_heuristic() {
-        let start = GridPos::new(0, 0);
-        let goal = GridPos::new(3, 3);
-
-        // Use zero heuristic (reduces to Dijkstra)
-        let result = astar_with::<_, FibonacciHeap<_, _>, _, _>(
-            &start,
-            |n| *n == goal,
-            |_| 0, // Zero heuristic
-        );
-        assert!(result.is_some());
-        let (_, cost) = result.unwrap();
-        assert_eq!(cost, 6);
+        assert_eq!(path[0].x, 3);
+        assert_eq!(path[0].y, 3);
     }
 
     // ==================== Builder Tests ====================
 
     #[test]
     fn test_builder_max_cost() {
-        let result = PathFinderBuilder::new(LinearNode(0))
+        let start = LinearNode::new(0, 10);
+        let result = PathFinderBuilder::new(start)
             .max_cost(3)
-            .dijkstra::<FibonacciHeap<_, _>>(|n| n.0 == 10);
+            .dijkstra::<FibonacciHeap<_, _>>();
         // Should fail because goal is at cost 10, but max is 3
         assert!(result.is_none());
     }
 
     #[test]
     fn test_builder_max_nodes() {
-        let result = PathFinderBuilder::new(LinearNode(0))
+        let start = LinearNode::new(0, 10);
+        let result = PathFinderBuilder::new(start)
             .max_nodes(5)
-            .dijkstra::<FibonacciHeap<_, _>>(|n| n.0 == 10);
+            .dijkstra::<FibonacciHeap<_, _>>();
         // Should fail because we can only explore 5 nodes
         assert!(result.is_none());
     }
 
     #[test]
     fn test_builder_success_within_limits() {
-        let result = PathFinderBuilder::new(LinearNode(0))
+        let start = LinearNode::new(0, 5);
+        let result = PathFinderBuilder::new(start)
             .max_cost(10)
             .max_nodes(20)
-            .dijkstra::<FibonacciHeap<_, _>>(|n| n.0 == 5);
+            .dijkstra::<FibonacciHeap<_, _>>();
         assert!(result.is_some());
         let (_, cost) = result.unwrap();
         assert_eq!(cost, 5);
@@ -930,7 +941,7 @@ mod tests {
 
     #[test]
     fn test_reachable_within() {
-        let reachable = reachable_within::<_, FibonacciHeap<_, _>>(&LinearNode(0), 5);
+        let reachable = reachable_within::<_, FibonacciHeap<_, _>>(&ReachableNode(0), 5);
         assert_eq!(reachable.len(), 6); // Nodes 0-5
         for (node, cost) in &reachable {
             assert!(node.0 >= 0 && node.0 <= 5);
@@ -940,9 +951,9 @@ mod tests {
 
     #[test]
     fn test_reachable_within_zero() {
-        let reachable = reachable_within::<_, FibonacciHeap<_, _>>(&LinearNode(0), 0);
+        let reachable = reachable_within::<_, FibonacciHeap<_, _>>(&ReachableNode(0), 0);
         assert_eq!(reachable.len(), 1);
-        assert_eq!(reachable[0].0, LinearNode(0));
+        assert_eq!(reachable[0].0, ReachableNode(0));
         assert_eq!(reachable[0].1, 0);
     }
 
@@ -950,7 +961,16 @@ mod tests {
 
     // Graph where decrease_key is necessary for optimal path
     #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-    struct DecreaseKeyNode(u32);
+    struct DecreaseKeyNode {
+        id: u32,
+        goal: u32,
+    }
+
+    impl DecreaseKeyNode {
+        fn new(id: u32, goal: u32) -> Self {
+            DecreaseKeyNode { id, goal }
+        }
+    }
 
     impl SearchNode for DecreaseKeyNode {
         type Cost = u32;
@@ -966,34 +986,41 @@ mod tests {
             //
             // Without decrease_key: might find 0->1->3 (cost 11)
             // With decrease_key: finds 0->2->1->3 (cost 7)
-            match self.0 {
-                0 => vec![(DecreaseKeyNode(1), 10), (DecreaseKeyNode(2), 1)],
-                1 => vec![(DecreaseKeyNode(3), 1)],
-                2 => vec![(DecreaseKeyNode(1), 5)],
+            match self.id {
+                0 => vec![
+                    (DecreaseKeyNode::new(1, self.goal), 10),
+                    (DecreaseKeyNode::new(2, self.goal), 1),
+                ],
+                1 => vec![(DecreaseKeyNode::new(3, self.goal), 1)],
+                2 => vec![(DecreaseKeyNode::new(1, self.goal), 5)],
                 _ => vec![],
             }
+        }
+
+        fn is_goal(&self) -> bool {
+            self.id == self.goal
         }
     }
 
     #[test]
     fn test_decrease_key_finds_optimal() {
-        let result =
-            dijkstra::<_, FibonacciHeap<_, _>>(&DecreaseKeyNode(0), |n| n.0 == 3);
+        let start = DecreaseKeyNode::new(0, 3);
+        let result = dijkstra::<_, FibonacciHeap<_, _>>(&start);
         assert!(result.is_some());
         let (path, cost) = result.unwrap();
         // Optimal path is 0 -> 2 -> 1 -> 3 with cost 7
         assert_eq!(cost, 7);
         assert_eq!(path.len(), 4);
-        assert_eq!(path[0], DecreaseKeyNode(0));
-        assert_eq!(path[1], DecreaseKeyNode(2));
-        assert_eq!(path[2], DecreaseKeyNode(1));
-        assert_eq!(path[3], DecreaseKeyNode(3));
+        assert_eq!(path[0].id, 0);
+        assert_eq!(path[1].id, 2);
+        assert_eq!(path[2].id, 1);
+        assert_eq!(path[3].id, 3);
     }
 
     #[test]
     fn test_decrease_key_with_pairing_heap() {
-        let result =
-            dijkstra::<_, PairingHeap<_, _>>(&DecreaseKeyNode(0), |n| n.0 == 3);
+        let start = DecreaseKeyNode::new(0, 3);
+        let result = dijkstra::<_, PairingHeap<_, _>>(&start);
         assert!(result.is_some());
         let (path, cost) = result.unwrap();
         assert_eq!(cost, 7);
@@ -1005,46 +1032,62 @@ mod tests {
     #[test]
     fn test_disconnected_graph() {
         #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-        struct DisconnectedNode(u32);
+        struct DisconnectedNode {
+            id: u32,
+            goal: u32,
+        }
 
         impl SearchNode for DisconnectedNode {
             type Cost = u32;
             fn successors(&self) -> Vec<(Self, u32)> {
-                match self.0 {
-                    0 => vec![(DisconnectedNode(1), 1)],
-                    1 => vec![(DisconnectedNode(0), 1)],
+                match self.id {
+                    0 => vec![(DisconnectedNode { id: 1, goal: self.goal }, 1)],
+                    1 => vec![(DisconnectedNode { id: 0, goal: self.goal }, 1)],
                     // 2 is disconnected
-                    2 => vec![(DisconnectedNode(3), 1)],
-                    3 => vec![(DisconnectedNode(2), 1)],
+                    2 => vec![(DisconnectedNode { id: 3, goal: self.goal }, 1)],
+                    3 => vec![(DisconnectedNode { id: 2, goal: self.goal }, 1)],
                     _ => vec![],
                 }
             }
+            fn is_goal(&self) -> bool {
+                self.id == self.goal
+            }
         }
 
-        let result =
-            dijkstra::<_, FibonacciHeap<_, _>>(&DisconnectedNode(0), |n| n.0 == 3);
+        let start = DisconnectedNode { id: 0, goal: 3 };
+        let result = dijkstra::<_, FibonacciHeap<_, _>>(&start);
         assert!(result.is_none());
     }
 
     #[test]
     fn test_cycle_in_graph() {
         #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-        struct CyclicNode(u32);
+        struct CyclicNode {
+            id: u32,
+            goal: u32,
+        }
 
         impl SearchNode for CyclicNode {
             type Cost = u32;
             fn successors(&self) -> Vec<(Self, u32)> {
-                match self.0 {
-                    0 => vec![(CyclicNode(1), 1)],
-                    1 => vec![(CyclicNode(2), 1)],
-                    2 => vec![(CyclicNode(0), 1), (CyclicNode(3), 1)],
+                match self.id {
+                    0 => vec![(CyclicNode { id: 1, goal: self.goal }, 1)],
+                    1 => vec![(CyclicNode { id: 2, goal: self.goal }, 1)],
+                    2 => vec![
+                        (CyclicNode { id: 0, goal: self.goal }, 1),
+                        (CyclicNode { id: 3, goal: self.goal }, 1),
+                    ],
                     3 => vec![],
                     _ => vec![],
                 }
             }
+            fn is_goal(&self) -> bool {
+                self.id == self.goal
+            }
         }
 
-        let result = dijkstra::<_, FibonacciHeap<_, _>>(&CyclicNode(0), |n| n.0 == 3);
+        let start = CyclicNode { id: 0, goal: 3 };
+        let result = dijkstra::<_, FibonacciHeap<_, _>>(&start);
         assert!(result.is_some());
         let (path, cost) = result.unwrap();
         assert_eq!(cost, 3);
@@ -1054,22 +1097,31 @@ mod tests {
     #[test]
     fn test_multiple_paths_same_cost() {
         #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-        struct MultiPathNode(u32);
+        struct MultiPathNode {
+            id: u32,
+            goal: u32,
+        }
 
         impl SearchNode for MultiPathNode {
             type Cost = u32;
             fn successors(&self) -> Vec<(Self, u32)> {
-                match self.0 {
-                    0 => vec![(MultiPathNode(1), 1), (MultiPathNode(2), 1)],
-                    1 => vec![(MultiPathNode(3), 1)],
-                    2 => vec![(MultiPathNode(3), 1)],
+                match self.id {
+                    0 => vec![
+                        (MultiPathNode { id: 1, goal: self.goal }, 1),
+                        (MultiPathNode { id: 2, goal: self.goal }, 1),
+                    ],
+                    1 => vec![(MultiPathNode { id: 3, goal: self.goal }, 1)],
+                    2 => vec![(MultiPathNode { id: 3, goal: self.goal }, 1)],
                     _ => vec![],
                 }
             }
+            fn is_goal(&self) -> bool {
+                self.id == self.goal
+            }
         }
 
-        let result =
-            dijkstra::<_, FibonacciHeap<_, _>>(&MultiPathNode(0), |n| n.0 == 3);
+        let start = MultiPathNode { id: 0, goal: 3 };
+        let result = dijkstra::<_, FibonacciHeap<_, _>>(&start);
         assert!(result.is_some());
         let (path, cost) = result.unwrap();
         assert_eq!(cost, 2);
@@ -1080,7 +1132,8 @@ mod tests {
 
     #[test]
     fn test_large_linear_graph() {
-        let result = dijkstra::<_, FibonacciHeap<_, _>>(&LinearNode(0), |n| n.0 == 99);
+        let start = LinearNode::new(0, 99);
+        let result = dijkstra::<_, FibonacciHeap<_, _>>(&start);
         assert!(result.is_some());
         let (path, cost) = result.unwrap();
         assert_eq!(cost, 99);
@@ -1089,9 +1142,8 @@ mod tests {
 
     #[test]
     fn test_large_grid() {
-        let start = GridPos::new(0, 0);
-        let goal = GridPos::new(20, 20);
-        let result = astar::<_, FibonacciHeap<_, _>>(&start, &goal);
+        let start = GridPos::new(0, 0, 20, 20);
+        let result = astar::<_, FibonacciHeap<_, _>>(&start);
         assert!(result.is_some());
         let (_, cost) = result.unwrap();
         assert_eq!(cost, 40);
