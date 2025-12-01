@@ -214,11 +214,11 @@ macro_rules! test_dijkstra_with_heap {
     };
 }
 
-test_dijkstra_with_heap!(FibonacciHeap<u64, _>, dijkstra_fibonacci);
-test_dijkstra_with_heap!(PairingHeap<u64, _>, dijkstra_pairing);
+test_dijkstra_with_heap!(FibonacciHeap<usize, _>, dijkstra_fibonacci);
+test_dijkstra_with_heap!(PairingHeap<usize, _>, dijkstra_pairing);
 // Note: BinomialHeap has a limitation where it expects exclusive ownership on pop,
 // which conflicts with keeping handles for decrease_key. Use for simple linear paths only.
-test_dijkstra_with_heap!(RankPairingHeap<u64, _>, dijkstra_rank_pairing);
+test_dijkstra_with_heap!(RankPairingHeap<usize, _>, dijkstra_rank_pairing);
 
 // ============================================================================
 // A* Tests - All Heap Types
@@ -265,10 +265,10 @@ macro_rules! test_astar_with_heap {
     };
 }
 
-test_astar_with_heap!(FibonacciHeap<u64, _>, astar_fibonacci);
-test_astar_with_heap!(PairingHeap<u64, _>, astar_pairing);
+test_astar_with_heap!(FibonacciHeap<usize, _>, astar_fibonacci);
+test_astar_with_heap!(PairingHeap<usize, _>, astar_pairing);
 // Note: BinomialHeap excluded due to ownership limitations (see dijkstra tests)
-test_astar_with_heap!(RankPairingHeap<u64, _>, astar_rank_pairing);
+test_astar_with_heap!(RankPairingHeap<usize, _>, astar_rank_pairing);
 
 // ============================================================================
 // Decrease Key Correctness Tests

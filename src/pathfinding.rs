@@ -10,6 +10,9 @@
 //! full node data. A fast hash map (using FxHash) maps node states to their
 //! metadata including costs and handles.
 //!
+//! Note: Dijkstra and A* are the same algorithm - A* just adds a heuristic to
+//! guide the search. Dijkstra is A* with h(n) = 0.
+//!
 //! # Example
 //!
 //! ```rust
@@ -85,12 +88,12 @@ pub trait AStarNode: SearchNode {
     fn heuristic(&self, goal: &Self) -> Self::Cost;
 }
 
-/// A wrapper for costs in the heap that orders by f-score (for A*) or g-score (for Dijkstra).
+/// A wrapper for costs in the heap that orders by f-score.
 ///
 /// Lower costs have higher priority (min-heap behavior).
 #[derive(Debug, Clone, Copy)]
 pub struct PriorityCost<C> {
-    /// The f-score (g + h for A*) or g-score (for Dijkstra)
+    /// The f-score: g + h (where h=0 for Dijkstra)
     pub f_score: C,
     /// The actual cost from start (g-score)
     pub g_score: C,
@@ -117,6 +120,10 @@ impl<C: Ord> Ord for PriorityCost<C> {
     }
 }
 
+/// Internal index type for the hash map.
+/// We store these lightweight indices in the heap instead of full node data.
+type NodeIndex = usize;
+
 /// Metadata stored for each visited node during search.
 struct NodeEntry<N: SearchNode, H: Handle> {
     /// The actual node state
@@ -126,14 +133,10 @@ struct NodeEntry<N: SearchNode, H: Handle> {
     /// Handle into the heap (if still in open set)
     handle: Option<H>,
     /// Previous node in the path (for reconstruction)
-    came_from: Option<u64>,
+    came_from: Option<NodeIndex>,
     /// Whether this node has been fully processed
     closed: bool,
 }
-
-/// Internal index type for the hash map.
-/// We store these lightweight indices in the heap instead of full node data.
-type NodeIndex = u64;
 
 /// A pathfinder that uses a heap with efficient decrease_key for graph search.
 ///
@@ -233,275 +236,19 @@ pub struct PathResult<N: SearchNode> {
     pub cost: N::Cost,
 }
 
-/// Runs Dijkstra's algorithm to find the shortest path from start to any goal.
+/// Core search algorithm used by both Dijkstra and A*.
 ///
-/// # Type Parameters
-/// - `N`: The node type implementing [`SearchNode`]
-/// - `H`: The heap type implementing [`Heap`]
+/// This is the unified implementation - Dijkstra is just this with h(n) = 0.
 ///
 /// # Arguments
 /// - `start`: The starting node
 /// - `is_goal`: A function that returns true when a goal node is reached
+/// - `heuristic`: A function returning a heuristic estimate (use |_| 0 for Dijkstra)
 ///
 /// # Returns
 /// - `Some((path, cost))` if a path is found
 /// - `None` if no path exists
-///
-/// # Example
-/// ```rust
-/// use rust_advanced_heaps::pathfinding::{SearchNode, dijkstra};
-/// use rust_advanced_heaps::fibonacci::FibonacciHeap;
-///
-/// #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-/// struct Node(i32);
-///
-/// impl SearchNode for Node {
-///     type Cost = u32;
-///     fn successors(&self) -> Vec<(Self, u32)> {
-///         if self.0 < 10 {
-///             vec![(Node(self.0 + 1), 1)]
-///         } else {
-///             vec![]
-///         }
-///     }
-/// }
-///
-/// let result = dijkstra::<_, FibonacciHeap<_, _>>(&Node(0), |n| n.0 == 5);
-/// assert!(result.is_some());
-/// let (path, cost) = result.unwrap();
-/// assert_eq!(cost, 5);
-/// assert_eq!(path.len(), 6); // 0, 1, 2, 3, 4, 5
-/// ```
-pub fn dijkstra<N, H>(start: &N, is_goal: impl Fn(&N) -> bool) -> Option<(Vec<N>, N::Cost)>
-where
-    N: SearchNode,
-    H: Heap<NodeIndex, PriorityCost<N::Cost>>,
-{
-    let mut heap = H::new();
-    let mut finder: PathFinder<N, H::Handle, N::Cost> = PathFinder::new();
-
-    // Initialize with start node
-    let (start_index, _) = finder.get_or_create_index(start.clone(), N::Cost::default());
-    let priority = PriorityCost {
-        f_score: N::Cost::default(),
-        g_score: N::Cost::default(),
-    };
-    let handle = heap.push(priority, start_index);
-    finder.nodes.get_mut(&start_index).unwrap().handle = Some(handle);
-
-    while let Some((priority, current_index)) = heap.pop() {
-        let current_entry = finder.nodes.get_mut(&current_index).unwrap();
-
-        // Skip if already processed with a better cost
-        if current_entry.closed {
-            continue;
-        }
-        current_entry.closed = true;
-        current_entry.handle = None;
-
-        let current_node = current_entry.node.clone();
-        let current_g = priority.g_score;
-
-        // Check if we reached a goal
-        if is_goal(&current_node) {
-            let path = finder.reconstruct_path(current_index);
-            return Some((path, current_g));
-        }
-
-        // Explore successors
-        for (neighbor, edge_cost) in current_node.successors() {
-            let tentative_g = current_g + edge_cost;
-
-            let (neighbor_index, is_new) =
-                finder.get_or_create_index(neighbor.clone(), tentative_g);
-
-            let neighbor_entry = finder.nodes.get_mut(&neighbor_index).unwrap();
-
-            if neighbor_entry.closed {
-                continue;
-            }
-
-            if is_new {
-                // New node: add to open set
-                neighbor_entry.g_score = tentative_g;
-                neighbor_entry.came_from = Some(current_index);
-                let new_priority = PriorityCost {
-                    f_score: tentative_g,
-                    g_score: tentative_g,
-                };
-                let handle = heap.push(new_priority, neighbor_index);
-                neighbor_entry.handle = Some(handle);
-            } else if tentative_g < neighbor_entry.g_score {
-                // Better path found: decrease key
-                neighbor_entry.g_score = tentative_g;
-                neighbor_entry.came_from = Some(current_index);
-                let new_priority = PriorityCost {
-                    f_score: tentative_g,
-                    g_score: tentative_g,
-                };
-
-                if let Some(ref handle) = neighbor_entry.handle {
-                    // Try to decrease key, ignore errors if priority wasn't actually decreased
-                    let _ = heap.decrease_key(handle, new_priority);
-                }
-            }
-        }
-    }
-
-    // No path found
-    None
-}
-
-/// Runs A* search to find the shortest path from start to goal.
-///
-/// A* uses a heuristic to guide the search, which can significantly reduce
-/// the number of nodes explored compared to Dijkstra's algorithm.
-///
-/// # Type Parameters
-/// - `N`: The node type implementing [`AStarNode`]
-/// - `H`: The heap type implementing [`Heap`]
-///
-/// # Arguments
-/// - `start`: The starting node
-/// - `goal`: The goal node
-///
-/// # Returns
-/// - `Some((path, cost))` if a path is found
-/// - `None` if no path exists
-///
-/// # Example
-/// ```rust
-/// use rust_advanced_heaps::pathfinding::{SearchNode, AStarNode, astar};
-/// use rust_advanced_heaps::pairing::PairingHeap;
-///
-/// #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-/// struct GridPos { x: i32, y: i32 }
-///
-/// impl SearchNode for GridPos {
-///     type Cost = u32;
-///     fn successors(&self) -> Vec<(Self, u32)> {
-///         vec![
-///             (GridPos { x: self.x + 1, y: self.y }, 1),
-///             (GridPos { x: self.x - 1, y: self.y }, 1),
-///             (GridPos { x: self.x, y: self.y + 1 }, 1),
-///             (GridPos { x: self.x, y: self.y - 1 }, 1),
-///         ]
-///     }
-/// }
-///
-/// impl AStarNode for GridPos {
-///     fn heuristic(&self, goal: &Self) -> u32 {
-///         ((self.x - goal.x).abs() + (self.y - goal.y).abs()) as u32
-///     }
-/// }
-///
-/// let start = GridPos { x: 0, y: 0 };
-/// let goal = GridPos { x: 3, y: 3 };
-/// let result = astar::<_, PairingHeap<_, _>>(&start, &goal);
-/// assert!(result.is_some());
-/// let (path, cost) = result.unwrap();
-/// assert_eq!(cost, 6);
-/// ```
-pub fn astar<N, H>(start: &N, goal: &N) -> Option<(Vec<N>, N::Cost)>
-where
-    N: AStarNode,
-    H: Heap<NodeIndex, PriorityCost<N::Cost>>,
-{
-    let mut heap = H::new();
-    let mut finder: PathFinder<N, H::Handle, N::Cost> = PathFinder::new();
-
-    // Initialize with start node
-    let initial_h = start.heuristic(goal);
-    let (start_index, _) = finder.get_or_create_index(start.clone(), N::Cost::default());
-    let priority = PriorityCost {
-        f_score: initial_h,
-        g_score: N::Cost::default(),
-    };
-    let handle = heap.push(priority, start_index);
-    finder.nodes.get_mut(&start_index).unwrap().handle = Some(handle);
-
-    while let Some((priority, current_index)) = heap.pop() {
-        let current_entry = finder.nodes.get_mut(&current_index).unwrap();
-
-        // Skip if already processed
-        if current_entry.closed {
-            continue;
-        }
-        current_entry.closed = true;
-        current_entry.handle = None;
-
-        let current_node = current_entry.node.clone();
-        let current_g = priority.g_score;
-
-        // Check if we reached the goal
-        if current_node == *goal {
-            let path = finder.reconstruct_path(current_index);
-            return Some((path, current_g));
-        }
-
-        // Explore successors
-        for (neighbor, edge_cost) in current_node.successors() {
-            let tentative_g = current_g + edge_cost;
-            let h = neighbor.heuristic(goal);
-            let f = tentative_g + h;
-
-            let (neighbor_index, is_new) =
-                finder.get_or_create_index(neighbor.clone(), tentative_g);
-
-            let neighbor_entry = finder.nodes.get_mut(&neighbor_index).unwrap();
-
-            if neighbor_entry.closed {
-                continue;
-            }
-
-            if is_new {
-                // New node: add to open set
-                neighbor_entry.g_score = tentative_g;
-                neighbor_entry.came_from = Some(current_index);
-                let new_priority = PriorityCost {
-                    f_score: f,
-                    g_score: tentative_g,
-                };
-                let handle = heap.push(new_priority, neighbor_index);
-                neighbor_entry.handle = Some(handle);
-            } else if tentative_g < neighbor_entry.g_score {
-                // Better path found: decrease key
-                neighbor_entry.g_score = tentative_g;
-                neighbor_entry.came_from = Some(current_index);
-                let new_priority = PriorityCost {
-                    f_score: f,
-                    g_score: tentative_g,
-                };
-
-                if let Some(ref handle) = neighbor_entry.handle {
-                    let _ = heap.decrease_key(handle, new_priority);
-                }
-            }
-        }
-    }
-
-    // No path found
-    None
-}
-
-/// Runs A* search with a custom goal predicate.
-///
-/// This variant allows finding a path to any node matching a predicate,
-/// not just a specific goal node. The heuristic is provided as a closure.
-///
-/// # Type Parameters
-/// - `N`: The node type implementing [`SearchNode`]
-/// - `H`: The heap type implementing [`Heap`]
-///
-/// # Arguments
-/// - `start`: The starting node
-/// - `is_goal`: A function that returns true when a goal node is reached
-/// - `heuristic`: A function returning a heuristic estimate for a node
-///
-/// # Returns
-/// - `Some((path, cost))` if a path is found
-/// - `None` if no path exists
-pub fn astar_with<N, H, G, F>(
+pub fn search<N, H, G, F>(
     start: &N,
     is_goal: G,
     heuristic: F,
@@ -583,6 +330,147 @@ where
     None
 }
 
+/// Runs Dijkstra's algorithm to find the shortest path from start to any goal.
+///
+/// This is equivalent to A* with a zero heuristic.
+///
+/// # Type Parameters
+/// - `N`: The node type implementing [`SearchNode`]
+/// - `H`: The heap type implementing [`Heap`]
+///
+/// # Arguments
+/// - `start`: The starting node
+/// - `is_goal`: A function that returns true when a goal node is reached
+///
+/// # Returns
+/// - `Some((path, cost))` if a path is found
+/// - `None` if no path exists
+///
+/// # Example
+/// ```rust
+/// use rust_advanced_heaps::pathfinding::{SearchNode, dijkstra};
+/// use rust_advanced_heaps::fibonacci::FibonacciHeap;
+///
+/// #[derive(Clone, PartialEq, Eq, Hash, Debug)]
+/// struct Node(i32);
+///
+/// impl SearchNode for Node {
+///     type Cost = u32;
+///     fn successors(&self) -> Vec<(Self, u32)> {
+///         if self.0 < 10 {
+///             vec![(Node(self.0 + 1), 1)]
+///         } else {
+///             vec![]
+///         }
+///     }
+/// }
+///
+/// let result = dijkstra::<_, FibonacciHeap<_, _>>(&Node(0), |n| n.0 == 5);
+/// assert!(result.is_some());
+/// let (path, cost) = result.unwrap();
+/// assert_eq!(cost, 5);
+/// assert_eq!(path.len(), 6); // 0, 1, 2, 3, 4, 5
+/// ```
+#[inline]
+pub fn dijkstra<N, H>(start: &N, is_goal: impl Fn(&N) -> bool) -> Option<(Vec<N>, N::Cost)>
+where
+    N: SearchNode,
+    H: Heap<NodeIndex, PriorityCost<N::Cost>>,
+{
+    search::<N, H, _, _>(start, is_goal, |_| N::Cost::default())
+}
+
+/// Runs A* search to find the shortest path from start to goal.
+///
+/// A* uses a heuristic to guide the search, which can significantly reduce
+/// the number of nodes explored compared to Dijkstra's algorithm.
+///
+/// # Type Parameters
+/// - `N`: The node type implementing [`AStarNode`]
+/// - `H`: The heap type implementing [`Heap`]
+///
+/// # Arguments
+/// - `start`: The starting node
+/// - `goal`: The goal node
+///
+/// # Returns
+/// - `Some((path, cost))` if a path is found
+/// - `None` if no path exists
+///
+/// # Example
+/// ```rust
+/// use rust_advanced_heaps::pathfinding::{SearchNode, AStarNode, astar};
+/// use rust_advanced_heaps::pairing::PairingHeap;
+///
+/// #[derive(Clone, PartialEq, Eq, Hash, Debug)]
+/// struct GridPos { x: i32, y: i32 }
+///
+/// impl SearchNode for GridPos {
+///     type Cost = u32;
+///     fn successors(&self) -> Vec<(Self, u32)> {
+///         vec![
+///             (GridPos { x: self.x + 1, y: self.y }, 1),
+///             (GridPos { x: self.x - 1, y: self.y }, 1),
+///             (GridPos { x: self.x, y: self.y + 1 }, 1),
+///             (GridPos { x: self.x, y: self.y - 1 }, 1),
+///         ]
+///     }
+/// }
+///
+/// impl AStarNode for GridPos {
+///     fn heuristic(&self, goal: &Self) -> u32 {
+///         ((self.x - goal.x).abs() + (self.y - goal.y).abs()) as u32
+///     }
+/// }
+///
+/// let start = GridPos { x: 0, y: 0 };
+/// let goal = GridPos { x: 3, y: 3 };
+/// let result = astar::<_, PairingHeap<_, _>>(&start, &goal);
+/// assert!(result.is_some());
+/// let (path, cost) = result.unwrap();
+/// assert_eq!(cost, 6);
+/// ```
+#[inline]
+pub fn astar<N, H>(start: &N, goal: &N) -> Option<(Vec<N>, N::Cost)>
+where
+    N: AStarNode,
+    H: Heap<NodeIndex, PriorityCost<N::Cost>>,
+{
+    search::<N, H, _, _>(start, |n| n == goal, |n| n.heuristic(goal))
+}
+
+/// Runs A* search with a custom goal predicate and heuristic.
+///
+/// This variant allows finding a path to any node matching a predicate,
+/// not just a specific goal node. The heuristic is provided as a closure.
+///
+/// # Type Parameters
+/// - `N`: The node type implementing [`SearchNode`]
+/// - `H`: The heap type implementing [`Heap`]
+///
+/// # Arguments
+/// - `start`: The starting node
+/// - `is_goal`: A function that returns true when a goal node is reached
+/// - `heuristic`: A function returning a heuristic estimate for a node
+///
+/// # Returns
+/// - `Some((path, cost))` if a path is found
+/// - `None` if no path exists
+#[inline]
+pub fn astar_with<N, H, G, F>(
+    start: &N,
+    is_goal: G,
+    heuristic: F,
+) -> Option<(Vec<N>, N::Cost)>
+where
+    N: SearchNode,
+    H: Heap<NodeIndex, PriorityCost<N::Cost>>,
+    G: Fn(&N) -> bool,
+    F: Fn(&N) -> N::Cost,
+{
+    search::<N, H, _, _>(start, is_goal, heuristic)
+}
+
 /// Builder for pathfinding queries with more configuration options.
 ///
 /// Provides a fluent API for configuring and running pathfinding searches.
@@ -614,10 +502,12 @@ impl<N: SearchNode> PathFinderBuilder<N> {
         self
     }
 
-    /// Runs Dijkstra's algorithm with the configured settings.
-    pub fn dijkstra<H>(self, is_goal: impl Fn(&N) -> bool) -> Option<(Vec<N>, N::Cost)>
+    /// Runs search with the configured settings.
+    pub fn search<H, G, F>(self, is_goal: G, heuristic: F) -> Option<(Vec<N>, N::Cost)>
     where
         H: Heap<NodeIndex, PriorityCost<N::Cost>>,
+        G: Fn(&N) -> bool,
+        F: Fn(&N) -> N::Cost,
     {
         let max_cost = self.max_cost;
         let max_nodes = self.max_nodes;
@@ -626,9 +516,10 @@ impl<N: SearchNode> PathFinderBuilder<N> {
         let mut heap = H::new();
         let mut finder: PathFinder<N, H::Handle, N::Cost> = PathFinder::new();
 
+        let initial_h = heuristic(&self.start);
         let (start_index, _) = finder.get_or_create_index(self.start.clone(), N::Cost::default());
         let priority = PriorityCost {
-            f_score: N::Cost::default(),
+            f_score: initial_h,
             g_score: N::Cost::default(),
         };
         let handle = heap.push(priority, start_index);
@@ -676,6 +567,9 @@ impl<N: SearchNode> PathFinderBuilder<N> {
                     }
                 }
 
+                let h = heuristic(&neighbor);
+                let f = tentative_g + h;
+
                 let (neighbor_index, is_new) =
                     finder.get_or_create_index(neighbor.clone(), tentative_g);
 
@@ -689,7 +583,7 @@ impl<N: SearchNode> PathFinderBuilder<N> {
                     neighbor_entry.g_score = tentative_g;
                     neighbor_entry.came_from = Some(current_index);
                     let new_priority = PriorityCost {
-                        f_score: tentative_g,
+                        f_score: f,
                         g_score: tentative_g,
                     };
                     let handle = heap.push(new_priority, neighbor_index);
@@ -698,7 +592,7 @@ impl<N: SearchNode> PathFinderBuilder<N> {
                     neighbor_entry.g_score = tentative_g;
                     neighbor_entry.came_from = Some(current_index);
                     let new_priority = PriorityCost {
-                        f_score: tentative_g,
+                        f_score: f,
                         g_score: tentative_g,
                     };
 
@@ -710,6 +604,15 @@ impl<N: SearchNode> PathFinderBuilder<N> {
         }
 
         None
+    }
+
+    /// Runs Dijkstra's algorithm with the configured settings.
+    #[inline]
+    pub fn dijkstra<H>(self, is_goal: impl Fn(&N) -> bool) -> Option<(Vec<N>, N::Cost)>
+    where
+        H: Heap<NodeIndex, PriorityCost<N::Cost>>,
+    {
+        self.search::<H, _, _>(is_goal, |_| N::Cost::default())
     }
 }
 
