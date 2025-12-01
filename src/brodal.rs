@@ -5,17 +5,51 @@
 //! - O(1) worst-case: insert, find_min, merge, decrease_key
 //! - O(log n) worst-case: delete_min
 //!
-//! # Implementation Details
+//! # Implementation Notes
 //!
-//! The heap uses:
-//! - A forest of heap-ordered trees, with the minimum at a distinguished root
-//! - Rank-based linking during delete_min (similar to binomial heaps)
-//! - Lazy violation handling for decrease_key
+//! This is a **Brodal-style** heap rather than a pure Brodal heap. The original
+//! Brodal heap from the 1996 paper requires:
+//!
+//! - **Rank-indexed children**: Each node maintains children organized by rank,
+//!   with 2-7 children per rank level
+//! - **Guide structure**: Tracks child counts per rank for O(1) maintenance
+//! - **Violation buffers (V and W)**: Store nodes violating heap property after
+//!   decrease_key, processed lazily
+//! - **T1/T2 tree structure**: Complex dual-tree organization
+//!
+//! ## Why This Isn't a Pure Brodal Heap
+//!
+//! Implementing the full Brodal heap in Rust with safe memory management is
+//! extremely challenging due to:
+//!
+//! 1. **Circular references**: The cut-and-reattach operations can create
+//!    situations where `Rc::try_unwrap` fails due to unexpected references
+//! 2. **Rank maintenance**: When nodes are cut, their ancestors' rank-indexed
+//!    child lists become stale, requiring complex updates
+//! 3. **Ownership conflicts**: Rust's borrow checker doesn't allow the flexible
+//!    pointer manipulation the algorithm requires
+//!
+//! Brodal himself noted the heap is "quite complicated" and "not applicable
+//! in practice."
+//!
+//! ## Current Implementation
+//!
+//! This implementation uses a simpler approach:
+//! - Sibling-linked children (like pairing heaps)
+//! - Two-pass pairing for delete_min
+//! - Cut-and-merge for decrease_key (like Fibonacci heaps)
+//!
+//! For true worst-case bounds, consider:
+//! - The Brodal-Okasaki functional variant (see `brodal_okasaki` module)
+//! - Unsafe Rust with raw pointers
+//! - Arena-based allocation
 //!
 //! # References
 //!
-//! Brodal, G.S. (1996). "Worst-case efficient priority queues".
-//! Proceedings of the Seventh Annual ACM-SIAM Symposium on Discrete Algorithms.
+//! - Brodal, G.S. (1996). "Worst-case efficient priority queues".
+//!   Proceedings of the Seventh Annual ACM-SIAM Symposium on Discrete Algorithms.
+//! - Brodal, G.S. and Okasaki, C. (1996). "Optimal Purely Functional Priority Queues".
+//!   Journal of Functional Programming.
 
 use crate::traits::{Handle, Heap, HeapError};
 use std::cell::RefCell;
