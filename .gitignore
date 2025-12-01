@@ -17,3 +17,6 @@ Thumbs.db
 # Test output
 solver_output.log
 tmp_*.csv
+
+# Benchmark data (downloaded DIMACS datasets)
+data/
