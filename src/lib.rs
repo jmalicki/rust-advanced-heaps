@@ -31,6 +31,7 @@ pub mod binomial;
 pub mod brodal;
 pub mod fibonacci;
 pub mod pairing;
+pub mod pathfinding;
 pub mod rank_pairing;
 pub mod skew_binomial;
 pub mod stdlib_compat;
