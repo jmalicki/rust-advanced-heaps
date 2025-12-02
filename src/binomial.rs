@@ -878,7 +878,10 @@ impl<T, P: Ord> BinomialHeap<T, P> {
     where
         P: Clone,
     {
-        fn find_min_in_tree<T, P: Ord + Clone>(node: &NodeRef<T, P>, current_min: Option<P>) -> Option<P> {
+        fn find_min_in_tree<T, P: Ord + Clone>(
+            node: &NodeRef<T, P>,
+            current_min: Option<P>,
+        ) -> Option<P> {
             let node_ref = node.borrow();
             let node_priority = node_ref.priority.clone();
 
@@ -924,13 +927,19 @@ mod tests {
             handles.push(heap.push(0, i));
         }
         println!("After 16 pushes, min: {:?}", heap.peek());
-        println!("Trees: {:?}", heap.trees.iter().map(|t| t.is_some()).collect::<Vec<_>>());
+        println!(
+            "Trees: {:?}",
+            heap.trees.iter().map(|t| t.is_some()).collect::<Vec<_>>()
+        );
 
         // Decrease handle 1 to -1
         heap.decrease_key(&handles[1], -1).unwrap();
         println!("\nAfter decrease_key(1, -1):");
         println!("  min: {:?}", heap.peek());
-        println!("  Trees: {:?}", heap.trees.iter().map(|t| t.is_some()).collect::<Vec<_>>());
+        println!(
+            "  Trees: {:?}",
+            heap.trees.iter().map(|t| t.is_some()).collect::<Vec<_>>()
+        );
         println!("  handle[1] valid: {}", handles[1].node.strong_count());
         assert_eq!(heap.peek().map(|(p, _)| *p), Some(-1));
 
@@ -939,7 +948,10 @@ mod tests {
         println!("  handle[3] valid: {}", handles[3].node.strong_count());
         heap.decrease_key(&handles[3], -98).unwrap();
         println!("After decrease_key(3, -98):");
-        println!("  Trees: {:?}", heap.trees.iter().map(|t| t.is_some()).collect::<Vec<_>>());
+        println!(
+            "  Trees: {:?}",
+            heap.trees.iter().map(|t| t.is_some()).collect::<Vec<_>>()
+        );
         println!("  handle[1] valid: {}", handles[1].node.strong_count());
         println!("  handle[3] valid: {}", handles[3].node.strong_count());
         if let Some(min_weak) = &heap.min {
@@ -973,8 +985,8 @@ mod tests {
         assert_eq!(heap.peek().map(|(p, _)| *p), Some(-34));
 
         // Push a few more items
-        handles.push(heap.push(71, 8));  // idx 8
-        handles.push(heap.push(94, 9));  // idx 9
+        handles.push(heap.push(71, 8)); // idx 8
+        handles.push(heap.push(94, 9)); // idx 9
         handles.push(heap.push(-87, 10)); // idx 10
         println!("After pushes, min: {:?}", heap.peek());
         assert_eq!(heap.peek().map(|(p, _)| *p), Some(-87)); // -87 is now min
@@ -1005,11 +1017,13 @@ mod tests {
         println!("\nRoots in trees:");
         for (i, tree) in heap.trees.iter().enumerate() {
             if let Some(root) = tree {
-                println!("  trees[{}]: priority={}, item={}, degree={}",
+                println!(
+                    "  trees[{}]: priority={}, item={}, degree={}",
                     i,
                     root.borrow().priority,
                     root.borrow().item,
-                    root.borrow().degree);
+                    root.borrow().degree
+                );
             }
         }
 
@@ -1038,7 +1052,11 @@ mod tests {
         let actual_min = heap.find_actual_min();
         let expected_min = priorities.values().min().copied();
         assert_eq!(actual_min, expected_min, "Initial min mismatch");
-        println!("After inserts: peek={:?}, expected_min={:?}", heap.peek().map(|(p, _)| *p), expected_min);
+        println!(
+            "After inserts: peek={:?}, expected_min={:?}",
+            heap.peek().map(|(p, _)| *p),
+            expected_min
+        );
 
         // Decrease some keys
         let decrease_ops = [(0, -100), (5, -200), (10, -50)];
@@ -1046,7 +1064,10 @@ mod tests {
             if priorities.contains_key(&idx) {
                 let old_priority = priorities[&idx];
                 if new_priority < old_priority {
-                    println!("decrease_key({}, {} -> {})", idx, old_priority, new_priority);
+                    println!(
+                        "decrease_key({}, {} -> {})",
+                        idx, old_priority, new_priority
+                    );
                     heap.decrease_key(&handles[idx], new_priority).unwrap();
                     priorities.insert(idx, new_priority);
 
@@ -1055,11 +1076,18 @@ mod tests {
                     let actual_min = heap.find_actual_min();
                     let expected_min = priorities.values().min().copied();
 
-                    println!("  After: peek={:?}, actual_min={:?}, expected={:?}", peek_val, actual_min, expected_min);
+                    println!(
+                        "  After: peek={:?}, actual_min={:?}, expected={:?}",
+                        peek_val, actual_min, expected_min
+                    );
 
                     if peek_val != expected_min || actual_min != expected_min {
                         println!("  MISMATCH!");
-                        println!("  Node count: {}, priorities count: {}", heap.count_all_nodes(), priorities.len());
+                        println!(
+                            "  Node count: {}, priorities count: {}",
+                            heap.count_all_nodes(),
+                            priorities.len()
+                        );
                         panic!("Heap invariant violated after decrease_key");
                     }
                 }
@@ -1073,8 +1101,10 @@ mod tests {
                 let expected_count = priorities.len();
 
                 if node_count != expected_count {
-                    println!("NODE COUNT MISMATCH at step {}: in_heap={}, expected={}",
-                        i, node_count, expected_count);
+                    println!(
+                        "NODE COUNT MISMATCH at step {}: in_heap={}, expected={}",
+                        i, node_count, expected_count
+                    );
                     panic!("Lost nodes!");
                 }
 
@@ -1082,8 +1112,10 @@ mod tests {
                 let expected_min = priorities.values().min().copied();
 
                 if peek_before != expected_min {
-                    println!("MISMATCH at pop {}: peek={:?}, expected={:?}",
-                        i, peek_before, expected_min);
+                    println!(
+                        "MISMATCH at pop {}: peek={:?}, expected={:?}",
+                        i, peek_before, expected_min
+                    );
                     panic!("Heap invariant violated before pop");
                 }
 
