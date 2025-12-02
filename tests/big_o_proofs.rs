@@ -363,13 +363,8 @@ fn test_twothree_insert() {
 }
 
 #[test]
-#[ignore] // Segfault occurs during pop operations: The TwoThreeHeap's structure maintenance
-          //          // operations (node splitting and merging) can trigger memory safety issues when
-          //          // processing large batches of pop operations. The 2-3 tree structure requires
-          //          // careful handling of node splits (when a node has 4 children) and merges (when
-          //          // a node has 1 child), and under certain heap states these operations may access
-          //          // invalidated pointers or create inconsistent tree structures. This appears to
-          //          // be an implementation bug in the structure maintenance logic that needs fixing.
+#[ignore] // Test hangs - TwoThreeHeap pop operations appear to have an infinite loop
+          // or deadlock issue when processing large batches. Needs investigation.
 fn test_twothree_pop() {
     test_pop_batch_complexity::<TwoThreeHeap<i32, i32>>("TwoThreeHeap");
 }
