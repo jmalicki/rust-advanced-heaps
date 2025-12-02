@@ -136,7 +136,10 @@ impl<T: Ord + Clone> SkewBinomialHeap<T> {
     }
 
     /// Insert a tree into the heap, maintaining rank order
-    fn insert_tree(tree: SkewBinomialTree<T>, trees: &[SkewBinomialTree<T>]) -> Vec<SkewBinomialTree<T>> {
+    fn insert_tree(
+        tree: SkewBinomialTree<T>,
+        trees: &[SkewBinomialTree<T>],
+    ) -> Vec<SkewBinomialTree<T>> {
         if trees.is_empty() {
             vec![tree]
         } else if tree.rank < trees[0].rank {
@@ -151,7 +154,10 @@ impl<T: Ord + Clone> SkewBinomialHeap<T> {
     }
 
     /// Merge two tree lists
-    fn merge_trees(ts1: &[SkewBinomialTree<T>], ts2: &[SkewBinomialTree<T>]) -> Vec<SkewBinomialTree<T>> {
+    fn merge_trees(
+        ts1: &[SkewBinomialTree<T>],
+        ts2: &[SkewBinomialTree<T>],
+    ) -> Vec<SkewBinomialTree<T>> {
         if ts1.is_empty() {
             ts2.to_vec()
         } else if ts2.is_empty() {
@@ -222,10 +228,7 @@ impl<T: Ord + Clone> SkewBinomialHeap<T> {
     /// Find the minimum element - O(log n) worst-case for primitive heap
     #[allow(dead_code)]
     fn find_min(&self) -> Option<&T> {
-        self.trees
-            .iter()
-            .map(|t| &t.root)
-            .min()
+        self.trees.iter().map(|t| &t.root).min()
     }
 
     /// Remove the minimum tree and return it along with the remaining heap
@@ -242,12 +245,20 @@ impl<T: Ord + Clone> SkewBinomialHeap<T> {
         }
 
         let min_tree = self.trees[min_idx].clone();
-        let remaining: Vec<_> = self.trees.iter().enumerate()
+        let remaining: Vec<_> = self
+            .trees
+            .iter()
+            .enumerate()
             .filter(|(i, _)| *i != min_idx)
             .map(|(_, t)| t.clone())
             .collect();
 
-        Some((min_tree, SkewBinomialHeap { trees: Rc::new(remaining) }))
+        Some((
+            min_tree,
+            SkewBinomialHeap {
+                trees: Rc::new(remaining),
+            },
+        ))
     }
 
     /// Delete the minimum element - O(log n) worst-case
@@ -255,7 +266,7 @@ impl<T: Ord + Clone> SkewBinomialHeap<T> {
         let (min_tree, rest) = self.remove_min_tree()?;
 
         // Children are in decreasing order of rank, reverse them
-        let mut children_reversed: Vec<_> = (*min_tree.children).iter().cloned().collect();
+        let mut children_reversed: Vec<_> = (*min_tree.children).to_vec();
         children_reversed.reverse();
 
         let children_heap = SkewBinomialHeap {
@@ -310,7 +321,10 @@ impl<T: Ord + Clone> Ord for BootstrappedHeap<T> {
 impl<T: Ord + Clone> BrodalOkasakiHeap<T> {
     /// Create a new empty heap
     pub fn new() -> Self {
-        BrodalOkasakiHeap { inner: None, len: 0 }
+        BrodalOkasakiHeap {
+            inner: None,
+            len: 0,
+        }
     }
 
     /// Check if the heap is empty
@@ -376,11 +390,7 @@ impl<T: Ord + Clone> BrodalOkasakiHeap<T> {
             (None, _) => other.clone(),
             (_, None) => self.clone(),
             (Some(h1), Some(h2)) => {
-                let (smaller, larger) = if h1.min <= h2.min {
-                    (h1, h2)
-                } else {
-                    (h2, h1)
-                };
+                let (smaller, larger) = if h1.min <= h2.min { (h1, h2) } else { (h2, h1) };
 
                 let new_inner = BootstrappedHeap {
                     min: smaller.min.clone(),
@@ -507,15 +517,9 @@ mod tests {
 
     #[test]
     fn test_meld() {
-        let heap1 = BrodalOkasakiHeap::new()
-            .insert(5)
-            .insert(3)
-            .insert(10);
+        let heap1 = BrodalOkasakiHeap::new().insert(5).insert(3).insert(10);
 
-        let heap2 = BrodalOkasakiHeap::new()
-            .insert(1)
-            .insert(7)
-            .insert(4);
+        let heap2 = BrodalOkasakiHeap::new().insert(1).insert(7).insert(4);
 
         let merged = heap1.meld(&heap2);
         assert_eq!(merged.len(), 6);
