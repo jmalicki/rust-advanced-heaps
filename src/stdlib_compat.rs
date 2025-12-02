@@ -17,7 +17,7 @@
 //! use rust_advanced_heaps::fibonacci::FibonacciHeap;
 //!
 //! // Use like std::collections::BinaryHeap
-//! let mut heap: StdHeap<i32, FibonacciHeap<i32, i32>> = StdHeap::new();
+//! let mut heap: StdHeap<i32, FibonacciHeap<(), i32>> = StdHeap::new();
 //! heap.push(5);
 //! heap.push(3);
 //! heap.push(7);
@@ -39,13 +39,13 @@ use crate::Heap;
 ///
 /// # Type Parameters
 /// - `T`: The item type, must implement `Ord` and `Clone` (for handles)
-/// - `H`: The underlying heap implementation (e.g., `FibonacciHeap<T, T>`)
-pub struct StdHeap<T: Ord + Clone, H: Heap<T, T>> {
+/// - `H`: The underlying heap implementation (e.g., `FibonacciHeap<(), T>`)
+pub struct StdHeap<T: Ord + Clone, H: Heap<(), T>> {
     heap: H,
     _phantom: std::marker::PhantomData<T>,
 }
 
-impl<T: Ord + Clone, H: Heap<T, T>> StdHeap<T, H> {
+impl<T: Ord + Clone, H: Heap<(), T>> StdHeap<T, H> {
     /// Creates a new empty heap
     pub fn new() -> Self {
         Self {
@@ -71,8 +71,7 @@ impl<T: Ord + Clone, H: Heap<T, T>> StdHeap<T, H> {
     /// Returns a handle that can be used with `decrease_key`. If you don't need
     /// `decrease_key`, you can ignore the return value.
     pub fn push(&mut self, item: T) -> H::Handle {
-        // Since T = P, we use the item as both priority and value
-        self.heap.push(item.clone(), item)
+        self.heap.push(item, ())
     }
 
     /// Pushes an item and returns both a handle and the item
@@ -87,14 +86,14 @@ impl<T: Ord + Clone, H: Heap<T, T>> StdHeap<T, H> {
     ///
     /// This is equivalent to `BinaryHeap::peek`, but returns the minimum (not maximum).
     pub fn peek(&self) -> Option<&T> {
-        self.heap.peek().map(|(_, item)| item)
+        self.heap.peek().map(|(priority, _)| priority)
     }
 
     /// Removes and returns the smallest item
     ///
     /// This is equivalent to `BinaryHeap::pop`, but returns the minimum (not maximum).
     pub fn pop(&mut self) -> Option<T> {
-        self.heap.pop().map(|(_, item)| item)
+        self.heap.pop().map(|(priority, _)| priority)
     }
 
     /// Decreases the priority of an item identified by the handle
@@ -113,7 +112,7 @@ impl<T: Ord + Clone, H: Heap<T, T>> StdHeap<T, H> {
     }
 }
 
-impl<T: Ord + Clone, H: Heap<T, T>> Default for StdHeap<T, H> {
+impl<T: Ord + Clone, H: Heap<(), T>> Default for StdHeap<T, H> {
     fn default() -> Self {
         Self::new()
     }
