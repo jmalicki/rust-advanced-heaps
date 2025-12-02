@@ -633,7 +633,11 @@ impl<T, P: Ord> RankPairingHeap<T, P> {
             let mut current = parent.borrow().child.clone();
             while let Some(curr) = current {
                 let curr_sibling = curr.borrow().sibling.clone();
-                if curr_sibling.as_ref().map(|s| Rc::ptr_eq(s, node)).unwrap_or(false) {
+                if curr_sibling
+                    .as_ref()
+                    .map(|s| Rc::ptr_eq(s, node))
+                    .unwrap_or(false)
+                {
                     // Found node: skip it in sibling chain
                     curr.borrow_mut().sibling = node_sibling.clone();
                     break;
