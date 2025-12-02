@@ -30,6 +30,8 @@ type WeakEntry<T, P> = Weak<RefCell<EntryData<T, P>>>;
 struct EntryData<T, P> {
     item: T,
     priority: P,
+    /// Back-reference to the node containing this entry (updated during bubble_up)
+    node: WeakNodeRef<T, P>,
 }
 
 /// Handle to an element in a 2-3 heap
@@ -83,6 +85,36 @@ pub struct TwoThreeHeap<T, P: Ord> {
     len: usize,
 }
 
+/// O(1) debug assertion: check that if root has an entry, its priority matches
+/// Note: Root may temporarily lack an entry during restructuring; ensure_node_has_min_entry fixes this
+#[cfg(debug_assertions)]
+fn debug_assert_root_priority_matches<T, P: Ord + Clone + std::fmt::Debug>(root: &NodeRef<T, P>) {
+    let root_ref = root.borrow();
+    // Only check priority match if root has an entry
+    // (root might temporarily lack entry during internal restructuring)
+    if let Some(ref entry) = root_ref.entry {
+        debug_assert_eq!(
+            root_ref.priority,
+            entry.borrow().priority,
+            "Root priority must match entry priority"
+        );
+    }
+}
+
+/// O(1) debug assertion: check that a node with entry has matching priority
+#[allow(dead_code)]
+#[cfg(debug_assertions)]
+fn debug_assert_entry_priority_matches<T, P: Ord + Clone + std::fmt::Debug>(node: &NodeRef<T, P>) {
+    let node_ref = node.borrow();
+    if let Some(ref entry) = node_ref.entry {
+        debug_assert_eq!(
+            node_ref.priority,
+            entry.borrow().priority,
+            "Node priority must match entry priority when entry exists"
+        );
+    }
+}
+
 impl<T: Clone, P: Ord + Clone + std::fmt::Debug> Heap<T, P> for TwoThreeHeap<T, P> {
     type Handle = TwoThreeHandle<T, P>;
 
@@ -103,29 +135,35 @@ impl<T: Clone, P: Ord + Clone + std::fmt::Debug> Heap<T, P> for TwoThreeHeap<T, 
     }
 
     fn insert(&mut self, priority: P, item: T) -> Self::Handle {
-        let entry = Rc::new(RefCell::new(EntryData {
-            item,
-            priority: priority.clone(),
-        }));
-        let handle = TwoThreeHandle {
-            entry: Rc::downgrade(&entry),
-        };
-
+        // Create node first (with None entry temporarily)
         let node = Rc::new(RefCell::new(Node {
-            entry: Some(entry),
-            priority,
+            entry: None,
+            priority: priority.clone(),
             parent: Weak::new(),
             children: Vec::new(),
         }));
 
-        if let Some(ref root) = self.root {
-            let new_is_smaller = {
-                let node_ref = node.borrow();
-                let root_ref = root.borrow();
-                node_ref.priority < root_ref.priority
-            };
+        // Create entry with back-reference to the node
+        let entry = Rc::new(RefCell::new(EntryData {
+            item,
+            priority: priority.clone(),
+            node: Rc::downgrade(&node),
+        }));
 
-            if new_is_smaller {
+        // Put entry in node
+        node.borrow_mut().entry = Some(Rc::clone(&entry));
+
+        let handle = TwoThreeHandle {
+            entry: Rc::downgrade(&entry),
+        };
+
+        if let Some(ref root) = self.root {
+            // Compare new node's priority with root's priority
+            // Root's priority should always be up-to-date (we maintain this invariant)
+            let new_priority = node.borrow().priority.clone();
+            let root_priority = root.borrow().priority.clone();
+
+            if new_priority < root_priority {
                 let old_root = self.root.take().unwrap();
                 old_root.borrow_mut().parent = Rc::downgrade(&node);
                 node.borrow_mut().children.push(old_root);
@@ -141,10 +179,16 @@ impl<T: Clone, P: Ord + Clone + std::fmt::Debug> Heap<T, P> for TwoThreeHeap<T, 
 
         // Ensure root has an entry after potential restructuring
         if let Some(root) = self.root.clone() {
-            ensure_node_has_entry(&root);
+            ensure_node_has_min_entry(&root);
         }
 
         self.len += 1;
+
+        // O(1) debug assertions
+        #[cfg(debug_assertions)]
+        if let Some(ref root) = self.root {
+            debug_assert_root_priority_matches(root);
+        }
 
         // Verify invariants after insert (expensive O(n) checks, only with feature flag)
         #[cfg(feature = "expensive_verify")]
@@ -216,6 +260,12 @@ impl<T: Clone, P: Ord + Clone + std::fmt::Debug> Heap<T, P> for TwoThreeHeap<T, 
             self.root = Some(self.rebuild_from_children(children));
         }
 
+        // O(1) debug assertions
+        #[cfg(debug_assertions)]
+        if let Some(ref root) = self.root {
+            debug_assert_root_priority_matches(root);
+        }
+
         // Verify invariants after delete_min (expensive O(n) checks, only with feature flag)
         #[cfg(feature = "expensive_verify")]
         {
@@ -243,19 +293,26 @@ impl<T: Clone, P: Ord + Clone + std::fmt::Debug> Heap<T, P> for TwoThreeHeap<T, 
             return Err(HeapError::PriorityNotDecreased);
         }
 
+        // Get the node containing this entry using the back-reference (O(1))
+        let node = entry.borrow().node.upgrade();
+
         entry.borrow_mut().priority = new_priority.clone();
 
-        if let Some(root) = self.root.clone() {
-            if let Some(node) = find_node_with_entry(Rc::clone(&root), &entry) {
-                // Also update the node's priority field
-                node.borrow_mut().priority = new_priority;
-                self.bubble_up(node);
-            }
+        if let Some(node) = node {
+            // Update the node's priority field
+            node.borrow_mut().priority = new_priority;
+            self.bubble_up(node);
         }
 
         // Ensure root has an entry after bubble_up (which may swap entries)
         if let Some(root) = self.root.clone() {
-            ensure_node_has_entry(&root);
+            ensure_node_has_min_entry(&root);
+        }
+
+        // O(1) debug assertions
+        #[cfg(debug_assertions)]
+        if let Some(ref root) = self.root {
+            debug_assert_root_priority_matches(root);
         }
 
         Ok(())
@@ -297,11 +354,17 @@ impl<T: Clone, P: Ord + Clone + std::fmt::Debug> Heap<T, P> for TwoThreeHeap<T, 
 
         // Ensure root has an entry after potential restructuring
         if let Some(root) = self.root.clone() {
-            ensure_node_has_entry(&root);
+            ensure_node_has_min_entry(&root);
         }
 
         self.len += other.len;
         other.len = 0;
+
+        // O(1) debug assertions
+        #[cfg(debug_assertions)]
+        if let Some(ref root) = self.root {
+            debug_assert_root_priority_matches(root);
+        }
 
         // Verify invariants after merge (expensive O(n) checks, only with feature flag)
         #[cfg(feature = "expensive_verify")]
@@ -321,31 +384,6 @@ impl<T: Clone, P: Ord + Clone + std::fmt::Debug> Default for TwoThreeHeap<T, P> 
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// Recursively searches for a node containing the given entry
-fn find_node_with_entry<T, P>(node: NodeRef<T, P>, entry: &Entry<T, P>) -> Option<NodeRef<T, P>> {
-    let is_match = {
-        let node_ref = node.borrow();
-        if let Some(ref node_entry) = node_ref.entry {
-            Rc::ptr_eq(node_entry, entry)
-        } else {
-            false
-        }
-    };
-
-    if is_match {
-        return Some(node);
-    }
-
-    let children: Vec<_> = node.borrow().children.to_vec();
-    for child in children {
-        if let Some(found) = find_node_with_entry(child, entry) {
-            return Some(found);
-        }
-    }
-
-    None
 }
 
 impl<T, P: Ord + Clone> TwoThreeHeap<T, P> {
@@ -447,22 +485,39 @@ impl<T, P: Ord + Clone> TwoThreeHeap<T, P> {
         self.maintain_structure(parent);
     }
 
-    /// Propagates priority changes up the tree when a node's subtree minimum changes
+    /// Propagates priority changes up the tree when a node's priority changes.
+    /// Recalculates each ancestor's priority based on its entry and direct children.
+    /// This is O(height) where height is O(log n), with O(1) work per level.
     fn propagate_priority_up(node: &NodeRef<T, P>) {
-        let node_priority = node.borrow().priority.clone();
         let mut current_weak = node.borrow().parent.clone();
 
         while let Some(parent) = current_weak.upgrade() {
-            let should_update = {
-                let parent_ref = parent.borrow();
-                node_priority < parent_ref.priority
+            // Calculate correct priority: min of entry priority and children's priorities
+            let correct_priority = {
+                let p = parent.borrow();
+                let mut min = p.entry.as_ref().map(|e| e.borrow().priority.clone());
+                for child in &p.children {
+                    let child_p = child.borrow().priority.clone();
+                    match &min {
+                        Some(m) if child_p < *m => min = Some(child_p),
+                        None => min = Some(child_p),
+                        _ => {}
+                    }
+                }
+                min
             };
 
-            if should_update {
-                parent.borrow_mut().priority = node_priority.clone();
-                current_weak = parent.borrow().parent.clone();
+            if let Some(new_priority) = correct_priority {
+                let old_priority = parent.borrow().priority.clone();
+                if new_priority != old_priority {
+                    parent.borrow_mut().priority = new_priority;
+                    current_weak = parent.borrow().parent.clone();
+                } else {
+                    break; // Priority unchanged, stop propagating
+                }
             } else {
-                break;
+                // Parent has no entries (shouldn't happen in valid heap)
+                current_weak = parent.borrow().parent.clone();
             }
         }
     }
@@ -475,7 +530,8 @@ impl<T, P: Ord + Clone> TwoThreeHeap<T, P> {
             let new_children = children_vec.split_off(2);
             let parent_weak = node.borrow().parent.clone();
 
-            // Calculate the minimum priority for the new structural node's subtree
+            // Calculate the minimum priority for the new structural node based on children's priorities
+            // Children's priorities should be up-to-date (we maintain this invariant)
             let new_node_priority = new_children
                 .iter()
                 .map(|c| c.borrow().priority.clone())
@@ -496,7 +552,7 @@ impl<T, P: Ord + Clone> TwoThreeHeap<T, P> {
 
             node.borrow_mut().children = children_vec;
 
-            // Update node's priority to be min of remaining children (if it's structural)
+            // Update node's priority based on its children (if it's structural)
             if node.borrow().entry.is_none() {
                 let node_min_priority = node
                     .borrow()
@@ -512,15 +568,21 @@ impl<T, P: Ord + Clone> TwoThreeHeap<T, P> {
             if let Some(parent) = parent_weak.upgrade() {
                 self.insert_as_child(parent, new_node);
             } else {
-                // Create new root - find which child has the minimum
-                let (min_child, _other_child) =
-                    if node.borrow().priority <= new_node.borrow().priority {
-                        (Rc::clone(&node), Rc::clone(&new_node))
-                    } else {
-                        (Rc::clone(&new_node), Rc::clone(&node))
-                    };
+                // Create new root - find which child has the minimum (based on their priorities)
+                let node_priority = node.borrow().priority.clone();
+                let new_node_priority = new_node.borrow().priority.clone();
 
-                let root_priority = min_child.borrow().priority.clone();
+                let min_child = if node_priority <= new_node_priority {
+                    Rc::clone(&node)
+                } else {
+                    Rc::clone(&new_node)
+                };
+
+                let root_priority = if node_priority <= new_node_priority {
+                    node_priority
+                } else {
+                    new_node_priority
+                };
 
                 let new_root = Rc::new(RefCell::new(Node {
                     entry: None,
@@ -539,18 +601,24 @@ impl<T, P: Ord + Clone> TwoThreeHeap<T, P> {
                     mem::swap(&mut mc.entry, &mut nr.entry);
                 }
 
-                // Update min_child's priority to reflect its subtree minimum
+                // Update back-references in swapped entries
+                if let Some(ref entry) = min_child.borrow().entry {
+                    entry.borrow_mut().node = Rc::downgrade(&min_child);
+                }
+                if let Some(ref entry) = new_root.borrow().entry {
+                    entry.borrow_mut().node = Rc::downgrade(&new_root);
+                }
+
+                // Update min_child's priority to reflect its children's minimum
                 // since it no longer has an entry
-                {
-                    let min_child_new_priority = min_child
-                        .borrow()
-                        .children
-                        .iter()
-                        .map(|c| c.borrow().priority.clone())
-                        .min();
-                    if let Some(p) = min_child_new_priority {
-                        min_child.borrow_mut().priority = p;
-                    }
+                let min_child_new_priority = min_child
+                    .borrow()
+                    .children
+                    .iter()
+                    .map(|c| c.borrow().priority.clone())
+                    .min();
+                if let Some(p) = min_child_new_priority {
+                    min_child.borrow_mut().priority = p;
                 }
 
                 self.root = Some(new_root);
@@ -560,6 +628,7 @@ impl<T, P: Ord + Clone> TwoThreeHeap<T, P> {
 
     fn bubble_up(&mut self, node: NodeRef<T, P>) {
         let mut current = node;
+        let mut nodes_to_cleanup: Vec<NodeRef<T, P>> = Vec::new();
 
         loop {
             let parent_weak = current.borrow().parent.clone();
@@ -568,13 +637,32 @@ impl<T, P: Ord + Clone> TwoThreeHeap<T, P> {
                 None => break,
             };
 
-            let should_swap = {
+            // Get current's entry priority (the priority we're bubbling up)
+            let current_entry_priority = {
                 let c = current.borrow();
-                let p = parent.borrow();
-                c.priority < p.priority
+                c.entry.as_ref().map(|e| e.borrow().priority.clone())
             };
 
-            if !should_swap {
+            // Only bubble up if current has an entry
+            let current_priority = match current_entry_priority {
+                Some(p) => p,
+                None => break, // Nothing to bubble up
+            };
+
+            // Get parent's actual minimum priority (either from entry or subtree)
+            let parent_priority = {
+                let p = parent.borrow();
+                if let Some(ref entry) = p.entry {
+                    // Parent has entry, compare with entry's priority
+                    entry.borrow().priority.clone()
+                } else {
+                    // Parent is structural, compare with its subtree min
+                    // (excluding current which we're trying to bubble up)
+                    p.priority.clone()
+                }
+            };
+
+            if current_priority >= parent_priority {
                 break;
             }
 
@@ -586,14 +674,48 @@ impl<T, P: Ord + Clone> TwoThreeHeap<T, P> {
                 mem::swap(&mut c.priority, &mut p.priority);
             }
 
-            // If current is now structural (no entry), update its priority to actual min of subtree
+            // Update back-references in swapped entries
+            if let Some(ref entry) = current.borrow().entry {
+                entry.borrow_mut().node = Rc::downgrade(&current);
+            }
+            if let Some(ref entry) = parent.borrow().entry {
+                entry.borrow_mut().node = Rc::downgrade(&parent);
+            }
+
+            // If current is now structural (no entry), update its priority based on children
             if current.borrow().entry.is_none() {
-                if let Some(p) = Self::find_min_priority_in_subtree(&current) {
+                let min_child_priority = current
+                    .borrow()
+                    .children
+                    .iter()
+                    .map(|c| c.borrow().priority.clone())
+                    .min();
+                if let Some(p) = min_child_priority {
                     current.borrow_mut().priority = p;
+                } else {
+                    // Current has no children - mark for cleanup
+                    nodes_to_cleanup.push(Rc::clone(&current));
                 }
             }
 
             current = parent;
+        }
+
+        // Clean up empty nodes (no entry, no children with entries)
+        for empty_node in nodes_to_cleanup {
+            let is_empty = {
+                let node_ref = empty_node.borrow();
+                node_ref.entry.is_none() && node_ref.children.is_empty()
+            };
+            if is_empty {
+                // Remove from parent's children
+                if let Some(parent) = empty_node.borrow().parent.upgrade() {
+                    parent
+                        .borrow_mut()
+                        .children
+                        .retain(|c| !Rc::ptr_eq(c, &empty_node));
+                }
+            }
         }
     }
 
@@ -604,27 +726,44 @@ impl<T, P: Ord + Clone> TwoThreeHeap<T, P> {
             // Fix priority based on actual minimum in subtree
             Self::update_priority_from_subtree(&root);
             // Ensure root has an entry by pulling up from children if needed
-            ensure_node_has_entry(&root);
+            ensure_node_has_min_entry(&root);
             return root;
         }
 
-        // First, update all children's priority fields to reflect actual minimums
-        for child in &children {
-            Self::update_priority_from_subtree(child);
-        }
+        // First, compute actual subtree minimums for all children
+        // This handles cases where cached priority fields might be stale
+        let child_mins: Vec<Option<P>> = children
+            .iter()
+            .map(|c| Self::find_min_priority_in_subtree(c))
+            .collect();
 
-        // Now find min child using correct priorities
-        let mut min = Rc::clone(&children[0]);
-        for child in children.iter().skip(1) {
-            let is_smaller = {
-                let c = child.borrow();
-                let m = min.borrow();
-                c.priority < m.priority
-            };
-            if is_smaller {
-                min = Rc::clone(child);
+        // Update all children's priority fields to reflect actual minimums
+        for (child, min_opt) in children.iter().zip(child_mins.iter()) {
+            if let Some(min_p) = min_opt {
+                child.borrow_mut().priority = min_p.clone();
             }
         }
+
+        // Find min child using the computed actual minimums (not cached priorities)
+        // Skip children with no entries in their subtree
+        let mut min_idx = 0;
+        let mut min_priority: Option<&P> = None;
+        for (i, min_opt) in child_mins.iter().enumerate() {
+            if let Some(p) = min_opt {
+                match min_priority {
+                    Some(m) if p < m => {
+                        min_idx = i;
+                        min_priority = Some(p);
+                    }
+                    None => {
+                        min_idx = i;
+                        min_priority = Some(p);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let min = Rc::clone(&children[min_idx]);
 
         // Set min as the temporary root before inserting other children
         // This allows maintain_structure to correctly update self.root if splits occur
@@ -641,7 +780,7 @@ impl<T, P: Ord + Clone> TwoThreeHeap<T, P> {
         // After all insertions, self.root may have changed due to splits
         // Ensure the actual root has an entry
         let actual_root = self.root.as_ref().unwrap().clone();
-        ensure_node_has_entry(&actual_root);
+        ensure_node_has_min_entry(&actual_root);
 
         actual_root
     }
@@ -680,103 +819,116 @@ impl<T, P: Ord + Clone> TwoThreeHeap<T, P> {
     }
 }
 
-/// Find the minimum entry priority in a subtree (standalone function)
-fn find_min_priority_in_subtree_standalone<T, P: Ord + Clone>(node: &NodeRef<T, P>) -> Option<P> {
-    let node_ref = node.borrow();
-
-    // Get this node's entry priority if it has one
-    let mut min = node_ref.entry.as_ref().map(|e| e.borrow().priority.clone());
-
-    // Compare with all children's minimums
-    for child in &node_ref.children {
-        if let Some(child_min) = find_min_priority_in_subtree_standalone(child) {
-            match &min {
-                Some(current_min) if child_min < *current_min => {
-                    min = Some(child_min);
-                }
-                None => {
-                    min = Some(child_min);
-                }
-                _ => {}
-            }
-        }
-    }
-
-    min
-}
-
-/// Ensures a node has an entry by pulling up from its children if needed
-fn ensure_node_has_entry<T, P: Ord + Clone>(node: &NodeRef<T, P>) {
-    if node.borrow().entry.is_some() {
-        return; // Already has an entry
-    }
-
-    // Try each child until we find one with an entry (or can get one)
+/// Ensures node has an entry with the minimum priority in its subtree.
+/// If node has no entry, pulls the minimum entry from children.
+/// If node has an entry but a child has a smaller one, swaps entries.
+///
+/// This function first ensures all children have their min entries (recursive),
+/// then compares with the node's entry to maintain the heap property.
+fn ensure_node_has_min_entry<T, P: Ord + Clone>(node: &NodeRef<T, P>) {
     loop {
         let children: Vec<_> = node.borrow().children.to_vec();
-        if children.is_empty() {
-            return; // No children to pull from
+
+        // First, recursively ensure all children have their min entries
+        // This updates their priority fields to be accurate
+        for child in &children {
+            ensure_node_has_min_entry(child);
         }
 
-        // Find child with minimum ACTUAL priority (scan subtrees for true minimum)
-        let mut min_child = Rc::clone(&children[0]);
-        let mut min_priority = find_min_priority_in_subtree_standalone(&min_child);
+        // Now find the child with minimum priority (priorities are now accurate after recursion)
+        let mut min_child: Option<NodeRef<T, P>> = None;
+        let mut min_child_priority: Option<P> = None;
 
-        for child in children.iter().skip(1) {
-            let child_min = find_min_priority_in_subtree_standalone(child);
-            let is_smaller = match (&child_min, &min_priority) {
-                (Some(c), Some(m)) => c < m,
-                (Some(_), None) => true,
-                _ => false,
-            };
-            if is_smaller {
-                min_child = Rc::clone(child);
-                min_priority = child_min;
-            }
-        }
-
-        // Recursively ensure min_child has an entry
-        ensure_node_has_entry(&min_child);
-
-        // Check if min_child now has an entry
-        if min_child.borrow().entry.is_some() {
-            // Take entry from min_child and put it in this node
-            let min_child_entry = min_child.borrow_mut().entry.take();
-            if let Some(entry) = min_child_entry {
-                let priority = entry.borrow().priority.clone();
-                node.borrow_mut().entry = Some(entry);
-                node.borrow_mut().priority = priority;
-            }
-
-            // If min_child is now a leaf with no entry, remove it from our children
-            let min_child_is_empty_leaf = {
-                let mc = min_child.borrow();
-                mc.entry.is_none() && mc.children.is_empty()
-            };
-
-            if min_child_is_empty_leaf {
-                node.borrow_mut()
-                    .children
-                    .retain(|c| !Rc::ptr_eq(c, &min_child));
-            } else {
-                // Update min_child's priority to reflect its subtree minimum
-                if let Some(p) = find_min_priority_in_subtree_standalone(&min_child) {
-                    min_child.borrow_mut().priority = p;
+        for child in &children {
+            // After recursion, if child has entry, priority equals entry priority
+            // If child has no entry, it will be removed below
+            if child.borrow().entry.is_some() {
+                let child_priority = child.borrow().priority.clone();
+                let is_smaller = match &min_child_priority {
+                    Some(m) => child_priority < *m,
+                    None => true,
+                };
+                if is_smaller {
+                    min_child = Some(Rc::clone(child));
+                    min_child_priority = Some(child_priority);
                 }
             }
+        }
 
-            return; // Successfully got an entry
-        } else {
-            // min_child has no entry and couldn't get one - it's a dead branch
-            // Remove it and try again with remaining children
+        // Remove children that have no entries (they're now empty)
+        {
+            let children_to_remove: Vec<_> = node.borrow().children.iter()
+                .filter(|c| c.borrow().entry.is_none() && c.borrow().children.is_empty())
+                .cloned()
+                .collect();
+            for empty_child in children_to_remove {
+                node.borrow_mut().children.retain(|c| !Rc::ptr_eq(c, &empty_child));
+            }
+        }
+
+        // Get current node's entry priority
+        let node_entry_priority = node
+            .borrow()
+            .entry
+            .as_ref()
+            .map(|e| e.borrow().priority.clone());
+
+        // If node has no entry and no children with entries, we're done
+        if node_entry_priority.is_none() && min_child_priority.is_none() {
+            return;
+        }
+
+        // If node has an entry that's already the minimum, we're done
+        match (&node_entry_priority, &min_child_priority) {
+            (Some(node_p), Some(child_p)) if *node_p <= *child_p => {
+                // Node's entry is smaller or equal, update priority field and return
+                node.borrow_mut().priority = node_p.clone();
+                return;
+            }
+            (Some(node_p), None) => {
+                // Node has entry, no children with entries
+                node.borrow_mut().priority = node_p.clone();
+                return;
+            }
+            _ => {}
+        }
+
+        // Need to swap entries with min_child
+        let min_child = min_child.unwrap();
+
+        // Take entry from min_child (it already has its min entry from recursion above)
+        let min_child_entry = min_child.borrow_mut().entry.take();
+        if let Some(child_entry) = min_child_entry {
+            let child_priority = child_entry.borrow().priority.clone();
+
+            // If node had an entry, move it to min_child
+            let old_node_entry = node.borrow_mut().entry.take();
+            if let Some(old_entry) = old_node_entry {
+                let old_priority = old_entry.borrow().priority.clone();
+                old_entry.borrow_mut().node = Rc::downgrade(&min_child);
+                min_child.borrow_mut().entry = Some(old_entry);
+                min_child.borrow_mut().priority = old_priority;
+            }
+
+            // Put child's entry in node
+            child_entry.borrow_mut().node = Rc::downgrade(node);
+            node.borrow_mut().entry = Some(child_entry);
+            node.borrow_mut().priority = child_priority;
+        }
+
+        // If min_child is now a leaf with no entry, remove it
+        let min_child_is_empty_leaf = {
+            let mc = min_child.borrow();
+            mc.entry.is_none() && mc.children.is_empty()
+        };
+
+        if min_child_is_empty_leaf {
             node.borrow_mut()
                 .children
                 .retain(|c| !Rc::ptr_eq(c, &min_child));
-
-            // Update node's priority to reflect remaining children
-            if let Some(p) = find_min_priority_in_subtree_standalone(node) {
-                node.borrow_mut().priority = p;
-            }
         }
+
+        // We're done - node now has the minimum entry
+        return;
     }
 }

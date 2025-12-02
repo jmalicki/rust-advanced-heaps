@@ -1074,3 +1074,103 @@ define_heap_tests!(
     test_skew_binomial_string_items,
     test_skew_binomial_tuple_items
 );
+
+/// Regression test for TwoThreeHeap complex_operations failure from proptest
+///
+/// This test reproduces the exact sequence that caused the failure:
+/// Expected min: -75, Actual min: -72
+#[test]
+fn test_twothree_proptest_regression() {
+    use std::collections::HashMap;
+
+    let mut heap = TwoThreeHeap::<i32, i32>::new();
+    let mut handles = Vec::new();
+    let mut priorities: HashMap<usize, i32> = HashMap::new();
+
+    // Initial values: [66, -88, 37, -99, 84, -16, -58, -91, -72]
+    let initial = vec![66, -88, 37, -99, 84, -16, -58, -91, -72];
+    for (i, priority) in initial.iter().enumerate() {
+        let handle = heap.push(*priority, i as i32);
+        handles.push(handle);
+        priorities.insert(i, *priority);
+    }
+
+    // Operations (0=push, 1=pop, 2=decrease_key, 3=peek)
+    let ops: Vec<(u8, i32)> = vec![
+        (0, 89), (0, -95), (2, -71), (0, -87), (2, 89), (1, 86), (0, -32), (3, -54),
+        (0, -96), (2, 77), (1, -52), (1, -74), (3, -100), (2, 91), (0, 66), (0, -48),
+        (2, 27), (2, -69), (1, 71), (1, -49), (1, -69), (0, -16), (0, 2), (0, -4),
+        (2, -75), (3, 45), (3, -19), (1, 34), (3, 14), (3, -54), (0, -58), (3, -53),
+        (3, 10), (0, -90),
+    ];
+
+    for (op_idx, (op_type, value)) in ops.iter().enumerate() {
+        match op_type % 4 {
+            0 => {
+                // Push with unique item (the index)
+                let idx = handles.len();
+                let handle = heap.push(*value, idx as i32);
+                handles.push(handle);
+                priorities.insert(idx, *value);
+            }
+            1 => {
+                // Pop
+                if !heap.is_empty() {
+                    let popped = heap.pop();
+                    if let Some((_priority, item)) = popped {
+                        let idx = item as usize;
+                        priorities.remove(&idx);
+                    }
+                }
+            }
+            2 => {
+                // Decrease_key
+                if !handles.is_empty() && !priorities.is_empty() {
+                    let mut valid_indices: Vec<usize> = priorities.keys().copied().collect();
+                    valid_indices.sort(); // Make iteration order deterministic
+                    if !valid_indices.is_empty() {
+                        let idx = valid_indices[(*value as usize) % valid_indices.len()];
+                        let old_priority = priorities[&idx];
+                        let new_priority = if *value < old_priority {
+                            *value
+                        } else {
+                            old_priority - 1
+                        };
+                        assert!(heap.decrease_key(&handles[idx], new_priority).is_ok(),
+                            "decrease_key failed at op {}", op_idx);
+                        priorities.insert(idx, new_priority);
+                    }
+                }
+            }
+            3 => {
+                // Peek
+                let peeked = heap.peek();
+                if let Some((priority, _item)) = peeked {
+                    if !priorities.is_empty() {
+                        let min_priority = priorities.values().min().copied();
+                        assert_eq!(*priority, min_priority.unwrap(),
+                            "Peek mismatch at op {}: heap says {} but expected {}",
+                            op_idx, *priority, min_priority.unwrap());
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        // Verify invariants after each operation
+        if !heap.is_empty() && !priorities.is_empty() {
+            let min_in_map = priorities.values().min().copied();
+            if let Some(expected_min) = min_in_map {
+                if let Some((actual_min, _)) = heap.peek() {
+                    assert_eq!(*actual_min, expected_min,
+                        "Invariant check failed at op {}: heap min {} but expected {}",
+                        op_idx, *actual_min, expected_min);
+                }
+            }
+        }
+
+        assert_eq!(heap.len(), priorities.len(),
+            "Length mismatch at op {}: heap {} but expected {}",
+            op_idx, heap.len(), priorities.len());
+    }
+}
