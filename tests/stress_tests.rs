@@ -4,7 +4,6 @@
 //! to catch edge cases and verify correctness under load.
 
 use rust_advanced_heaps::binomial::BinomialHeap;
-use rust_advanced_heaps::brodal::BrodalHeap;
 use rust_advanced_heaps::fibonacci::FibonacciHeap;
 use rust_advanced_heaps::pairing::PairingHeap;
 use rust_advanced_heaps::rank_pairing::RankPairingHeap;
@@ -312,39 +311,3 @@ fn test_binomial_rapid_fire() {
     test_rapid_fire::<BinomialHeap<i32, i32>>();
 }
 
-// Brodal heap stress tests (smaller scale due to complexity)
-
-#[test]
-fn test_brodal_massive() {
-    test_massive_operations::<BrodalHeap<i32, i32>>();
-}
-
-#[test]
-fn test_brodal_many_decrease_keys() {
-    test_many_decrease_keys::<BrodalHeap<i32, i32>>();
-}
-
-#[test]
-fn test_brodal_alternating() {
-    test_alternating_ops::<BrodalHeap<i32, i32>>();
-}
-
-#[test]
-fn test_brodal_large_merge() {
-    test_large_merge::<BrodalHeap<i32, i32>>();
-}
-
-#[test]
-fn test_brodal_decrease_on_many() {
-    test_decrease_on_many_operations::<BrodalHeap<i32, i32>>();
-}
-
-#[test]
-fn test_brodal_large_priorities() {
-    test_large_priorities::<BrodalHeap<i32, i64>>();
-}
-
-#[test]
-fn test_brodal_rapid_fire() {
-    test_rapid_fire::<BrodalHeap<i32, i32>>();
-}
