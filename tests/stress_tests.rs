@@ -310,4 +310,3 @@ fn test_binomial_large_priorities() {
 fn test_binomial_rapid_fire() {
     test_rapid_fire::<BinomialHeap<i32, i32>>();
 }
-
