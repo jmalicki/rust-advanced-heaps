@@ -18,7 +18,7 @@
 //!
 //! # Differences from the Imperative Brodal Heap
 //!
-//! Unlike the imperative Brodal heap (in `brodal.rs`), this implementation:
+//! Unlike imperative Brodal heap implementations, this implementation:
 //! - Is purely functional (persistent) - operations return new heaps
 //! - Does NOT support decrease_key (typical for functional priority queues)
 //! - Uses immutable data structures with `Rc` for sharing
