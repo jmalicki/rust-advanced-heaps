@@ -110,10 +110,9 @@ fn test_decrease_on_many_operations<H: Heap<i32, i32>>() {
 
     // Try to decrease remaining handles
     for handle in handles.iter().skip(100) {
-        // Decrease key (get current min by popping and pushing back)
-        if let Some((current, item)) = heap.pop() {
+        // Decrease key (get current min using peek to avoid invalidating handles)
+        if let Some((current, _)) = heap.peek() {
             assert!(heap.decrease_key(handle, current - 1).is_ok());
-            heap.push(current, item); // Restore
         }
     }
 

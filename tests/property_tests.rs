@@ -449,11 +449,9 @@ fn test_decrease_key_edge_cases<H: Heap<i32, i32>>(values: Vec<i32>) -> Result<(
         let new_priority = val - 100;
         prop_assert!(heap.decrease_key(&handles[idx], new_priority).is_ok());
 
-        // Verify min is now this value or something smaller
-        // Check by popping and pushing back
-        if let Some((min, item)) = heap.pop() {
-            prop_assert!(min <= new_priority);
-            heap.push(min, item); // Restore
+        // Verify min is now this value or something smaller using peek
+        if let Some((min, _)) = heap.peek() {
+            prop_assert!(*min <= new_priority);
         }
     }
 
