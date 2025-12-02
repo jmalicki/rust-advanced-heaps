@@ -54,7 +54,7 @@ Synthetic graphs are deterministic (seeded LCG PRNG) for reproducible results.
 
 ### Directory Structure
 
-```
+```text
 rust-advanced-heaps/
 ├── data/                    # Git-ignored, user downloads here
 │   ├── USA-road-d.NY.gr     # New York road network
@@ -173,7 +173,7 @@ The `data/` directory is git-ignored. Available datasets:
 
 The `.gr` files use a simple text format:
 
-```
+```text
 c This is a comment
 p sp <num_nodes> <num_edges>
 a <from> <to> <weight>
