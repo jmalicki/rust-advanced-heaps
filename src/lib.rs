@@ -9,7 +9,6 @@
 //! - **Pairing Heap**: O(1) amortized insert and merge; O(log n) amortized delete-min; o(log n) amortized decrease_key
 //! - **Rank-Pairing Heap**: O(1) amortized insert, decrease_key, and merge; O(log n) amortized delete-min
 //! - **Binomial Heap**: O(log n) insert and delete-min; O(log n) decrease_key; O(1) amortized merge
-//! - **Brodal Heap**: O(1) worst-case insert, decrease_key, and merge; O(log n) worst-case delete-min
 //! - **Brodal-Okasaki Heap**: O(1) worst-case insert, find_min, and meld; O(log n) worst-case delete-min (functional/persistent)
 //! - **Strict Fibonacci Heap**: O(1) worst-case insert, decrease_key, and merge; O(log n) worst-case delete-min
 //! - **2-3 Heap**: O(1) amortized insert and decrease_key; O(log n) amortized delete-min
@@ -29,7 +28,6 @@
 //! ```
 
 pub mod binomial;
-pub mod brodal;
 pub mod brodal_okasaki;
 pub mod fibonacci;
 pub mod pairing;

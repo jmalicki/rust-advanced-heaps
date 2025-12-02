@@ -4,7 +4,6 @@
 //! with various edge cases and complex scenarios.
 
 use rust_advanced_heaps::binomial::BinomialHeap;
-use rust_advanced_heaps::brodal::BrodalHeap;
 use rust_advanced_heaps::fibonacci::FibonacciHeap;
 use rust_advanced_heaps::pairing::PairingHeap;
 use rust_advanced_heaps::rank_pairing::RankPairingHeap;
@@ -963,43 +962,6 @@ define_heap_tests!(
     test_binomial_very_large_sequence,
     test_binomial_string_items,
     test_binomial_tuple_items
-);
-
-define_heap_tests!(
-    brodal,
-    BrodalHeap,
-    test_brodal_empty,
-    test_brodal_basic,
-    test_brodal_decrease_key,
-    test_brodal_multiple_decrease_keys,
-    test_brodal_merge,
-    test_brodal_merge_empty,
-    test_brodal_duplicate_priorities,
-    test_brodal_stress,
-    test_brodal_peek_idempotent,
-    test_brodal_single_element,
-    test_brodal_merge_then_operations,
-    test_brodal_rapid_operations,
-    test_brodal_large_priorities,
-    test_brodal_decrease_key_same,
-    test_brodal_complex_sequence,
-    test_brodal_ascending_insertion,
-    test_brodal_descending_insertion,
-    test_brodal_random_order_insertion,
-    test_brodal_multiple_decrease_same,
-    test_brodal_decrease_key_new_min,
-    test_brodal_alternating_operations,
-    test_brodal_merge_large,
-    test_brodal_decrease_key_selective,
-    test_brodal_all_same_priority,
-    test_brodal_negative_priorities,
-    test_brodal_decrease_to_negative,
-    test_brodal_alias_methods,
-    test_brodal_heap_property,
-    test_brodal_merge_with_handles,
-    test_brodal_very_large_sequence,
-    test_brodal_string_items,
-    test_brodal_tuple_items
 );
 
 define_heap_tests!(

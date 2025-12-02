@@ -15,7 +15,6 @@
 
 use big_o_test::{test_algorithm, BigOAlgorithmComplexity};
 use rust_advanced_heaps::binomial::BinomialHeap;
-use rust_advanced_heaps::brodal::BrodalHeap;
 use rust_advanced_heaps::fibonacci::FibonacciHeap;
 use rust_advanced_heaps::pairing::PairingHeap;
 use rust_advanced_heaps::rank_pairing::RankPairingHeap;
@@ -297,48 +296,6 @@ fn test_binomial_decrease_key() {
     test_decrease_key_batch_complexity::<BinomialHeap<i32, i32>>(
         "BinomialHeap",
         BigOAlgorithmComplexity::ONLogN,
-    );
-}
-
-// ============================================================================
-// Brodal Heap Tests
-// ============================================================================
-
-#[test]
-#[ignore] // big-o-test complexity analysis fails: BrodalHeap uses a violation tracking system
-          //          // that defers repair operations, making it difficult for complexity analysis tools
-          //          // to accurately measure worst-case bounds. The implementation maintains violation
-          //          // queues that may be processed lazily, creating irregular memory access patterns
-          //          // that confuse static analysis. Additionally, the current implementation is a
-          //          // simplified version that may not achieve true worst-case O(1) bounds, leading
-          //          // to inconsistent complexity measurements that don't match theoretical expectations.
-fn test_brodal_insert() {
-    test_insert_batch_complexity::<BrodalHeap<i32, i32>>("BrodalHeap", BigOAlgorithmComplexity::ON);
-}
-
-#[test]
-#[ignore] // big-o-test complexity analysis fails: The violation repair system in delete_min
-          //          // processes accumulated violations, creating complex nested operations that the
-          //          // complexity analysis tool cannot accurately measure. The batch processing of
-          //          // violations creates irregular timing patterns that don't fit clean O-notation
-          //          // analysis, and the tool may report false complexity bounds or time out during
-          //          // analysis due to the intricate control flow in violation repair operations.
-fn test_brodal_pop() {
-    test_pop_batch_complexity::<BrodalHeap<i32, i32>>("BrodalHeap");
-}
-
-#[test]
-#[ignore] // big-o-test complexity analysis fails: Decrease_key operations trigger violation
-          //          // tracking and deferred repair operations. The violation system's deferred
-          //          // processing model makes it difficult for complexity analysis to distinguish
-          //          // between the actual decrease_key work (O(1) worst-case) and the deferred
-          //          // violation repairs that may be batched. The analysis tool cannot reliably
-          //          // attribute costs correctly, leading to inconsistent or incorrect complexity
-          //          // measurements that don't reflect the theoretical O(1) worst-case bound.
-fn test_brodal_decrease_key() {
-    test_decrease_key_batch_complexity::<BrodalHeap<i32, i32>>(
-        "BrodalHeap",
-        BigOAlgorithmComplexity::ON,
     );
 }
 
