@@ -9,6 +9,11 @@ repository = "https://github.com/yourusername/rust-advanced-heaps"
 keywords = ["heap", "priority-queue", "data-structure", "fibonacci-heap", "pairing-heap"]
 categories = ["data-structures", "algorithms"]
 
+[features]
+# Enable expensive O(n) invariant verification checks. Only use for debugging specific issues.
+# These checks significantly slow down all heap operations.
+expensive_verify = []
+
 [dependencies]
 # For benchmarking
 criterion = "0.5"

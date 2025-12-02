@@ -258,6 +258,17 @@ impl<T, P: Ord> Heap<T, P> for RankPairingHeap<T, P> {
                 self.root = Some(self.merge_children(children));
             }
 
+            // Verify invariants after delete_min
+            #[cfg(feature = "expensive_verify")]
+            {
+                let count = self.verify_heap_property();
+                assert_eq!(
+                    count, self.len,
+                    "Length mismatch after delete_min: counted {} nodes but len is {}",
+                    count, self.len
+                );
+            }
+
             Some((priority, item))
         }
     }
@@ -312,23 +323,25 @@ impl<T, P: Ord> Heap<T, P> for RankPairingHeap<T, P> {
                 if (*node).priority < (*parent.as_ptr()).priority {
                     // Heap property violated: cut node from parent
                     // This operation may trigger cascading cuts if parent was marked
-                    self.cut(node_ptr);
+                    // Returns all cut nodes (including cascaded parents)
+                    let cut_nodes = self.cut(node_ptr);
 
-                    // Merge cut node with root
-                    // If cut node has smaller priority, it becomes the new root
-                    // Otherwise, it becomes a child of the current root
-                    if let Some(root_ptr) = self.root {
-                        if (*node).priority < (*root_ptr.as_ptr()).priority {
-                            // Cut node has smaller priority: make it the new root
-                            self.make_child(node_ptr, root_ptr);
-                            self.root = Some(node_ptr);
+                    // Merge all cut nodes with root
+                    // Each cut node (including cascaded parents) needs to be added
+                    for cut_node in cut_nodes {
+                        if let Some(root_ptr) = self.root {
+                            if (*cut_node.as_ptr()).priority < (*root_ptr.as_ptr()).priority {
+                                // Cut node has smaller priority: make it the new root
+                                self.make_child(cut_node, root_ptr);
+                                self.root = Some(cut_node);
+                            } else {
+                                // Current root has smaller priority: add cut node as child
+                                self.make_child(root_ptr, cut_node);
+                            }
                         } else {
-                            // Current root has smaller priority: add cut node as child
-                            self.make_child(root_ptr, node_ptr);
+                            // Heap is empty (shouldn't happen, but handle gracefully)
+                            self.root = Some(cut_node);
                         }
-                    } else {
-                        // Heap is empty (shouldn't happen, but handle gracefully)
-                        self.root = Some(node_ptr);
                     }
                 }
                 // If heap property is not violated, no restructuring needed
@@ -389,6 +402,47 @@ impl<T, P: Ord> Heap<T, P> for RankPairingHeap<T, P> {
 }
 
 impl<T, P: Ord> RankPairingHeap<T, P> {
+    /// Verifies heap property: all children have priority >= parent
+    /// Returns the total count of nodes for length verification
+    #[cfg(feature = "expensive_verify")]
+    unsafe fn verify_heap_property(&self) -> usize {
+        if let Some(root) = self.root {
+            self.verify_subtree(root, None)
+        } else {
+            0
+        }
+    }
+
+    #[cfg(feature = "expensive_verify")]
+    #[allow(clippy::only_used_in_recursion)]
+    unsafe fn verify_subtree(
+        &self,
+        node: NonNull<Node<T, P>>,
+        parent_priority: Option<&P>,
+    ) -> usize {
+        let node_ptr = node.as_ptr();
+        let node_priority = &(*node_ptr).priority;
+
+        // Verify heap property: node priority >= parent priority
+        if let Some(parent_p) = parent_priority {
+            assert!(
+                node_priority >= parent_p,
+                "Heap property violated: child priority < parent priority"
+            );
+        }
+
+        let mut count = 1;
+
+        // Verify all children
+        let mut current = (*node_ptr).child;
+        while let Some(child) = current {
+            count += self.verify_subtree(child, Some(node_priority));
+            current = (*child.as_ptr()).sibling;
+        }
+
+        count
+    }
+
     /// Makes y a child of x, maintaining heap property and rank constraints
     ///
     /// **Time Complexity**: O(1) amortized (rank update may be O(degree) but amortized to O(1))
@@ -479,7 +533,7 @@ impl<T, P: Ord> RankPairingHeap<T, P> {
         }
     }
 
-    /// Cuts a node from its parent and makes it a root
+    /// Cuts a node from its parent and collects all cascaded nodes
     ///
     /// **Time Complexity**: O(1) amortized (cascading cuts amortized to O(1))
     ///
@@ -489,6 +543,7 @@ impl<T, P: Ord> RankPairingHeap<T, P> {
     /// 3. **Marking rule**: If parent is not marked, mark it
     /// 4. **Cascading**: If parent is already marked, cut it too (cascade upward)
     /// 5. Update parent's rank after losing a child
+    /// 6. Return all cut nodes so they can be merged with the root
     ///
     /// **Marking Rule (Type-A)**:
     /// - A node can lose at most one child before being cut
@@ -500,11 +555,14 @@ impl<T, P: Ord> RankPairingHeap<T, P> {
     /// - Most cuts are cheap (cutting near root, parent not marked)
     /// - Cascading cuts are bounded: each node can be cut at most once
     /// - Amortized analysis shows average cascade depth is O(1)
-    unsafe fn cut(&mut self, node: NonNull<Node<T, P>>) {
+    ///
+    /// Returns a vector of all cut nodes (including cascaded parents) that need
+    /// to be merged with the root.
+    unsafe fn cut(&mut self, node: NonNull<Node<T, P>>) -> Vec<NonNull<Node<T, P>>> {
         let node_ptr = node.as_ptr();
         let parent_opt = match (*node_ptr).parent {
             Some(p) => p,
-            None => return, // Node is already root or orphaned
+            None => return Vec::new(), // Node is already root or orphaned
         };
         let parent_ptr = parent_opt.as_ptr();
 
@@ -530,6 +588,10 @@ impl<T, P: Ord> RankPairingHeap<T, P> {
         // Step 2: Clear node's parent and sibling pointers (it's now a root)
         (*node_ptr).parent = None;
         (*node_ptr).sibling = None;
+        (*node_ptr).marked = false; // Reset mark when cut
+
+        // Collect all cut nodes that need to be merged with root
+        let mut cut_nodes = vec![node];
 
         // Step 3: Apply marking rule (Type-A rank-pairing heap)
         // This maintains the constraint that no node loses more than one child
@@ -537,32 +599,17 @@ impl<T, P: Ord> RankPairingHeap<T, P> {
             // Parent hasn't lost a child yet: mark it
             // Next time it loses a child, it will be cut (cascading)
             (*parent_ptr).marked = true;
+            // Update parent's rank (it lost a child, rank may decrease)
+            self.update_rank(parent_opt);
         } else {
             // Parent already marked (has lost one child): cut it now (cascading)
             // This prevents nodes from losing too many children
-            // Recursive cut may trigger further cascades
-            self.cut(parent_opt);
-            // Fix up rank constraints after cascading cut
-            self.fixup(parent_opt);
+            // Recursive cut collects all cascaded nodes
+            let cascaded = self.cut(parent_opt);
+            cut_nodes.extend(cascaded);
         }
 
-        // Step 4: Update parent's rank (it lost a child, rank may decrease)
-        // This maintains rank constraints after cutting
-        self.update_rank(parent_opt);
-    }
-
-    /// Performs rank-based fixup after cutting
-    unsafe fn fixup(&mut self, node: NonNull<Node<T, P>>) {
-        // For type-A rank-pairing heaps, we need to ensure rank constraints
-        // are maintained. The cut operation may have violated them.
-        let node_ptr = node.as_ptr();
-
-        // If this is not a root, we may need to fix up the parent chain
-        if (*node_ptr).parent.is_some() {
-            // The rank update already happened in cut()
-            // We may need additional restructuring, but for simplicity,
-            // we'll rely on the rank constraints from cutting
-        }
+        cut_nodes
     }
 
     /// Collects all children of a node into a vector

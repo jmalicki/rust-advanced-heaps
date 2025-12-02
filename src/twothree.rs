@@ -83,7 +83,7 @@ pub struct TwoThreeHeap<T, P: Ord> {
     len: usize,
 }
 
-impl<T: Clone, P: Ord + Clone> Heap<T, P> for TwoThreeHeap<T, P> {
+impl<T: Clone, P: Ord + Clone + std::fmt::Debug> Heap<T, P> for TwoThreeHeap<T, P> {
     type Handle = TwoThreeHandle<T, P>;
 
     fn new() -> Self {
@@ -145,6 +145,19 @@ impl<T: Clone, P: Ord + Clone> Heap<T, P> for TwoThreeHeap<T, P> {
         }
 
         self.len += 1;
+
+        // Verify invariants after insert (expensive O(n) checks, only with feature flag)
+        #[cfg(feature = "expensive_verify")]
+        {
+            let count = self.count_all_nodes();
+            assert_eq!(
+                count, self.len,
+                "Length mismatch after insert: counted {} entries but len is {}",
+                count, self.len
+            );
+            self.verify_min_at_root();
+        }
+
         handle
     }
 
@@ -203,6 +216,20 @@ impl<T: Clone, P: Ord + Clone> Heap<T, P> for TwoThreeHeap<T, P> {
             self.root = Some(self.rebuild_from_children(children));
         }
 
+        // Verify invariants after delete_min (expensive O(n) checks, only with feature flag)
+        #[cfg(feature = "expensive_verify")]
+        {
+            let count = self.count_all_nodes();
+            assert_eq!(
+                count, self.len,
+                "Length mismatch after delete_min: counted {} entries but len is {}",
+                count, self.len
+            );
+
+            // Verify root has minimum priority
+            self.verify_min_at_root();
+        }
+
         Some((priority, item))
     }
 
@@ -254,11 +281,18 @@ impl<T: Clone, P: Ord + Clone> Heap<T, P> for TwoThreeHeap<T, P> {
         };
 
         if other_is_smaller {
+            // Set other_root as temporary root before insert_as_child
+            // because maintain_structure may need to find the root
+            self.root = Some(Rc::clone(&other_root));
             self.insert_as_child(Rc::clone(&other_root), self_root);
-            self.root = Some(other_root);
+            // Note: maintain_structure might have created a new root,
+            // so we don't overwrite self.root here
         } else {
+            // Set self_root as temporary root before insert_as_child
+            self.root = Some(Rc::clone(&self_root));
             self.insert_as_child(Rc::clone(&self_root), other_root);
-            self.root = Some(self_root);
+            // Note: maintain_structure might have created a new root,
+            // so we don't overwrite self.root here
         }
 
         // Ensure root has an entry after potential restructuring
@@ -268,10 +302,22 @@ impl<T: Clone, P: Ord + Clone> Heap<T, P> for TwoThreeHeap<T, P> {
 
         self.len += other.len;
         other.len = 0;
+
+        // Verify invariants after merge (expensive O(n) checks, only with feature flag)
+        #[cfg(feature = "expensive_verify")]
+        {
+            let count = self.count_all_nodes();
+            assert_eq!(
+                count, self.len,
+                "Length mismatch after merge: counted {} entries but len is {}",
+                count, self.len
+            );
+            self.verify_min_at_root();
+        }
     }
 }
 
-impl<T: Clone, P: Ord + Clone> Default for TwoThreeHeap<T, P> {
+impl<T: Clone, P: Ord + Clone + std::fmt::Debug> Default for TwoThreeHeap<T, P> {
     fn default() -> Self {
         Self::new()
     }
@@ -303,10 +349,122 @@ fn find_node_with_entry<T, P>(node: NodeRef<T, P>, entry: &Entry<T, P>) -> Optio
 }
 
 impl<T, P: Ord + Clone> TwoThreeHeap<T, P> {
+    /// Counts all nodes in the heap (debug only)
+    #[cfg(feature = "expensive_verify")]
+    fn count_all_nodes(&self) -> usize {
+        if let Some(ref root) = self.root {
+            Self::count_subtree(root)
+        } else {
+            0
+        }
+    }
+
+    #[cfg(feature = "expensive_verify")]
+    fn count_subtree(node: &NodeRef<T, P>) -> usize {
+        let node_ref = node.borrow();
+
+        // Count this node only if it has an entry (structural nodes don't have items)
+        let count = if node_ref.entry.is_some() { 1 } else { 0 };
+
+        // Count children
+        let children_count: usize = node_ref
+            .children
+            .iter()
+            .map(|c| Self::count_subtree(c))
+            .sum();
+
+        count + children_count
+    }
+
+    /// Finds the actual minimum priority in the entire heap (debug only)
+    #[cfg(feature = "expensive_verify")]
+    fn find_actual_min(&self) -> Option<P> {
+        if let Some(ref root) = self.root {
+            Self::find_min_in_subtree(root)
+        } else {
+            None
+        }
+    }
+
+    #[cfg(feature = "expensive_verify")]
+    fn find_min_in_subtree(node: &NodeRef<T, P>) -> Option<P> {
+        let node_ref = node.borrow();
+
+        // Get this node's entry priority if it has one
+        let mut min = node_ref.entry.as_ref().map(|e| e.borrow().priority.clone());
+
+        // Compare with all children's minimums
+        for child in &node_ref.children {
+            if let Some(child_min) = Self::find_min_in_subtree(child) {
+                match &min {
+                    Some(current_min) if child_min < *current_min => {
+                        min = Some(child_min);
+                    }
+                    None => {
+                        min = Some(child_min);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        min
+    }
+
+    /// Verifies that the root has the minimum priority in the heap
+    #[cfg(feature = "expensive_verify")]
+    fn verify_min_at_root(&self)
+    where
+        P: std::fmt::Debug,
+    {
+        if let Some(ref root) = self.root {
+            let root_priority = {
+                let root_ref = root.borrow();
+                root_ref.entry.as_ref().map(|e| e.borrow().priority.clone())
+            };
+            if let Some(root_p) = root_priority {
+                let actual_min = self.find_actual_min();
+                if let Some(min_p) = actual_min {
+                    assert!(
+                        root_p <= min_p,
+                        "Root priority {:?} is greater than actual min {:?}",
+                        root_p,
+                        min_p
+                    );
+                }
+            }
+        }
+    }
+
     fn insert_as_child(&mut self, parent: NodeRef<T, P>, child: NodeRef<T, P>) {
         child.borrow_mut().parent = Rc::downgrade(&parent);
+        let child_clone = Rc::clone(&child);
         parent.borrow_mut().children.push(child);
+
+        // Propagate priority up if child has smaller priority
+        Self::propagate_priority_up(&child_clone);
+
         self.maintain_structure(parent);
+    }
+
+    /// Propagates priority changes up the tree when a node's subtree minimum changes
+    fn propagate_priority_up(node: &NodeRef<T, P>) {
+        let node_priority = node.borrow().priority.clone();
+        let mut current_weak = node.borrow().parent.clone();
+
+        while let Some(parent) = current_weak.upgrade() {
+            let should_update = {
+                let parent_ref = parent.borrow();
+                node_priority < parent_ref.priority
+            };
+
+            if should_update {
+                parent.borrow_mut().priority = node_priority.clone();
+                current_weak = parent.borrow().parent.clone();
+            } else {
+                break;
+            }
+        }
     }
 
     fn maintain_structure(&mut self, node: NodeRef<T, P>) {
@@ -428,15 +586,9 @@ impl<T, P: Ord + Clone> TwoThreeHeap<T, P> {
                 mem::swap(&mut c.priority, &mut p.priority);
             }
 
-            // If current is now structural (no entry), update its priority to min of children
+            // If current is now structural (no entry), update its priority to actual min of subtree
             if current.borrow().entry.is_none() {
-                let new_priority = current
-                    .borrow()
-                    .children
-                    .iter()
-                    .map(|c| c.borrow().priority.clone())
-                    .min();
-                if let Some(p) = new_priority {
+                if let Some(p) = Self::find_min_priority_in_subtree(&current) {
                     current.borrow_mut().priority = p;
                 }
             }
@@ -449,11 +601,19 @@ impl<T, P: Ord + Clone> TwoThreeHeap<T, P> {
         if children.len() == 1 {
             let root = Rc::clone(&children[0]);
             root.borrow_mut().parent = Weak::new();
+            // Fix priority based on actual minimum in subtree
+            Self::update_priority_from_subtree(&root);
             // Ensure root has an entry by pulling up from children if needed
             ensure_node_has_entry(&root);
             return root;
         }
 
+        // First, update all children's priority fields to reflect actual minimums
+        for child in &children {
+            Self::update_priority_from_subtree(child);
+        }
+
+        // Now find min child using correct priorities
         let mut min = Rc::clone(&children[0]);
         for child in children.iter().skip(1) {
             let is_smaller = {
@@ -485,6 +645,64 @@ impl<T, P: Ord + Clone> TwoThreeHeap<T, P> {
 
         actual_root
     }
+
+    /// Update a node's priority field to reflect the actual minimum in its subtree
+    fn update_priority_from_subtree(node: &NodeRef<T, P>) {
+        let actual_min = Self::find_min_priority_in_subtree(node);
+        if let Some(min_p) = actual_min {
+            node.borrow_mut().priority = min_p;
+        }
+    }
+
+    /// Find the minimum entry priority in a subtree (non-debug version)
+    fn find_min_priority_in_subtree(node: &NodeRef<T, P>) -> Option<P> {
+        let node_ref = node.borrow();
+
+        // Get this node's entry priority if it has one
+        let mut min = node_ref.entry.as_ref().map(|e| e.borrow().priority.clone());
+
+        // Compare with all children's minimums
+        for child in &node_ref.children {
+            if let Some(child_min) = Self::find_min_priority_in_subtree(child) {
+                match &min {
+                    Some(current_min) if child_min < *current_min => {
+                        min = Some(child_min);
+                    }
+                    None => {
+                        min = Some(child_min);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        min
+    }
+}
+
+/// Find the minimum entry priority in a subtree (standalone function)
+fn find_min_priority_in_subtree_standalone<T, P: Ord + Clone>(node: &NodeRef<T, P>) -> Option<P> {
+    let node_ref = node.borrow();
+
+    // Get this node's entry priority if it has one
+    let mut min = node_ref.entry.as_ref().map(|e| e.borrow().priority.clone());
+
+    // Compare with all children's minimums
+    for child in &node_ref.children {
+        if let Some(child_min) = find_min_priority_in_subtree_standalone(child) {
+            match &min {
+                Some(current_min) if child_min < *current_min => {
+                    min = Some(child_min);
+                }
+                None => {
+                    min = Some(child_min);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    min
 }
 
 /// Ensures a node has an entry by pulling up from its children if needed
@@ -500,11 +718,20 @@ fn ensure_node_has_entry<T, P: Ord + Clone>(node: &NodeRef<T, P>) {
             return; // No children to pull from
         }
 
-        // Find child with minimum priority
+        // Find child with minimum ACTUAL priority (scan subtrees for true minimum)
         let mut min_child = Rc::clone(&children[0]);
+        let mut min_priority = find_min_priority_in_subtree_standalone(&min_child);
+
         for child in children.iter().skip(1) {
-            if child.borrow().priority < min_child.borrow().priority {
+            let child_min = find_min_priority_in_subtree_standalone(child);
+            let is_smaller = match (&child_min, &min_priority) {
+                (Some(c), Some(m)) => c < m,
+                (Some(_), None) => true,
+                _ => false,
+            };
+            if is_smaller {
                 min_child = Rc::clone(child);
+                min_priority = child_min;
             }
         }
 
@@ -533,13 +760,7 @@ fn ensure_node_has_entry<T, P: Ord + Clone>(node: &NodeRef<T, P>) {
                     .retain(|c| !Rc::ptr_eq(c, &min_child));
             } else {
                 // Update min_child's priority to reflect its subtree minimum
-                let min_child_new_priority = min_child
-                    .borrow()
-                    .children
-                    .iter()
-                    .map(|c| c.borrow().priority.clone())
-                    .min();
-                if let Some(p) = min_child_new_priority {
+                if let Some(p) = find_min_priority_in_subtree_standalone(&min_child) {
                     min_child.borrow_mut().priority = p;
                 }
             }
@@ -553,13 +774,7 @@ fn ensure_node_has_entry<T, P: Ord + Clone>(node: &NodeRef<T, P>) {
                 .retain(|c| !Rc::ptr_eq(c, &min_child));
 
             // Update node's priority to reflect remaining children
-            let new_priority = node
-                .borrow()
-                .children
-                .iter()
-                .map(|c| c.borrow().priority.clone())
-                .min();
-            if let Some(p) = new_priority {
+            if let Some(p) = find_min_priority_in_subtree_standalone(node) {
                 node.borrow_mut().priority = p;
             }
         }
