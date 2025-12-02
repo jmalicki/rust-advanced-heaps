@@ -24,7 +24,6 @@
 
 use proptest::prelude::*;
 use rust_advanced_heaps::binomial::BinomialHeap;
-use rust_advanced_heaps::brodal::BrodalHeap;
 use rust_advanced_heaps::fibonacci::FibonacciHeap;
 use rust_advanced_heaps::pairing::PairingHeap;
 use rust_advanced_heaps::rank_pairing::RankPairingHeap;
@@ -617,9 +616,4 @@ create_heap_tests!(
 create_heap_tests!(
     skew_binomial_tests => SkewBinomialHeap<i32, i32>,
     0..100, 1..50, 0..20, 1..100
-);
-
-create_heap_tests!(
-    brodal_tests => BrodalHeap<i32, i32>,
-    0..50, 1..30, 0..10, 1..50
 );
