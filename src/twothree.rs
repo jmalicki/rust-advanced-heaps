@@ -1,18 +1,20 @@
-//! 2-3 Heap implementation
+//! 2-3 Heap implementation (Takaoka)
 //!
-//! A 2-3 heap is a balanced tree where each internal node has either 2 or 3 children.
-//! It provides:
-//! - O(1) amortized insert and decrease_key
+//! A 2-3 heap is a priority queue consisting of a forest of trees where each tree
+//! follows the 2-3 tree structure. It provides:
+//! - O(1) amortized insert
+//! - O(1) amortized decrease_key (via cut-and-link)
 //! - O(log n) amortized delete_min
+//! - O(1) merge
 //!
-//! The 2-3 structure ensures balance while allowing efficient decrease_key operations.
+//! Based on: Takaoka, T.: "Theory of 2-3 heaps", Discrete Applied Mathematics 126 (2003)
 //!
-//! This implementation uses Rc/Weak references for memory safety:
-//! - Strong references (Rc) point from parent to children
-//! - Weak references point from children back to parents
-//! - Handles point directly to nodes; bubble-up swaps node positions, not contents
+//! The key insight: decrease_key is O(1) because we simply cut the node with its
+//! subtree from its parent and add it to the root list. No restructuring is needed
+//! during decrease_key - all restructuring is deferred to delete_min.
 
 use crate::traits::{Handle, Heap, HeapError};
+use smallvec::SmallVec;
 use std::cell::RefCell;
 use std::mem;
 use std::rc::{Rc, Weak};
@@ -25,13 +27,12 @@ type WeakNodeRef<T, P> = Weak<RefCell<Node<T, P>>>;
 
 /// Handle to an element in a 2-3 heap
 ///
-/// Uses a Weak reference to the node, which remains valid because bubble-up
-/// swaps node positions in the tree rather than swapping contents.
+/// Uses a Weak reference to the node. Handle stability is preserved because
+/// nodes are never moved or reallocated - only tree links are updated.
 pub struct TwoThreeHandle<T, P> {
     node: WeakNodeRef<T, P>,
 }
 
-// Manual Clone implementation to avoid requiring T: Clone, P: Clone
 impl<T, P> Clone for TwoThreeHandle<T, P> {
     fn clone(&self) -> Self {
         TwoThreeHandle {
@@ -60,21 +61,30 @@ impl<T, P> Handle for TwoThreeHandle<T, P> {}
 
 /// Node in the 2-3 tree
 ///
-/// Layout optimized for cache locality: metadata first, then priority, then item.
-/// When traversing the heap, we often only need to compare priorities.
+/// Layout: metadata first (parent, children), then priority, then item.
+/// This optimizes for cache locality during priority comparisons.
 struct Node<T, P> {
-    // Metadata for tree structure (accessed during traversal)
+    // Tree structure
     parent: WeakNodeRef<T, P>,
-    children: Vec<NodeRef<T, P>>,
-    // Priority for ordering (accessed during comparisons)
+    // SmallVec with inline capacity of 3 (2-3 heap nodes have at most 3 children)
+    children: SmallVec<[NodeRef<T, P>; 3]>,
+    // Rank (degree) of the tree rooted at this node
+    rank: usize,
+    // Priority and item (accessed during comparisons and retrieval)
     priority: P,
-    // Item data (accessed only when we've found the target node)
     item: T,
 }
 
-/// 2-3 Heap
+/// 2-3 Heap - a forest of 2-3 trees
+///
+/// Roots are stored in a Vec for simplicity and correct memory management.
+/// A separate min pointer tracks the root with minimum priority.
 pub struct TwoThreeHeap<T, P: Ord> {
-    root: Option<NodeRef<T, P>>,
+    /// All tree roots
+    roots: Vec<NodeRef<T, P>>,
+    /// Pointer to the root with minimum priority (None if empty)
+    min: Option<NodeRef<T, P>>,
+    /// Total number of elements
     len: usize,
 }
 
@@ -82,7 +92,11 @@ impl<T: Clone, P: Ord + Clone> Heap<T, P> for TwoThreeHeap<T, P> {
     type Handle = TwoThreeHandle<T, P>;
 
     fn new() -> Self {
-        Self { root: None, len: 0 }
+        Self {
+            roots: Vec::with_capacity(16), // Pre-allocate some space
+            min: None,
+            len: 0,
+        }
     }
 
     fn is_empty(&self) -> bool {
@@ -98,11 +112,12 @@ impl<T: Clone, P: Ord + Clone> Heap<T, P> for TwoThreeHeap<T, P> {
     }
 
     fn insert(&mut self, priority: P, item: T) -> Self::Handle {
-        // Create new node with item inline
+        // Create new node as a single-node tree (rank 0)
         let node = Rc::new(RefCell::new(Node {
             parent: Weak::new(),
-            children: Vec::new(),
-            priority: priority.clone(),
+            children: SmallVec::new(), // Inline storage for up to 3 children
+            rank: 0,
+            priority,
             item,
         }));
 
@@ -110,25 +125,8 @@ impl<T: Clone, P: Ord + Clone> Heap<T, P> for TwoThreeHeap<T, P> {
             node: Rc::downgrade(&node),
         };
 
-        if let Some(ref root) = self.root {
-            let new_priority = priority;
-            let root_priority = root.borrow().priority.clone();
-
-            if new_priority < root_priority {
-                // New node becomes root
-                let old_root = self.root.take().unwrap();
-                old_root.borrow_mut().parent = Rc::downgrade(&node);
-                node.borrow_mut().children.push(old_root);
-                self.root = Some(Rc::clone(&node));
-            } else {
-                // Insert as child of root
-                self.insert_as_child(Rc::clone(root), Rc::clone(&node));
-            }
-        } else {
-            self.root = Some(Rc::clone(&node));
-        }
-
-        self.maintain_structure(Rc::clone(&node));
+        // Add to root list
+        self.add_root(node);
         self.len += 1;
 
         handle
@@ -139,11 +137,11 @@ impl<T: Clone, P: Ord + Clone> Heap<T, P> for TwoThreeHeap<T, P> {
     }
 
     fn find_min(&self) -> Option<(&P, &T)> {
-        let root = self.root.as_ref()?;
-        let node = root.borrow();
+        let min = self.min.as_ref()?;
+        let node_ref = min.borrow();
         unsafe {
-            let priority: &P = &*(&node.priority as *const P);
-            let item: &T = &*(&node.item as *const T);
+            let priority: &P = &*(&node_ref.priority as *const P);
+            let item: &T = &*(&node_ref.item as *const T);
             Some((priority, item))
         }
     }
@@ -153,19 +151,26 @@ impl<T: Clone, P: Ord + Clone> Heap<T, P> for TwoThreeHeap<T, P> {
     }
 
     fn delete_min(&mut self) -> Option<(P, T)> {
-        let root = self.root.take()?;
+        let min = self.min.take()?;
 
-        // Get children from root
-        let children: Vec<_> = mem::take(&mut root.borrow_mut().children);
+        // Find and remove min from roots
+        let min_idx = self.roots.iter().position(|r| Rc::ptr_eq(r, &min))?;
+        self.roots.swap_remove(min_idx);
 
-        // Extract item and priority from root
-        let (priority, item) = match Rc::try_unwrap(root) {
+        // Extract children from min and add to roots
+        let children = mem::take(&mut min.borrow_mut().children);
+        for child in children {
+            child.borrow_mut().parent = Weak::new();
+            self.roots.push(child);
+        }
+
+        // Extract item and priority
+        let (priority, item) = match Rc::try_unwrap(min) {
             Ok(cell) => {
                 let node = cell.into_inner();
                 (node.priority, node.item)
             }
             Err(rc) => {
-                // Node still referenced by handle - clone the data
                 let node = rc.borrow();
                 (node.priority.clone(), node.item.clone())
             }
@@ -173,24 +178,16 @@ impl<T: Clone, P: Ord + Clone> Heap<T, P> for TwoThreeHeap<T, P> {
 
         self.len -= 1;
 
-        if children.is_empty() {
-            self.root = None;
-        } else {
-            // Clear parent references
-            for child in &children {
-                child.borrow_mut().parent = Weak::new();
-            }
-            self.root = Some(self.rebuild_from_children(children));
+        // Consolidate and find new min
+        if !self.roots.is_empty() {
+            self.consolidate();
         }
 
         Some((priority, item))
     }
 
     fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) -> Result<(), HeapError> {
-        let node = handle
-            .node
-            .upgrade()
-            .ok_or(HeapError::InvalidHandle)?;
+        let node = handle.node.upgrade().ok_or(HeapError::InvalidHandle)?;
 
         {
             let current_priority = node.borrow().priority.clone();
@@ -200,10 +197,21 @@ impl<T: Clone, P: Ord + Clone> Heap<T, P> for TwoThreeHeap<T, P> {
         }
 
         // Update priority
-        node.borrow_mut().priority = new_priority;
+        node.borrow_mut().priority = new_priority.clone();
 
-        // Bubble up by swapping node positions
-        self.bubble_up(Rc::clone(&node));
+        // Check if node is a root (no parent)
+        let parent_weak = node.borrow().parent.clone();
+        if let Some(parent) = parent_weak.upgrade() {
+            // Cut this node from parent and add to root list
+            self.cut(&node, &parent);
+        }
+
+        // Update min pointer if this node now has the smallest priority - O(1)
+        if let Some(ref min) = self.min {
+            if new_priority < min.borrow().priority {
+                self.min = Some(Rc::clone(&node));
+            }
+        }
 
         Ok(())
     }
@@ -214,36 +222,25 @@ impl<T: Clone, P: Ord + Clone> Heap<T, P> for TwoThreeHeap<T, P> {
         }
 
         if self.is_empty() {
-            self.root = other.root.take();
+            self.roots = mem::take(&mut other.roots);
+            self.min = other.min.take();
             self.len = other.len;
             other.len = 0;
             return;
         }
 
-        let other_root = other.root.take().unwrap();
-        let self_root = self.root.as_ref().unwrap();
-
-        let self_priority = self_root.borrow().priority.clone();
-        let other_priority = other_root.borrow().priority.clone();
-
-        if other_priority < self_priority {
-            // Other root becomes new root
-            let old_self_root = self.root.take().unwrap();
-            old_self_root.borrow_mut().parent = Rc::downgrade(&other_root);
-            other_root.borrow_mut().children.push(old_self_root);
-            self.root = Some(other_root);
-        } else {
-            // Add other_root as child of self_root
-            other_root.borrow_mut().parent = Rc::downgrade(self_root);
-            self_root.borrow_mut().children.push(other_root);
-        }
-
+        // Append other's roots to self
+        self.roots.append(&mut other.roots);
         self.len += other.len;
         other.len = 0;
 
-        // Maintain 2-3 structure
-        if let Some(ref root) = self.root {
-            self.maintain_structure(Rc::clone(root));
+        // Update min pointer if other had smaller min - O(1)
+        if let Some(other_min) = other.min.take() {
+            if let Some(ref self_min) = self.min {
+                if other_min.borrow().priority < self_min.borrow().priority {
+                    self.min = Some(other_min);
+                }
+            }
         }
     }
 }
@@ -255,214 +252,181 @@ impl<T: Clone, P: Ord + Clone> Default for TwoThreeHeap<T, P> {
 }
 
 impl<T: Clone, P: Ord + Clone> TwoThreeHeap<T, P> {
-    /// Counts all nodes in the heap (debug only)
-    #[cfg(feature = "expensive_verify")]
-    fn count_all_nodes(&self) -> usize {
-        fn count_subtree<T, P>(node: &NodeRef<T, P>) -> usize {
-            let node_ref = node.borrow();
-            let mut count = 1;
-            for child in &node_ref.children {
-                count += count_subtree(child);
+    /// Add a root to the forest and update min if needed - O(1)
+    fn add_root(&mut self, node: NodeRef<T, P>) {
+        // Update min pointer if this node has smaller priority
+        match self.min.as_ref() {
+            None => {
+                self.min = Some(Rc::clone(&node));
             }
-            count
+            Some(min) => {
+                if node.borrow().priority < min.borrow().priority {
+                    self.min = Some(Rc::clone(&node));
+                }
+            }
         }
 
-        match &self.root {
-            Some(root) => count_subtree(root),
-            None => 0,
+        self.roots.push(node);
+    }
+
+    /// Cut a node from its parent and add to root list (Takaoka cut)
+    fn cut(&mut self, node: &NodeRef<T, P>, parent: &NodeRef<T, P>) {
+        // Remove node from parent's children
+        {
+            let mut parent_ref = parent.borrow_mut();
+            parent_ref.children.retain(|c| !Rc::ptr_eq(c, node));
         }
+
+        // Clear node's parent link
+        node.borrow_mut().parent = Weak::new();
+
+        // Add node to root list
+        self.add_root(Rc::clone(node));
     }
 
-    /// Insert a node as a child of parent
-    fn insert_as_child(&self, parent: NodeRef<T, P>, node: NodeRef<T, P>) {
-        node.borrow_mut().parent = Rc::downgrade(&parent);
-        parent.borrow_mut().children.push(node);
-    }
-
-    /// Maintain 2-3 structure by splitting nodes with too many children
-    fn maintain_structure(&mut self, node: NodeRef<T, P>) {
-        let num_children = node.borrow().children.len();
-
-        if num_children <= 3 {
-            // Check parent
-            let parent_weak = node.borrow().parent.clone();
-            if let Some(parent) = parent_weak.upgrade() {
-                self.maintain_structure(parent);
-            }
+    /// Consolidate trees after delete_min to maintain 2-3 structure
+    fn consolidate(&mut self) {
+        if self.roots.is_empty() {
             return;
         }
 
-        // Node has too many children (4+), need to split
-        let mut children: Vec<_> = mem::take(&mut node.borrow_mut().children);
+        // Take all roots
+        let roots = mem::take(&mut self.roots);
+        self.min = None;
 
-        // Sort children by priority for balanced split
+        // Use array indexed by rank to merge trees of same rank
+        let max_rank = ((self.len + 1) as f64).log2().ceil() as usize + 2;
+        let max_rank = max_rank.max(roots.len() + 1);
+        let mut rank_array: Vec<Option<NodeRef<T, P>>> = vec![None; max_rank];
+
+        for root in roots {
+            let mut current_root = root;
+
+            loop {
+                let rank = current_root.borrow().rank;
+
+                // Ensure rank_array is large enough
+                while rank >= rank_array.len() {
+                    rank_array.push(None);
+                }
+
+                match rank_array[rank].take() {
+                    None => {
+                        rank_array[rank] = Some(current_root);
+                        break;
+                    }
+                    Some(other) => {
+                        // Link trees: smaller priority becomes parent
+                        current_root = self.link_trees(current_root, other);
+                        // Continue to check if there's another tree at the new rank
+                    }
+                }
+            }
+        }
+
+        // Rebuild roots from rank_array
+        for tree in rank_array.into_iter().flatten() {
+            self.add_root(tree);
+        }
+    }
+
+    /// Link two trees of the same rank into one tree of rank+1
+    fn link_trees(&mut self, a: NodeRef<T, P>, b: NodeRef<T, P>) -> NodeRef<T, P> {
+        // Make the one with smaller priority the parent
+        let (parent, child) = if a.borrow().priority <= b.borrow().priority {
+            (a, b)
+        } else {
+            (b, a)
+        };
+
+        // Add child to parent's children
+        child.borrow_mut().parent = Rc::downgrade(&parent);
+        parent.borrow_mut().children.push(child);
+
+        // Update parent's rank
+        parent.borrow_mut().rank += 1;
+
+        // Maintain 2-3 property: if parent has 4+ children, split
+        if parent.borrow().children.len() > 3 {
+            self.split_node(&parent);
+        }
+
+        parent
+    }
+
+    /// Split a node with too many children (>3) into two nodes
+    fn split_node(&mut self, node: &NodeRef<T, P>) {
+        let num_children = node.borrow().children.len();
+        if num_children <= 3 {
+            return;
+        }
+
+        // Take children and sort by priority
+        let mut children: SmallVec<[NodeRef<T, P>; 3]> = mem::take(&mut node.borrow_mut().children);
         children.sort_by(|a, b| a.borrow().priority.cmp(&b.borrow().priority));
 
-        // Split: first 2 children stay with node, rest go to new sibling
-        let mut second_half: Vec<_> = children.drain(2..).collect();
+        // Keep first 2 children with node
+        let second_half: SmallVec<[NodeRef<T, P>; 3]> = children.drain(2..).collect();
         node.borrow_mut().children = children;
+
+        // Update rank for node (based on remaining children)
+        let max_child_rank = node
+            .borrow()
+            .children
+            .iter()
+            .map(|c| c.borrow().rank)
+            .max()
+            .unwrap_or(0);
+        node.borrow_mut().rank = max_child_rank + 1;
 
         // Update parent references for remaining children
         for child in &node.borrow().children {
-            child.borrow_mut().parent = Rc::downgrade(&node);
+            child.borrow_mut().parent = Rc::downgrade(node);
         }
 
-        // The child with minimum priority in second_half becomes the sibling
-        // This preserves handle stability - the node identity doesn't change
-        let min_child_idx = second_half
+        // The child with minimum priority in second_half becomes a new sibling tree
+        let min_idx = second_half
             .iter()
             .enumerate()
             .min_by(|(_, a), (_, b)| a.borrow().priority.cmp(&b.borrow().priority))
             .map(|(i, _)| i)
             .unwrap();
 
-        // Remove min_child from second_half - it becomes the sibling
-        let sibling = second_half.remove(min_child_idx);
-        sibling.borrow_mut().parent = node.borrow().parent.clone();
+        let mut second_half = second_half;
+        let sibling = second_half.remove(min_idx);
 
-        // Add remaining children of second_half as children of sibling
+        // Remaining children become children of sibling
         for child in second_half {
             child.borrow_mut().parent = Rc::downgrade(&sibling);
             sibling.borrow_mut().children.push(child);
         }
 
-        // Add sibling to parent
+        // Update sibling's rank
+        let sibling_max_rank = sibling
+            .borrow()
+            .children
+            .iter()
+            .map(|c| c.borrow().rank)
+            .max()
+            .unwrap_or(0);
+        sibling.borrow_mut().rank = sibling_max_rank + 1;
+
+        // Handle based on whether node has a parent
         let parent_weak = node.borrow().parent.clone();
         if let Some(parent) = parent_weak.upgrade() {
+            // Add sibling as child of parent
             sibling.borrow_mut().parent = Rc::downgrade(&parent);
-            parent.borrow_mut().children.push(sibling);
-            self.maintain_structure(parent);
+            parent.borrow_mut().children.push(Rc::clone(&sibling));
+
+            // Recursively check if parent needs splitting
+            if parent.borrow().children.len() > 3 {
+                self.split_node(&parent);
+            }
         } else {
-            // Node was root - we need to create a new root above both node and sibling
-            // The new root's item should be the minimum of node and sibling
-            // But since we're just reorganizing, we'll swap if needed
-
-            if sibling.borrow().priority < node.borrow().priority {
-                // Sibling has smaller priority, it should be the root
-                // Make node a child of sibling
-                node.borrow_mut().parent = Rc::downgrade(&sibling);
-                sibling.borrow_mut().children.insert(0, Rc::clone(&node));
-                sibling.borrow_mut().parent = Weak::new();
-                self.root = Some(sibling);
-            } else {
-                // Node has smaller or equal priority, it stays as root
-                // Make sibling a child of node
-                sibling.borrow_mut().parent = Rc::downgrade(&node);
-                node.borrow_mut().children.push(sibling);
-                // node is already the root
-                self.root = Some(Rc::clone(&node));
-            }
+            // Node is a root - sibling becomes a new root
+            sibling.borrow_mut().parent = Weak::new();
+            self.roots.push(sibling);
         }
-    }
-
-    /// Bubble up a node by swapping its position with ancestors that have larger priorities
-    fn bubble_up(&mut self, node: NodeRef<T, P>) {
-        let current = node;
-
-        loop {
-            let parent_weak = current.borrow().parent.clone();
-            let parent = match parent_weak.upgrade() {
-                Some(p) => p,
-                None => break, // Reached root
-            };
-
-            let should_swap = current.borrow().priority < parent.borrow().priority;
-
-            if !should_swap {
-                break;
-            }
-
-            // Swap node positions: current moves to parent's position
-            self.swap_node_with_parent(&current, &parent);
-
-            // current is now in parent's old position, continue to check grandparent
-        }
-    }
-
-    /// Swap a child node with its parent in the tree structure
-    fn swap_node_with_parent(&mut self, child: &NodeRef<T, P>, parent: &NodeRef<T, P>) {
-        // Step 1: Remove child from parent's children list
-        {
-            let mut parent_ref = parent.borrow_mut();
-            parent_ref.children.retain(|c| !Rc::ptr_eq(c, child));
-        }
-
-        // Step 2: Get parent's old position info
-        let grandparent_weak = parent.borrow().parent.clone();
-        let parent_siblings: Vec<NodeRef<T, P>>;
-
-        // Step 3: Child takes parent's position
-        child.borrow_mut().parent = grandparent_weak.clone();
-
-        // Step 4: Update grandparent's children (or root if parent was root)
-        if let Some(gp) = grandparent_weak.upgrade() {
-            // Replace parent with child in grandparent's children
-            let mut gp_ref = gp.borrow_mut();
-            for i in 0..gp_ref.children.len() {
-                if Rc::ptr_eq(&gp_ref.children[i], parent) {
-                    gp_ref.children[i] = Rc::clone(child);
-                    break;
-                }
-            }
-            parent_siblings = Vec::new(); // Not used in this path
-        } else {
-            // Parent was root - child becomes new root
-            self.root = Some(Rc::clone(child));
-            parent_siblings = Vec::new();
-        }
-        let _ = parent_siblings; // Silence unused warning
-
-        // Step 5: Parent becomes a child of child
-        // Move child's old children to parent (they become siblings of what was child)
-        let child_old_children: Vec<_> = mem::take(&mut child.borrow_mut().children);
-
-        // Parent keeps its remaining children, gets child's old children too
-        for old_child in child_old_children {
-            old_child.borrow_mut().parent = Rc::downgrade(parent);
-            parent.borrow_mut().children.push(old_child);
-        }
-
-        // Parent becomes child of the (now promoted) child
-        parent.borrow_mut().parent = Rc::downgrade(child);
-        child.borrow_mut().children.push(Rc::clone(parent));
-    }
-
-    /// Rebuild tree from a list of child nodes after root deletion
-    fn rebuild_from_children(&mut self, children: Vec<NodeRef<T, P>>) -> NodeRef<T, P> {
-        if children.len() == 1 {
-            let root = Rc::clone(&children[0]);
-            root.borrow_mut().parent = Weak::new();
-            return root;
-        }
-
-        // Find child with minimum priority - it becomes the new root
-        let min_idx = children
-            .iter()
-            .enumerate()
-            .min_by(|(_, a), (_, b)| a.borrow().priority.cmp(&b.borrow().priority))
-            .map(|(i, _)| i)
-            .unwrap();
-
-        let min = Rc::clone(&children[min_idx]);
-        min.borrow_mut().parent = Weak::new();
-
-        // Set as temporary root
-        self.root = Some(Rc::clone(&min));
-
-        // Add other children as children of the new root
-        for (i, child) in children.into_iter().enumerate() {
-            if i != min_idx {
-                child.borrow_mut().parent = Rc::downgrade(&min);
-                min.borrow_mut().children.push(child);
-            }
-        }
-
-        // Maintain 2-3 structure if needed
-        if min.borrow().children.len() > 3 {
-            self.maintain_structure(Rc::clone(&min));
-        }
-
-        self.root.as_ref().unwrap().clone()
     }
 }
 
@@ -474,9 +438,9 @@ mod tests {
     fn test_basic_operations() {
         let mut heap = TwoThreeHeap::new();
 
-        let h1 = heap.insert(5, "five");
-        let h2 = heap.insert(3, "three");
-        let h3 = heap.insert(7, "seven");
+        let _h1 = heap.insert(5, "five");
+        let _h2 = heap.insert(3, "three");
+        let _h3 = heap.insert(7, "seven");
 
         assert_eq!(heap.len(), 3);
         assert_eq!(heap.peek(), Some((&3, &"three")));
@@ -490,13 +454,12 @@ mod tests {
     fn test_decrease_key() {
         let mut heap = TwoThreeHeap::new();
 
-        let h1 = heap.insert(10, "ten");
-        let h2 = heap.insert(5, "five");
+        let _h1 = heap.insert(10, "ten");
+        let _h2 = heap.insert(5, "five");
         let h3 = heap.insert(15, "fifteen");
 
         assert_eq!(heap.peek(), Some((&5, &"five")));
 
-        // Decrease h3's priority to make it the minimum
         heap.decrease_key(&h3, 1).unwrap();
         assert_eq!(heap.peek(), Some((&1, &"fifteen")));
     }
@@ -515,5 +478,47 @@ mod tests {
 
         assert_eq!(heap1.len(), 4);
         assert_eq!(heap1.peek(), Some((&1, &"one")));
+    }
+
+    #[test]
+    fn test_decrease_key_to_min() {
+        let mut heap = TwoThreeHeap::new();
+
+        let h1 = heap.insert(10, "ten");
+        let _h2 = heap.insert(5, "five");
+        let _h3 = heap.insert(15, "fifteen");
+
+        // Decrease h1 to be the new minimum
+        heap.decrease_key(&h1, 1).unwrap();
+        assert_eq!(heap.peek(), Some((&1, &"ten")));
+
+        // Pop should return the decreased element
+        assert_eq!(heap.pop(), Some((1, "ten")));
+    }
+
+    #[test]
+    fn test_many_operations() {
+        let mut heap = TwoThreeHeap::new();
+        let mut handles = Vec::new();
+
+        // Insert many elements
+        for i in 0..100 {
+            handles.push(heap.insert(i + 100, i));
+        }
+
+        assert_eq!(heap.len(), 100);
+        assert_eq!(heap.peek(), Some((&100, &0)));
+
+        // Decrease some keys
+        heap.decrease_key(&handles[50], 10).unwrap();
+        assert_eq!(heap.peek(), Some((&10, &50)));
+
+        heap.decrease_key(&handles[75], 5).unwrap();
+        assert_eq!(heap.peek(), Some((&5, &75)));
+
+        // Pop elements and verify order
+        let (p, v) = heap.pop().unwrap();
+        assert_eq!(p, 5);
+        assert_eq!(v, 75);
     }
 }
