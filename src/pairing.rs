@@ -445,6 +445,7 @@ impl<T, P: Ord> PairingHeap<T, P> {
     }
 
     #[cfg(debug_assertions)]
+    #[allow(clippy::only_used_in_recursion)]
     fn count_and_verify_subtree(&self, node: &NodeRef<T, P>, parent_priority: Option<&P>) -> usize {
         // Verify heap property: node priority >= parent priority
         if let Some(parent_p) = parent_priority {

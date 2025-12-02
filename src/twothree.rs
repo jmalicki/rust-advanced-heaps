@@ -367,7 +367,11 @@ impl<T, P: Ord + Clone> TwoThreeHeap<T, P> {
         let count = if node_ref.entry.is_some() { 1 } else { 0 };
 
         // Count children
-        let children_count: usize = node_ref.children.iter().map(|c| Self::count_subtree(c)).sum();
+        let children_count: usize = node_ref
+            .children
+            .iter()
+            .map(|c| Self::count_subtree(c))
+            .sum();
 
         count + children_count
     }
@@ -387,10 +391,7 @@ impl<T, P: Ord + Clone> TwoThreeHeap<T, P> {
         let node_ref = node.borrow();
 
         // Get this node's entry priority if it has one
-        let mut min = node_ref
-            .entry
-            .as_ref()
-            .map(|e| e.borrow().priority.clone());
+        let mut min = node_ref.entry.as_ref().map(|e| e.borrow().priority.clone());
 
         // Compare with all children's minimums
         for child in &node_ref.children {
@@ -419,10 +420,7 @@ impl<T, P: Ord + Clone> TwoThreeHeap<T, P> {
         if let Some(ref root) = self.root {
             let root_priority = {
                 let root_ref = root.borrow();
-                root_ref
-                    .entry
-                    .as_ref()
-                    .map(|e| e.borrow().priority.clone())
+                root_ref.entry.as_ref().map(|e| e.borrow().priority.clone())
             };
             if let Some(root_p) = root_priority {
                 let actual_min = self.find_actual_min();
@@ -661,10 +659,7 @@ impl<T, P: Ord + Clone> TwoThreeHeap<T, P> {
         let node_ref = node.borrow();
 
         // Get this node's entry priority if it has one
-        let mut min = node_ref
-            .entry
-            .as_ref()
-            .map(|e| e.borrow().priority.clone());
+        let mut min = node_ref.entry.as_ref().map(|e| e.borrow().priority.clone());
 
         // Compare with all children's minimums
         for child in &node_ref.children {
@@ -690,10 +685,7 @@ fn find_min_priority_in_subtree_standalone<T, P: Ord + Clone>(node: &NodeRef<T, 
     let node_ref = node.borrow();
 
     // Get this node's entry priority if it has one
-    let mut min = node_ref
-        .entry
-        .as_ref()
-        .map(|e| e.borrow().priority.clone());
+    let mut min = node_ref.entry.as_ref().map(|e| e.borrow().priority.clone());
 
     // Compare with all children's minimums
     for child in &node_ref.children {

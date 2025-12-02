@@ -414,6 +414,7 @@ impl<T, P: Ord> RankPairingHeap<T, P> {
     }
 
     #[cfg(debug_assertions)]
+    #[allow(clippy::only_used_in_recursion)]
     unsafe fn verify_subtree(
         &self,
         node: NonNull<Node<T, P>>,
