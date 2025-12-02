@@ -622,8 +622,20 @@ fn test_self_loop() {
         type Cost = u32;
         fn successors(&self) -> Vec<(Self, u32)> {
             vec![
-                (SelfLoopNode { id: self.id, goal: self.goal }, 1), // Self loop
-                (SelfLoopNode { id: self.id + 1, goal: self.goal }, 2), // Forward edge
+                (
+                    SelfLoopNode {
+                        id: self.id,
+                        goal: self.goal,
+                    },
+                    1,
+                ), // Self loop
+                (
+                    SelfLoopNode {
+                        id: self.id + 1,
+                        goal: self.goal,
+                    },
+                    2,
+                ), // Forward edge
             ]
         }
         fn is_goal(&self) -> bool {
@@ -655,7 +667,15 @@ fn test_high_branching_factor() {
             }
             // Each node connects to 10 successors
             (0..10)
-                .map(|i| (HighBranchNode { id: self.id * 10 + i + 1, goal: self.goal }, 1))
+                .map(|i| {
+                    (
+                        HighBranchNode {
+                            id: self.id * 10 + i + 1,
+                            goal: self.goal,
+                        },
+                        1,
+                    )
+                })
                 .collect()
         }
         fn is_goal(&self) -> bool {

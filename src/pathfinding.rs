@@ -314,7 +314,8 @@ where
 
 /// Runs A* search from the start node until `is_goal()` returns true.
 ///
-/// Uses the node's `heuristic()` method to guide the search.
+/// Uses the node's `heuristic()` method to guide the search. For optimal paths,
+/// the heuristic must be admissible (never overestimate the true cost).
 ///
 /// # Type Parameters
 /// - `N`: The node type implementing [`AStarNode`]
@@ -326,6 +327,38 @@ where
 /// # Returns
 /// - `Some((path, cost))` if a path is found
 /// - `None` if no path exists
+///
+/// # Example
+/// ```rust
+/// use rust_advanced_heaps::pathfinding::{SearchNode, AStarNode, astar};
+/// use rust_advanced_heaps::pairing::PairingHeap;
+///
+/// #[derive(Clone, PartialEq, Eq, Hash)]
+/// struct GridPos { x: i32, y: i32, goal_x: i32, goal_y: i32 }
+///
+/// impl SearchNode for GridPos {
+///     type Cost = u32;
+///     fn successors(&self) -> Vec<(Self, u32)> {
+///         vec![
+///             (GridPos { x: self.x + 1, y: self.y, goal_x: self.goal_x, goal_y: self.goal_y }, 1),
+///             (GridPos { x: self.x, y: self.y + 1, goal_x: self.goal_x, goal_y: self.goal_y }, 1),
+///         ]
+///     }
+///     fn is_goal(&self) -> bool { self.x == self.goal_x && self.y == self.goal_y }
+/// }
+///
+/// impl AStarNode for GridPos {
+///     fn heuristic(&self) -> u32 {
+///         ((self.goal_x - self.x).abs() + (self.goal_y - self.y).abs()) as u32
+///     }
+/// }
+///
+/// let start = GridPos { x: 0, y: 0, goal_x: 3, goal_y: 3 };
+/// let result = astar::<_, PairingHeap<_, _>>(&start);
+/// assert!(result.is_some());
+/// let (path, cost) = result.unwrap();
+/// assert_eq!(cost, 6); // Manhattan distance
+/// ```
 pub fn astar<N, H>(start: &N) -> Option<(Vec<N>, N::Cost)>
 where
     N: AStarNode,
@@ -335,10 +368,7 @@ where
 }
 
 /// Internal search implementation.
-fn search_impl<N, H>(
-    start: &N,
-    heuristic: impl Fn(&N) -> N::Cost,
-) -> Option<(Vec<N>, N::Cost)>
+fn search_impl<N, H>(start: &N, heuristic: impl Fn(&N) -> N::Cost) -> Option<(Vec<N>, N::Cost)>
 where
     N: SearchNode,
     H: Heap<NodeIndex, PriorityCost<N::Cost>>,
@@ -413,7 +443,6 @@ where
 
     None
 }
-
 
 /// Builder for pathfinding queries with more configuration options.
 ///
@@ -701,7 +730,12 @@ mod tests {
 
     impl GridPos {
         fn new(x: i32, y: i32, goal_x: i32, goal_y: i32) -> Self {
-            GridPos { x, y, goal_x, goal_y }
+            GridPos {
+                x,
+                y,
+                goal_x,
+                goal_y,
+            }
         }
     }
 
@@ -710,10 +744,22 @@ mod tests {
 
         fn successors(&self) -> Vec<(Self, u32)> {
             vec![
-                (GridPos::new(self.x + 1, self.y, self.goal_x, self.goal_y), 1),
-                (GridPos::new(self.x - 1, self.y, self.goal_x, self.goal_y), 1),
-                (GridPos::new(self.x, self.y + 1, self.goal_x, self.goal_y), 1),
-                (GridPos::new(self.x, self.y - 1, self.goal_x, self.goal_y), 1),
+                (
+                    GridPos::new(self.x + 1, self.y, self.goal_x, self.goal_y),
+                    1,
+                ),
+                (
+                    GridPos::new(self.x - 1, self.y, self.goal_x, self.goal_y),
+                    1,
+                ),
+                (
+                    GridPos::new(self.x, self.y + 1, self.goal_x, self.goal_y),
+                    1,
+                ),
+                (
+                    GridPos::new(self.x, self.y - 1, self.goal_x, self.goal_y),
+                    1,
+                ),
             ]
         }
 
@@ -1041,11 +1087,35 @@ mod tests {
             type Cost = u32;
             fn successors(&self) -> Vec<(Self, u32)> {
                 match self.id {
-                    0 => vec![(DisconnectedNode { id: 1, goal: self.goal }, 1)],
-                    1 => vec![(DisconnectedNode { id: 0, goal: self.goal }, 1)],
+                    0 => vec![(
+                        DisconnectedNode {
+                            id: 1,
+                            goal: self.goal,
+                        },
+                        1,
+                    )],
+                    1 => vec![(
+                        DisconnectedNode {
+                            id: 0,
+                            goal: self.goal,
+                        },
+                        1,
+                    )],
                     // 2 is disconnected
-                    2 => vec![(DisconnectedNode { id: 3, goal: self.goal }, 1)],
-                    3 => vec![(DisconnectedNode { id: 2, goal: self.goal }, 1)],
+                    2 => vec![(
+                        DisconnectedNode {
+                            id: 3,
+                            goal: self.goal,
+                        },
+                        1,
+                    )],
+                    3 => vec![(
+                        DisconnectedNode {
+                            id: 2,
+                            goal: self.goal,
+                        },
+                        1,
+                    )],
                     _ => vec![],
                 }
             }
@@ -1071,11 +1141,35 @@ mod tests {
             type Cost = u32;
             fn successors(&self) -> Vec<(Self, u32)> {
                 match self.id {
-                    0 => vec![(CyclicNode { id: 1, goal: self.goal }, 1)],
-                    1 => vec![(CyclicNode { id: 2, goal: self.goal }, 1)],
+                    0 => vec![(
+                        CyclicNode {
+                            id: 1,
+                            goal: self.goal,
+                        },
+                        1,
+                    )],
+                    1 => vec![(
+                        CyclicNode {
+                            id: 2,
+                            goal: self.goal,
+                        },
+                        1,
+                    )],
                     2 => vec![
-                        (CyclicNode { id: 0, goal: self.goal }, 1),
-                        (CyclicNode { id: 3, goal: self.goal }, 1),
+                        (
+                            CyclicNode {
+                                id: 0,
+                                goal: self.goal,
+                            },
+                            1,
+                        ),
+                        (
+                            CyclicNode {
+                                id: 3,
+                                goal: self.goal,
+                            },
+                            1,
+                        ),
                     ],
                     3 => vec![],
                     _ => vec![],
@@ -1107,11 +1201,35 @@ mod tests {
             fn successors(&self) -> Vec<(Self, u32)> {
                 match self.id {
                     0 => vec![
-                        (MultiPathNode { id: 1, goal: self.goal }, 1),
-                        (MultiPathNode { id: 2, goal: self.goal }, 1),
+                        (
+                            MultiPathNode {
+                                id: 1,
+                                goal: self.goal,
+                            },
+                            1,
+                        ),
+                        (
+                            MultiPathNode {
+                                id: 2,
+                                goal: self.goal,
+                            },
+                            1,
+                        ),
                     ],
-                    1 => vec![(MultiPathNode { id: 3, goal: self.goal }, 1)],
-                    2 => vec![(MultiPathNode { id: 3, goal: self.goal }, 1)],
+                    1 => vec![(
+                        MultiPathNode {
+                            id: 3,
+                            goal: self.goal,
+                        },
+                        1,
+                    )],
+                    2 => vec![(
+                        MultiPathNode {
+                            id: 3,
+                            goal: self.goal,
+                        },
+                        1,
+                    )],
                     _ => vec![],
                 }
             }

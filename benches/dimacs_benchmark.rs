@@ -178,6 +178,7 @@ impl DimacsGraph {
         let mut rng = Lcg::new(seed);
         let mut edge_set: HashSet<(usize, usize)> = HashSet::new();
 
+        #[allow(clippy::needless_range_loop)]
         for node in 1..=num_nodes {
             let degree = avg_degree + (rng.next() % 3) as usize;
 
@@ -214,7 +215,11 @@ pub struct Query {
 }
 
 /// Generate random query pairs and compute their Dijkstra ranks
-pub fn generate_queries_with_ranks(graph: &DimacsGraph, num_queries: usize, seed: u64) -> Vec<Query> {
+pub fn generate_queries_with_ranks(
+    graph: &DimacsGraph,
+    num_queries: usize,
+    seed: u64,
+) -> Vec<Query> {
     let mut rng = Lcg::new(seed);
     let mut queries = Vec::with_capacity(num_queries);
 
@@ -264,7 +269,10 @@ fn compute_dijkstra_rank(graph: &DimacsGraph, source: u32, target: u32) -> u32 {
         if let Some(neighbors) = graph.adjacency.get(node as usize) {
             for &(neighbor, weight) in neighbors {
                 let new_dist = d + weight;
-                let should_update = dist.get(&neighbor).map(|&old| new_dist < old).unwrap_or(true);
+                let should_update = dist
+                    .get(&neighbor)
+                    .map(|&old| new_dist < old)
+                    .unwrap_or(true);
 
                 if should_update {
                     dist.insert(neighbor, new_dist);
