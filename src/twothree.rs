@@ -146,8 +146,8 @@ impl<T: Clone, P: Ord + Clone + std::fmt::Debug> Heap<T, P> for TwoThreeHeap<T, 
 
         self.len += 1;
 
-        // Verify invariants after insert
-        #[cfg(debug_assertions)]
+        // Verify invariants after insert (expensive O(n) checks, only with feature flag)
+        #[cfg(feature = "expensive_verify")]
         {
             let count = self.count_all_nodes();
             assert_eq!(
@@ -216,8 +216,8 @@ impl<T: Clone, P: Ord + Clone + std::fmt::Debug> Heap<T, P> for TwoThreeHeap<T, 
             self.root = Some(self.rebuild_from_children(children));
         }
 
-        // Verify invariants after delete_min
-        #[cfg(debug_assertions)]
+        // Verify invariants after delete_min (expensive O(n) checks, only with feature flag)
+        #[cfg(feature = "expensive_verify")]
         {
             let count = self.count_all_nodes();
             assert_eq!(
@@ -303,8 +303,8 @@ impl<T: Clone, P: Ord + Clone + std::fmt::Debug> Heap<T, P> for TwoThreeHeap<T, 
         self.len += other.len;
         other.len = 0;
 
-        // Verify invariants after merge
-        #[cfg(debug_assertions)]
+        // Verify invariants after merge (expensive O(n) checks, only with feature flag)
+        #[cfg(feature = "expensive_verify")]
         {
             let count = self.count_all_nodes();
             assert_eq!(
@@ -350,7 +350,7 @@ fn find_node_with_entry<T, P>(node: NodeRef<T, P>, entry: &Entry<T, P>) -> Optio
 
 impl<T, P: Ord + Clone> TwoThreeHeap<T, P> {
     /// Counts all nodes in the heap (debug only)
-    #[cfg(debug_assertions)]
+    #[cfg(feature = "expensive_verify")]
     fn count_all_nodes(&self) -> usize {
         if let Some(ref root) = self.root {
             Self::count_subtree(root)
@@ -359,7 +359,7 @@ impl<T, P: Ord + Clone> TwoThreeHeap<T, P> {
         }
     }
 
-    #[cfg(debug_assertions)]
+    #[cfg(feature = "expensive_verify")]
     fn count_subtree(node: &NodeRef<T, P>) -> usize {
         let node_ref = node.borrow();
 
@@ -377,7 +377,7 @@ impl<T, P: Ord + Clone> TwoThreeHeap<T, P> {
     }
 
     /// Finds the actual minimum priority in the entire heap (debug only)
-    #[cfg(debug_assertions)]
+    #[cfg(feature = "expensive_verify")]
     fn find_actual_min(&self) -> Option<P> {
         if let Some(ref root) = self.root {
             Self::find_min_in_subtree(root)
@@ -386,7 +386,7 @@ impl<T, P: Ord + Clone> TwoThreeHeap<T, P> {
         }
     }
 
-    #[cfg(debug_assertions)]
+    #[cfg(feature = "expensive_verify")]
     fn find_min_in_subtree(node: &NodeRef<T, P>) -> Option<P> {
         let node_ref = node.borrow();
 
@@ -412,7 +412,7 @@ impl<T, P: Ord + Clone> TwoThreeHeap<T, P> {
     }
 
     /// Verifies that the root has the minimum priority in the heap
-    #[cfg(debug_assertions)]
+    #[cfg(feature = "expensive_verify")]
     fn verify_min_at_root(&self)
     where
         P: std::fmt::Debug,

@@ -264,7 +264,7 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
         self.len -= 1;
 
         // Verify invariants after restructuring
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "expensive_verify")]
         {
             let count = self.verify_heap_property();
             assert_eq!(
@@ -358,7 +358,7 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
         }
 
         // Verify invariants after decrease_key
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "expensive_verify")]
         {
             let count = self.verify_heap_property();
             assert_eq!(
@@ -435,7 +435,7 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
 impl<T, P: Ord> PairingHeap<T, P> {
     /// Verifies heap property: all children have priority >= parent
     /// Returns the total count of nodes for length verification
-    #[cfg(debug_assertions)]
+    #[cfg(feature = "expensive_verify")]
     fn verify_heap_property(&self) -> usize {
         if let Some(ref root) = self.root {
             self.count_and_verify_subtree(root, None)
@@ -444,7 +444,7 @@ impl<T, P: Ord> PairingHeap<T, P> {
         }
     }
 
-    #[cfg(debug_assertions)]
+    #[cfg(feature = "expensive_verify")]
     #[allow(clippy::only_used_in_recursion)]
     fn count_and_verify_subtree(&self, node: &NodeRef<T, P>, parent_priority: Option<&P>) -> usize {
         // Verify heap property: node priority >= parent priority
@@ -512,7 +512,7 @@ impl<T, P: Ord> PairingHeap<T, P> {
         }
 
         // Count initial nodes (debug only)
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "expensive_verify")]
         let initial_count = {
             let mut count = 0;
             let mut curr = Some(first.clone());
@@ -551,7 +551,7 @@ impl<T, P: Ord> PairingHeap<T, P> {
         }
 
         // Verify no nodes lost during first pass
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "expensive_verify")]
         {
             let after_first_pass: usize = pairs.iter().map(|p| Self::count_subtree(p)).sum();
             assert_eq!(
@@ -571,7 +571,7 @@ impl<T, P: Ord> PairingHeap<T, P> {
         }
 
         // Verify no nodes lost during second pass
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "expensive_verify")]
         {
             let final_count = Self::count_subtree(&result);
             assert_eq!(
@@ -584,7 +584,7 @@ impl<T, P: Ord> PairingHeap<T, P> {
         result
     }
 
-    #[cfg(debug_assertions)]
+    #[cfg(feature = "expensive_verify")]
     fn count_subtree(node: &NodeRef<T, P>) -> usize {
         let node_ref = node.borrow();
         let mut count = 1;

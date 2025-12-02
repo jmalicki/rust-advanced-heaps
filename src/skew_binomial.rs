@@ -168,7 +168,7 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
         self.len -= 1;
 
         // Verify invariants after delete_min
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "expensive_verify")]
         {
             let count = self.count_all_nodes();
             assert_eq!(
@@ -245,7 +245,7 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
 
 impl<T, P: Ord> SkewBinomialHeap<T, P> {
     /// Counts all nodes reachable from the trees array (debug only)
-    #[cfg(debug_assertions)]
+    #[cfg(feature = "expensive_verify")]
     fn count_all_nodes(&self) -> usize {
         let mut count = 0;
         for tree in self.trees.iter().flatten() {
@@ -254,7 +254,7 @@ impl<T, P: Ord> SkewBinomialHeap<T, P> {
         count
     }
 
-    #[cfg(debug_assertions)]
+    #[cfg(feature = "expensive_verify")]
     fn count_subtree(node: &NodeRef<T, P>) -> usize {
         let node_ref = node.borrow();
         // Verify node has valid priority

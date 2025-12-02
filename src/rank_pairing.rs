@@ -259,7 +259,7 @@ impl<T, P: Ord> Heap<T, P> for RankPairingHeap<T, P> {
             }
 
             // Verify invariants after delete_min
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "expensive_verify")]
             {
                 let count = self.verify_heap_property();
                 assert_eq!(
@@ -404,7 +404,7 @@ impl<T, P: Ord> Heap<T, P> for RankPairingHeap<T, P> {
 impl<T, P: Ord> RankPairingHeap<T, P> {
     /// Verifies heap property: all children have priority >= parent
     /// Returns the total count of nodes for length verification
-    #[cfg(debug_assertions)]
+    #[cfg(feature = "expensive_verify")]
     unsafe fn verify_heap_property(&self) -> usize {
         if let Some(root) = self.root {
             self.verify_subtree(root, None)
@@ -413,7 +413,7 @@ impl<T, P: Ord> RankPairingHeap<T, P> {
         }
     }
 
-    #[cfg(debug_assertions)]
+    #[cfg(feature = "expensive_verify")]
     #[allow(clippy::only_used_in_recursion)]
     unsafe fn verify_subtree(
         &self,
