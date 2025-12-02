@@ -263,6 +263,17 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
 
         self.len -= 1;
 
+        // Verify invariants after restructuring
+        #[cfg(debug_assertions)]
+        {
+            let count = self.verify_heap_property();
+            assert_eq!(
+                count, self.len,
+                "Length mismatch after delete_min: counted {} nodes but len is {}",
+                count, self.len
+            );
+        }
+
         // Extract item and priority from the root node
         // At this point, root should be the only strong reference, so we can unwrap
         // If try_unwrap fails, there's a bug in our reference counting
@@ -304,10 +315,11 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
     /// root (or make it root if it's smaller). This maintains heap property.
     fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) -> Result<(), HeapError> {
         // Upgrade the weak reference to get the node
+        // If the upgrade fails, the node was already removed from the heap
         let node = handle
             .node
             .upgrade()
-            .expect("Handle references a node that has been removed from the heap");
+            .ok_or(HeapError::PriorityNotDecreased)?;
 
         // Safety check: new priority must actually be less
         if new_priority >= node.borrow().priority {
@@ -336,31 +348,26 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
         // Step 1: Cut the node from its parent's child list
         self.cut_node(&node);
 
-        // Step 2: Merge the cut node with the root
-        // If the cut node has smaller priority, it becomes the new root
-        // Otherwise, it becomes a child of the current root
-        if let Some(ref root) = self.root {
-            if node.borrow().priority < root.borrow().priority {
-                // Cut node has smaller priority: make it the new root
-                // Old root becomes its child (heap property maintained)
-                node.borrow_mut().child = Some(Rc::clone(root));
-                root.borrow_mut().prev = Some(Rc::downgrade(&node));
-                self.root = Some(node);
-            } else {
-                // Current root has smaller priority: add cut node as child
-                // Heap property maintained: cut node >= root
-                let root_child = root.borrow().child.clone();
-                node.borrow_mut().sibling = root_child.clone();
-                node.borrow_mut().prev = Some(Rc::downgrade(root));
-                if let Some(ref child) = root_child {
-                    child.borrow_mut().prev = Some(Rc::downgrade(&node));
-                }
-                root.borrow_mut().child = Some(node);
-            }
+        // Step 2: Merge the cut node with the root using merge_nodes
+        // This properly handles preserving children of both nodes
+        if let Some(root) = self.root.take() {
+            self.root = Some(self.merge_nodes(node, root));
         } else {
             // Heap is empty (shouldn't happen, but handle gracefully)
             self.root = Some(node);
         }
+
+        // Verify invariants after decrease_key
+        #[cfg(debug_assertions)]
+        {
+            let count = self.verify_heap_property();
+            assert_eq!(
+                count, self.len,
+                "Length mismatch after decrease_key: counted {} nodes but len is {}",
+                count, self.len
+            );
+        }
+
         Ok(())
     }
 
@@ -426,6 +433,51 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
 }
 
 impl<T, P: Ord> PairingHeap<T, P> {
+    /// Verifies heap property: all children have priority >= parent
+    /// Returns the total count of nodes for length verification
+    #[cfg(debug_assertions)]
+    fn verify_heap_property(&self) -> usize {
+        if let Some(ref root) = self.root {
+            self.count_and_verify_subtree(root, None)
+        } else {
+            0
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    fn count_and_verify_subtree(&self, node: &NodeRef<T, P>, parent_priority: Option<&P>) -> usize {
+        // Verify heap property: node priority >= parent priority
+        if let Some(parent_p) = parent_priority {
+            let node_priority = &node.borrow().priority;
+            assert!(
+                node_priority >= parent_p,
+                "Heap property violated: child priority < parent priority"
+            );
+        }
+
+        let mut count = 1;
+
+        // Collect children first to avoid borrow conflicts
+        let mut children = Vec::new();
+        {
+            let node_ref = node.borrow();
+            let mut child_opt = node_ref.child.clone();
+            while let Some(child) = child_opt {
+                children.push(child.clone());
+                child_opt = child.borrow().sibling.clone();
+            }
+        }
+
+        // Count all children recursively
+        for child in children {
+            // Use unsafe to get a stable reference to parent's priority
+            let node_priority = unsafe { &*(&node.borrow().priority as *const P) };
+            count += self.count_and_verify_subtree(&child, Some(node_priority));
+        }
+
+        count
+    }
+
     /// Merges pairs of trees in a two-pass pairing operation
     ///
     /// This is the **critical operation** that achieves O(log n) amortized delete_min.
@@ -458,6 +510,18 @@ impl<T, P: Ord> PairingHeap<T, P> {
             return first;
         }
 
+        // Count initial nodes (debug only)
+        #[cfg(debug_assertions)]
+        let initial_count = {
+            let mut count = 0;
+            let mut curr = Some(first.clone());
+            while let Some(n) = curr {
+                count += Self::count_subtree(&n);
+                curr = n.borrow().sibling.clone();
+            }
+            count
+        };
+
         // First pass: pair adjacent children and merge each pair
         // This reduces the number of trees by approximately half
         let mut pairs: Vec<NodeRef<T, P>> = Vec::new();
@@ -485,6 +549,17 @@ impl<T, P: Ord> PairingHeap<T, P> {
             }
         }
 
+        // Verify no nodes lost during first pass
+        #[cfg(debug_assertions)]
+        {
+            let after_first_pass: usize = pairs.iter().map(|p| Self::count_subtree(p)).sum();
+            assert_eq!(
+                initial_count, after_first_pass,
+                "Nodes lost during first pass: initial={} after={}",
+                initial_count, after_first_pass
+            );
+        }
+
         // Second pass: merge pairs from right to left
         // Starting with the last merged tree, merge each remaining pair into it
         // This right-to-left ordering is crucial for balanced structure
@@ -494,7 +569,33 @@ impl<T, P: Ord> PairingHeap<T, P> {
             result = self.merge_nodes(pair, result);
         }
 
+        // Verify no nodes lost during second pass
+        #[cfg(debug_assertions)]
+        {
+            let final_count = Self::count_subtree(&result);
+            assert_eq!(
+                initial_count, final_count,
+                "Nodes lost during second pass: initial={} final={}",
+                initial_count, final_count
+            );
+        }
+
         result
+    }
+
+    #[cfg(debug_assertions)]
+    fn count_subtree(node: &NodeRef<T, P>) -> usize {
+        let node_ref = node.borrow();
+        let mut count = 1;
+
+        // Count children
+        let mut child_opt = node_ref.child.clone();
+        while let Some(child) = child_opt {
+            count += Self::count_subtree(&child);
+            child_opt = child.borrow().sibling.clone();
+        }
+
+        count
     }
 
     /// Merges two nodes, returning the one with smaller priority

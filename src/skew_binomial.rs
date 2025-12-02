@@ -101,20 +101,14 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
             node: Rc::downgrade(&node),
         };
 
-        let should_update_min = match &self.min {
-            Some(min_ref) => {
-                node.borrow().priority.as_ref().unwrap()
-                    < min_ref.borrow().priority.as_ref().unwrap()
-            }
-            None => true,
-        };
-
-        if should_update_min {
-            self.min = Some(Rc::clone(&node));
-        }
-
         self.insert_tree(node);
         self.len += 1;
+
+        // Update min pointer AFTER insert_tree, because during insert_tree
+        // the node may become a child of another node during linking.
+        // find_and_update_min scans roots to find the actual minimum.
+        self.find_and_update_min();
+
         handle
     }
 
@@ -172,6 +166,18 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
 
         self.find_and_update_min();
         self.len -= 1;
+
+        // Verify invariants after delete_min
+        #[cfg(debug_assertions)]
+        {
+            let count = self.count_all_nodes();
+            assert_eq!(
+                count, self.len,
+                "Length mismatch after delete_min: counted {} nodes but len is {}",
+                count, self.len
+            );
+        }
+
         Some((priority, item))
     }
 
@@ -238,6 +244,39 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
 }
 
 impl<T, P: Ord> SkewBinomialHeap<T, P> {
+    /// Counts all nodes reachable from the trees array (debug only)
+    #[cfg(debug_assertions)]
+    fn count_all_nodes(&self) -> usize {
+        let mut count = 0;
+        for tree in self.trees.iter().flatten() {
+            count += Self::count_subtree(tree);
+        }
+        count
+    }
+
+    #[cfg(debug_assertions)]
+    fn count_subtree(node: &NodeRef<T, P>) -> usize {
+        let node_ref = node.borrow();
+        // Verify node has valid priority
+        assert!(
+            node_ref.priority.is_some(),
+            "Found node with None priority in tree"
+        );
+
+        let mut count = 1;
+
+        // Count children
+        let mut child_opt = node_ref.child.clone();
+        drop(node_ref);
+
+        while let Some(child) = child_opt {
+            count += Self::count_subtree(&child);
+            child_opt = child.borrow().sibling.clone();
+        }
+
+        count
+    }
+
     /// Cuts a node from its parent and reinserts it with a new priority
     fn cut_and_reinsert(&mut self, node: NodeRef<T, P>, new_priority: P) {
         // Get parent before we modify anything
@@ -339,6 +378,15 @@ impl<T, P: Ord> SkewBinomialHeap<T, P> {
         let a_priority_greater = {
             let a_b = a.borrow();
             let b_b = b.borrow();
+            // Debug assertions to catch nodes with invalid priorities
+            debug_assert!(
+                a_b.priority.is_some(),
+                "link_trees: node 'a' has None priority"
+            );
+            debug_assert!(
+                b_b.priority.is_some(),
+                "link_trees: node 'b' has None priority"
+            );
             a_b.priority.as_ref().unwrap() > b_b.priority.as_ref().unwrap()
         };
 
