@@ -75,15 +75,7 @@ codebase can be parametrized to use k-ary trees instead of binary trees
   - Similar considerations as Fibonacci heap
   - Unbounded degree is critical for worst-case bounds
 
-### 7. Brodal Heap (`src/brodal.rs`)
-
-- **Tree Structure**: General tree with rank constraints
-- **Node Structure**: child/sibling with rank tracking
-- **K-Ary Feasibility**: ❌ **NOT RECOMMENDED**
-  - Unbounded degree enables worst-case O(1) operations
-  - Violation system designed for multi-way trees
-
-### 8. Two-Three Heap (`src/twothree.rs`)
+### 7. Two-Three Heap (`src/twothree.rs`)
 
 - **Tree Structure**: **Already k-ary!** (2-3 children per node)
 - **Node Structure**:
@@ -609,13 +601,5 @@ Beyond TwoThreeHeap, other heaps have small predictable Vec sizes:
    - **Benefits**: Eliminates allocations for heaps up to 4 billion elements
    - All tests pass
 
-2. **BrodalHeap**: `violations: Vec<Vec<NonNull<>>>`
-   - Outer Vec: log₂(n) entries (one per rank)
-   - Inner Vecs: Small violation lists per rank (typically <10)
-   - Could use `SmallVec<[SmallVec<[NonNull<Node>; 8]>; 32]>` (nested)
-   - **Complexity**: Nested SmallVec might be overkill
-   - **Recommendation**: Maybe just outer Vec, or skip entirely given complexity
-
-3. **General Recommendation**: ✅ All promising candidates now
-   implemented. Skip Brodal unless benchmarks show significant
-   impact. The smallvec dependency is already added for all heaps.
+2. **General Recommendation**: ✅ All promising candidates now
+   implemented. The smallvec dependency is already added for all heaps.

@@ -24,7 +24,6 @@
 
 use proptest::prelude::*;
 use rust_advanced_heaps::binomial::BinomialHeap;
-use rust_advanced_heaps::brodal::BrodalHeap;
 use rust_advanced_heaps::fibonacci::FibonacciHeap;
 use rust_advanced_heaps::pairing::PairingHeap;
 use rust_advanced_heaps::rank_pairing::RankPairingHeap;
@@ -265,11 +264,13 @@ fn test_complex_operations<H: Heap<i32, i32>>(
 ) -> Result<(), TestCaseError> {
     let mut heap = H::new();
     let mut handles = Vec::new();
+    // Track current priority for each handle index
+    // Use handle index as the item value for unique identification
     let mut priorities: HashMap<usize, i32> = HashMap::new();
 
-    // Insert initial values
+    // Insert initial values with unique item (the index)
     for (i, priority) in initial.iter().enumerate() {
-        let handle = heap.push(*priority, *priority);
+        let handle = heap.push(*priority, i as i32);
         handles.push(handle);
         priorities.insert(i, *priority);
     }
@@ -278,9 +279,9 @@ fn test_complex_operations<H: Heap<i32, i32>>(
     for (op_type, value) in ops {
         match op_type % 4 {
             0 => {
-                // Push
+                // Push with unique item (the index)
                 let idx = handles.len();
-                let handle = heap.push(value, value);
+                let handle = heap.push(value, idx as i32);
                 handles.push(handle);
                 priorities.insert(idx, value);
             }
@@ -288,11 +289,10 @@ fn test_complex_operations<H: Heap<i32, i32>>(
                 // Pop
                 if !heap.is_empty() {
                     let popped = heap.pop();
-                    if let Some((priority, _item)) = popped {
-                        // Find and remove from priorities map
-                        if let Some((&idx, _)) = priorities.iter().find(|(_, &p)| p == priority) {
-                            priorities.remove(&idx);
-                        }
+                    if let Some((_priority, item)) = popped {
+                        // Item is the handle index, so we can directly identify which was popped
+                        let idx = item as usize;
+                        priorities.remove(&idx);
                     }
                 }
             }
@@ -616,9 +616,4 @@ create_heap_tests!(
 create_heap_tests!(
     skew_binomial_tests => SkewBinomialHeap<i32, i32>,
     0..100, 1..50, 0..20, 1..100
-);
-
-create_heap_tests!(
-    brodal_tests => BrodalHeap<i32, i32>,
-    0..50, 1..30, 0..10, 1..50
 );
