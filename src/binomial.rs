@@ -31,7 +31,6 @@
 
 use crate::traits::{Handle, Heap, HeapError};
 use std::cell::RefCell;
-use std::mem;
 use std::rc::{Rc, Weak};
 
 /// Type alias for node reference (strong reference)
@@ -190,22 +189,6 @@ impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
             node: Rc::downgrade(&node),
         };
 
-        // Update minimum pointer
-        let should_update_min = match &self.min {
-            Some(min_weak) => {
-                if let Some(min_rc) = min_weak.upgrade() {
-                    node.borrow().priority < min_rc.borrow().priority
-                } else {
-                    true // Min was invalid, update it
-                }
-            }
-            None => true, // No minimum yet
-        };
-
-        if should_update_min {
-            self.min = Some(Rc::downgrade(&node));
-        }
-
         // Merge this single-node tree into the heap using carry propagation
         let mut carry: NodePtr<T, P> = Some(node);
         let mut degree = 0;
@@ -230,6 +213,10 @@ impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
         }
 
         self.len += 1;
+
+        // Update minimum pointer AFTER carry propagation to ensure min points to a root
+        self.find_and_update_min();
+
         handle
     }
 
@@ -285,11 +272,16 @@ impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
         let min_weak = self.min.take()?;
         let min_rc = min_weak.upgrade()?;
 
-        let degree = min_rc.borrow().degree;
-
         // Remove minimum tree from trees array
-        if degree < self.trees.len() {
-            self.trees[degree] = None;
+        // We must search all slots because after bubble_up, the node's degree
+        // may not match its slot (degree changes during swaps but slot doesn't)
+        for i in 0..self.trees.len() {
+            if let Some(ref tree) = self.trees[i] {
+                if Rc::ptr_eq(tree, &min_rc) {
+                    self.trees[i] = None;
+                    break;
+                }
+            }
         }
 
         // Collect children into a temporary heap
@@ -410,8 +402,8 @@ impl<T, P: Ord> BinomialHeap<T, P> {
         let first_child = node.borrow_mut().child.take();
 
         if let Some(child) = first_child {
-            // Children are linked in a sibling list in decreasing degree order
-            // We need to reverse the list and clear parent links
+            // Children are linked in a sibling list
+            // We need to collect them and clear parent links
             let mut children: Vec<NodeRef<T, P>> = Vec::new();
             let mut current = Some(child);
 
@@ -424,15 +416,29 @@ impl<T, P: Ord> BinomialHeap<T, P> {
             }
 
             // Add each child tree to the temporary heap at its degree slot
+            // IMPORTANT: After bubble_up, degrees might conflict. If a slot is
+            // already occupied, we need to merge instead of overwrite.
             for child_node in children {
-                let child_degree = child_node.borrow().degree;
+                let mut node_to_add = child_node;
+                loop {
+                    let degree = node_to_add.borrow().degree;
 
-                // Ensure child_heap.trees array is large enough
-                while child_heap.trees.len() <= child_degree {
-                    child_heap.trees.push(None);
+                    // Ensure child_heap.trees array is large enough
+                    while child_heap.trees.len() <= degree {
+                        child_heap.trees.push(None);
+                    }
+
+                    // Check if slot is already occupied
+                    if let Some(existing) = child_heap.trees[degree].take() {
+                        // Conflict: merge the two trees
+                        node_to_add = self.link_trees(node_to_add, existing);
+                        // Continue loop to place the merged tree
+                    } else {
+                        // Slot is empty, place the tree
+                        child_heap.trees[degree] = Some(node_to_add);
+                        break;
+                    }
                 }
-                // Place child tree at its degree slot
-                child_heap.trees[child_degree] = Some(child_node);
             }
         }
 
@@ -580,30 +586,26 @@ impl<T, P: Ord> BinomialHeap<T, P> {
         }
     }
 
-    /// Bubbles up a node to maintain heap property
+    /// Bubbles up a node to maintain heap property by swapping node positions.
     ///
     /// **Time Complexity**: O(log n) worst-case
     ///
     /// **Algorithm**:
     /// 1. While node has a parent and heap property is violated:
-    ///    - Swap node's priority and item with parent's
-    ///    - Move up to parent
-    /// 2. Update minimum pointer if node became root and has smaller priority
+    ///    - Swap node positions (child moves to parent's position)
+    ///    - The node keeps its data, only its position in tree changes
+    /// 2. Update minimum pointer if node became root
     ///
-    /// **Why O(log n)?**
-    /// - Binomial tree has height O(log n)
-    /// - We may need to traverse from leaf to root
-    /// - Each swap is O(1), but there may be O(log n) swaps
+    /// **Handle Semantics**: By swapping node positions instead of values,
+    /// handles remain valid - they still point to the same node with the
+    /// same data, just at a different tree position.
     ///
-    /// **Difference from Fibonacci/Pairing heaps**:
-    /// - Binomial heaps **swap values** instead of **cutting** nodes
-    /// - Simpler but slower: O(log n) vs O(1) amortized
-    /// - No structural changes: tree shape remains the same
-    ///
-    /// **Note**: We swap priorities and items, not pointers. This maintains the
-    /// binomial tree structure while fixing heap property violations.
+    /// **Note**: This relaxes strict binomial tree structure (degrees may not
+    /// match slots), but maintains heap property. Structure is restored during
+    /// delete_min consolidation.
     fn bubble_up(&mut self, node: NodeRef<T, P>) {
-        let mut current = node;
+        let current = node;
+        let mut did_swap = false;
 
         loop {
             // Get parent weak ref
@@ -628,20 +630,178 @@ impl<T, P: Ord> BinomialHeap<T, P> {
                 break; // Heap property satisfied
             }
 
-            // Swap priorities and items between current and parent
-            {
-                let mut current_ref = current.borrow_mut();
-                let mut parent_ref = parent.borrow_mut();
-                mem::swap(&mut current_ref.priority, &mut parent_ref.priority);
-                mem::swap(&mut current_ref.item, &mut parent_ref.item);
+            // Swap node positions: current moves to parent's position
+            self.swap_node_with_parent(&current, &parent);
+            did_swap = true;
+
+            // current is now in parent's old position, continue loop
+            // to check against grandparent
+        }
+
+        // If we did swaps and current is now a root, we need to fix the tree slot
+        // because the degree changed but the slot didn't
+        if did_swap && current.borrow().parent.is_none() {
+            // Current is a root - find it in trees and move to correct slot
+            let current_degree = current.borrow().degree;
+
+            // Find and remove current from its old slot
+            let mut old_slot = None;
+            for i in 0..self.trees.len() {
+                if let Some(ref tree) = self.trees[i] {
+                    if Rc::ptr_eq(tree, &current) {
+                        old_slot = Some(i);
+                        break;
+                    }
+                }
             }
 
-            // Move up to parent
-            current = parent;
+            if let Some(old_i) = old_slot {
+                if old_i != current_degree {
+                    // Slot mismatch - need to move tree
+                    self.trees[old_i] = None;
+
+                    // Place at correct slot, handling conflicts
+                    let mut tree_to_place = current.clone();
+                    let mut target_degree = current_degree;
+
+                    while self.trees.len() <= target_degree {
+                        self.trees.push(None);
+                    }
+
+                    loop {
+                        if let Some(existing) = self.trees[target_degree].take() {
+                            // Conflict - merge and try next slot
+                            tree_to_place = self.link_trees(tree_to_place, existing);
+                            target_degree = tree_to_place.borrow().degree;
+                            while self.trees.len() <= target_degree {
+                                self.trees.push(None);
+                            }
+                        } else {
+                            self.trees[target_degree] = Some(tree_to_place);
+                            break;
+                        }
+                    }
+
+                    // After slot fix with potential merges, rescan all roots for min
+                    self.find_and_update_min();
+                    return;
+                }
+            }
         }
 
         // Update minimum pointer if needed
         self.update_min_if_needed(&current);
+    }
+
+    /// Swaps a child node with its parent, moving child to parent's position.
+    ///
+    /// After this operation:
+    /// - child is where parent was (same grandparent, same siblings as parent had)
+    /// - parent is a child of child
+    /// - child's old children become siblings of parent
+    /// - parent keeps its other children
+    fn swap_node_with_parent(&mut self, child: &NodeRef<T, P>, parent: &NodeRef<T, P>) {
+        // Step 1: Remove child from parent's child list
+        {
+            let child_sibling = child.borrow().sibling.clone();
+            let mut parent_ref = parent.borrow_mut();
+
+            if let Some(ref first_child) = parent_ref.child {
+                if Rc::ptr_eq(first_child, child) {
+                    // Child is first child, replace with its sibling
+                    parent_ref.child = child_sibling;
+                } else {
+                    // Child is not first, find and remove from sibling chain
+                    let mut prev = first_child.clone();
+                    loop {
+                        let next = prev.borrow().sibling.clone();
+                        match next {
+                            Some(ref n) if Rc::ptr_eq(n, child) => {
+                                prev.borrow_mut().sibling = child_sibling;
+                                break;
+                            }
+                            Some(n) => prev = n,
+                            None => break, // Not found (shouldn't happen)
+                        }
+                    }
+                }
+            }
+        }
+
+        // Step 2: Save parent's old position info
+        let grandparent_weak = parent.borrow().parent.clone();
+        let parent_sibling = parent.borrow().sibling.clone();
+
+        // Step 3: Child takes parent's position
+        child.borrow_mut().parent = grandparent_weak.clone();
+        child.borrow_mut().sibling = parent_sibling;
+
+        // Step 4: Update grandparent's child pointer (or trees array if parent was root)
+        if let Some(ref gp_weak) = grandparent_weak {
+            if let Some(gp) = gp_weak.upgrade() {
+                let mut gp_ref = gp.borrow_mut();
+                if let Some(ref first) = gp_ref.child {
+                    if Rc::ptr_eq(first, parent) {
+                        gp_ref.child = Some(child.clone());
+                    } else {
+                        // Find parent in sibling chain and replace
+                        let mut prev = first.clone();
+                        loop {
+                            let next = prev.borrow().sibling.clone();
+                            match next {
+                                Some(ref n) if Rc::ptr_eq(n, parent) => {
+                                    prev.borrow_mut().sibling = Some(child.clone());
+                                    break;
+                                }
+                                Some(n) => prev = n,
+                                None => break,
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            // Parent was a root - update trees array
+            // We must search all slots because the parent's degree may have changed
+            // through previous bubble_up swaps, so it might not be at its degree slot.
+            let mut found = false;
+            for i in 0..self.trees.len() {
+                if let Some(ref tree) = self.trees[i] {
+                    if Rc::ptr_eq(tree, parent) {
+                        self.trees[i] = Some(child.clone());
+                        found = true;
+                        break;
+                    }
+                }
+            }
+
+            debug_assert!(found, "Parent root should be found in trees array");
+        }
+
+        // Step 5: Parent becomes a child of child
+        // Parent's new siblings = child's old children
+        let child_old_children = child.borrow_mut().child.take();
+        parent.borrow_mut().sibling = child_old_children;
+        parent.borrow_mut().parent = Some(Rc::downgrade(child));
+        child.borrow_mut().child = Some(parent.clone());
+
+        // Step 6: Update degrees
+        // Child gains one child (parent): degree += 1
+        // Parent loses one child (child): degree -= 1
+        child.borrow_mut().degree += 1;
+        if parent.borrow().degree > 0 {
+            parent.borrow_mut().degree -= 1;
+        }
+
+        // Invariant: Both nodes must still have strong references (be in the tree)
+        debug_assert!(
+            Rc::strong_count(child) > 0,
+            "Child node lost all strong references during swap"
+        );
+        debug_assert!(
+            Rc::strong_count(parent) > 0,
+            "Parent node lost all strong references during swap"
+        );
     }
 
     /// Updates the minimum pointer if the given node has a smaller priority
@@ -685,7 +845,255 @@ impl<T, P: Ord> BinomialHeap<T, P> {
             }
         }
     }
+
+    /// Debug helper: count all nodes in the heap recursively
+    #[cfg(test)]
+    fn count_all_nodes(&self) -> usize {
+        fn count_tree<T, P>(node: &NodeRef<T, P>) -> usize {
+            let node_ref = node.borrow();
+            let mut count = 1; // This node
+
+            // Count children
+            if let Some(ref child) = node_ref.child {
+                let mut current = Some(child.clone());
+                while let Some(curr) = current {
+                    count += count_tree(&curr);
+                    current = curr.borrow().sibling.clone();
+                }
+            }
+
+            count
+        }
+
+        let mut total = 0;
+        for tree in self.trees.iter().flatten() {
+            total += count_tree(tree);
+        }
+        total
+    }
+
+    /// Debug helper: find the actual minimum by scanning all nodes
+    #[cfg(test)]
+    fn find_actual_min(&self) -> Option<P>
+    where
+        P: Clone,
+    {
+        fn find_min_in_tree<T, P: Ord + Clone>(node: &NodeRef<T, P>, current_min: Option<P>) -> Option<P> {
+            let node_ref = node.borrow();
+            let node_priority = node_ref.priority.clone();
+
+            let mut min = match current_min {
+                Some(m) if m < node_priority => Some(m),
+                _ => Some(node_priority),
+            };
+
+            // Check children
+            if let Some(ref child) = node_ref.child {
+                let mut current = Some(child.clone());
+                while let Some(curr) = current {
+                    min = find_min_in_tree(&curr, min);
+                    current = curr.borrow().sibling.clone();
+                }
+            }
+
+            min
+        }
+
+        let mut overall_min: Option<P> = None;
+        for tree in self.trees.iter().flatten() {
+            overall_min = find_min_in_tree(tree, overall_min);
+        }
+        overall_min
+    }
 }
 
 // Note: Most tests are in tests/generic_heap_tests.rs which provides comprehensive
 // test coverage for all heap implementations.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_decrease_key_min_update() {
+        let mut heap: BinomialHeap<i32, i32> = BinomialHeap::new();
+        let mut handles = Vec::new();
+
+        // Insert 16 zeros
+        for i in 0..16 {
+            handles.push(heap.push(0, i));
+        }
+        println!("After 16 pushes, min: {:?}", heap.peek());
+        println!("Trees: {:?}", heap.trees.iter().map(|t| t.is_some()).collect::<Vec<_>>());
+
+        // Decrease handle 1 to -1
+        heap.decrease_key(&handles[1], -1).unwrap();
+        println!("\nAfter decrease_key(1, -1):");
+        println!("  min: {:?}", heap.peek());
+        println!("  Trees: {:?}", heap.trees.iter().map(|t| t.is_some()).collect::<Vec<_>>());
+        println!("  handle[1] valid: {}", handles[1].node.strong_count());
+        assert_eq!(heap.peek().map(|(p, _)| *p), Some(-1));
+
+        // Decrease handle 3 to -98
+        println!("\nBefore decrease_key(3, -98):");
+        println!("  handle[3] valid: {}", handles[3].node.strong_count());
+        heap.decrease_key(&handles[3], -98).unwrap();
+        println!("After decrease_key(3, -98):");
+        println!("  Trees: {:?}", heap.trees.iter().map(|t| t.is_some()).collect::<Vec<_>>());
+        println!("  handle[1] valid: {}", handles[1].node.strong_count());
+        println!("  handle[3] valid: {}", handles[3].node.strong_count());
+        if let Some(min_weak) = &heap.min {
+            println!("  min weak strong_count: {}", min_weak.strong_count());
+        } else {
+            println!("  min is None!");
+        }
+        println!("  min: {:?}", heap.peek());
+        assert_eq!(heap.peek().map(|(p, _)| *p), Some(-98), "Min should be -98");
+    }
+
+    #[test]
+    fn test_complex_operations_failure() {
+        // Simplified test case focusing on the issue
+        let mut heap: BinomialHeap<i32, i32> = BinomialHeap::new();
+        let mut handles = Vec::new();
+
+        // Insert: [54, -34, 48, 55, 19, 8, 23, 87]
+        let initial = [54i32, -34, 48, 55, 19, 8, 23, 87];
+        for (i, priority) in initial.iter().enumerate() {
+            handles.push(heap.push(*priority, i as i32));
+        }
+        println!("After initial inserts, min: {:?}", heap.peek());
+        assert_eq!(heap.peek().map(|(p, _)| *p), Some(-34));
+
+        // decrease_key(handle[6], 23 -> -7)
+        println!("\nDecreasing handle[6] from 23 to -7");
+        heap.decrease_key(&handles[6], -7).unwrap();
+        println!("After decrease_key, min: {:?}", heap.peek());
+        // Now the minimum should be -34 (not -7, since -34 < -7)
+        assert_eq!(heap.peek().map(|(p, _)| *p), Some(-34));
+
+        // Push a few more items
+        handles.push(heap.push(71, 8));  // idx 8
+        handles.push(heap.push(94, 9));  // idx 9
+        handles.push(heap.push(-87, 10)); // idx 10
+        println!("After pushes, min: {:?}", heap.peek());
+        assert_eq!(heap.peek().map(|(p, _)| *p), Some(-87)); // -87 is now min
+
+        // Pop -87
+        let p = heap.pop();
+        println!("Pop: {:?}", p);
+        assert_eq!(p.map(|(p, _)| p), Some(-87));
+        println!("After pop, min: {:?}", heap.peek());
+        assert_eq!(heap.peek().map(|(p, _)| *p), Some(-34)); // -34 is next min
+
+        // decrease_key(handle[5], 8 -> 7)
+        println!("\nDecreasing handle[5] from 8 to 7");
+        heap.decrease_key(&handles[5], 7).unwrap();
+        println!("After decrease_key, min: {:?}", heap.peek());
+        assert_eq!(heap.peek().map(|(p, _)| *p), Some(-34)); // Still -34
+
+        // Pop -34
+        let p = heap.pop();
+        println!("Pop: {:?}", p);
+        assert_eq!(p.map(|(p, _)| p), Some(-34));
+
+        // Now the minimum should be -7 (handle[6])
+        println!("After pop, min: {:?}", heap.peek());
+        println!("Expected: -7 (handle 6)");
+
+        // Debug: print all root priorities
+        println!("\nRoots in trees:");
+        for (i, tree) in heap.trees.iter().enumerate() {
+            if let Some(root) = tree {
+                println!("  trees[{}]: priority={}, item={}, degree={}",
+                    i,
+                    root.borrow().priority,
+                    root.borrow().item,
+                    root.borrow().degree);
+            }
+        }
+
+        assert_eq!(heap.peek().map(|(p, _)| *p), Some(-7), "Min should be -7");
+    }
+
+    #[test]
+    fn test_failing_input_from_proptest() {
+        use std::collections::HashMap;
+
+        let mut heap: BinomialHeap<i32, i32> = BinomialHeap::new();
+        let mut handles = Vec::new();
+        let mut priorities: HashMap<usize, i32> = HashMap::new();
+
+        // From failing proptest
+        let initial: Vec<i32> = vec![
+            54, -72, 30, -53, -78, -71, -30, -7, -41, 93, 14, -5, -84, -60, -9, 5, -93, 34,
+        ];
+
+        for (i, priority) in initial.iter().enumerate() {
+            handles.push(heap.push(*priority, i as i32));
+            priorities.insert(i, *priority);
+        }
+
+        // Verify after inserts
+        let actual_min = heap.find_actual_min();
+        let expected_min = priorities.values().min().copied();
+        assert_eq!(actual_min, expected_min, "Initial min mismatch");
+        println!("After inserts: peek={:?}, expected_min={:?}", heap.peek().map(|(p, _)| *p), expected_min);
+
+        // Decrease some keys
+        let decrease_ops = [(0, -100), (5, -200), (10, -50)];
+        for (idx, new_priority) in decrease_ops {
+            if priorities.contains_key(&idx) {
+                let old_priority = priorities[&idx];
+                if new_priority < old_priority {
+                    println!("decrease_key({}, {} -> {})", idx, old_priority, new_priority);
+                    heap.decrease_key(&handles[idx], new_priority).unwrap();
+                    priorities.insert(idx, new_priority);
+
+                    // Verify heap invariant
+                    let peek_val = heap.peek().map(|(p, _)| *p);
+                    let actual_min = heap.find_actual_min();
+                    let expected_min = priorities.values().min().copied();
+
+                    println!("  After: peek={:?}, actual_min={:?}, expected={:?}", peek_val, actual_min, expected_min);
+
+                    if peek_val != expected_min || actual_min != expected_min {
+                        println!("  MISMATCH!");
+                        println!("  Node count: {}, priorities count: {}", heap.count_all_nodes(), priorities.len());
+                        panic!("Heap invariant violated after decrease_key");
+                    }
+                }
+            }
+        }
+
+        // Now do some pops and verify node count
+        for i in 0..10 {
+            if !priorities.is_empty() {
+                let node_count = heap.count_all_nodes();
+                let expected_count = priorities.len();
+
+                if node_count != expected_count {
+                    println!("NODE COUNT MISMATCH at step {}: in_heap={}, expected={}",
+                        i, node_count, expected_count);
+                    panic!("Lost nodes!");
+                }
+
+                let peek_before = heap.peek().map(|(p, _)| *p);
+                let expected_min = priorities.values().min().copied();
+
+                if peek_before != expected_min {
+                    println!("MISMATCH at pop {}: peek={:?}, expected={:?}",
+                        i, peek_before, expected_min);
+                    panic!("Heap invariant violated before pop");
+                }
+
+                if let Some((_priority, item)) = heap.pop() {
+                    println!("pop() -> ({}, {})", _priority, item);
+                    priorities.remove(&(item as usize));
+                }
+            }
+        }
+
+        println!("All operations completed successfully");
+    }
+}
