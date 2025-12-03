@@ -88,6 +88,18 @@ pub trait Heap<T, P: Ord> {
     /// Equivalent to `BinaryHeap::peek`. Note that `BinaryHeap` is a max-heap,
     /// while these heaps are min-heaps.
     ///
+    /// # Lifetime Safety
+    ///
+    /// The returned references are valid for the lifetime of the `&self` borrow.
+    /// This is safe because:
+    /// - The caller holds `&self`, preventing any `&mut self` methods from being called
+    /// - All mutating operations (`push`, `pop`, `decrease_key`, `merge`) require `&mut self`
+    /// - Therefore no internal mutation can occur while these references exist
+    ///
+    /// Implementations using interior mutability (e.g., `RefCell`) may use unsafe
+    /// pointer operations to return these references, but this is sound because
+    /// the `&self` borrow prevents any mutable access to the heap structure.
+    ///
     /// # Time Complexity
     /// All implementations: O(1)
     fn peek(&self) -> Option<(&P, &T)>;

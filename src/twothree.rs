@@ -158,7 +158,13 @@ impl<T, P: Ord + Clone> Heap<T, P> for TwoThreeHeap<T, P> {
     fn find_min(&self) -> Option<(&P, &T)> {
         let min_node = self.find_min_node()?;
         let node = min_node.borrow();
-        // SAFETY: We hold a reference to min_node which keeps the data alive
+        // SAFETY: The returned references are valid for the lifetime of `&self`:
+        // 1. The caller holds `&self`, preventing any `&mut self` methods
+        // 2. All mutating operations (push, pop, decrease_key, merge) require `&mut self`
+        // 3. Therefore no `borrow_mut()` can occur on any RefCell while these refs exist
+        // 4. The data is kept alive by the Rc in `self.trees[]` which outlives `&self`
+        // 5. The Ref guard (`node`) is dropped here, but the data remains valid because
+        //    no mutation can occur while `&self` is held
         unsafe {
             let priority: &P = &*(&node.priority as *const P);
             let item: &T = &*(&node.item as *const T);
