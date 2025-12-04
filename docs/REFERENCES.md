@@ -1,43 +1,56 @@
 # Academic References for Heap Data Structures
 
 This document provides citations, paper summaries, and links for heap data
-structures relevant to this crate.
+structures implemented in this crate, ordered by publication date.
+
+## Summary
+
+| Heap | Year | decrease-key | Notes |
+|------|------|--------------|-------|
+| Binomial | 1978 | O(log n) | Foundational, simple |
+| Pairing | 1986 | o(log n) am. | Simple, fast in practice |
+| Fibonacci | 1987 | O(1) am. | Optimal amortized bounds |
+| Skew Binomial | 1996 | O(log n) | O(1) insert |
+| 2-3 Heap | 1999 | O(1) am. | Simpler than Fibonacci |
+| Rank-Pairing | 2011 | O(1) am. | Simple + optimal bounds |
+| Strict Fibonacci | 2012 | O(1) worst | Optimal worst-case |
 
 ---
 
-## Fibonacci Heap
+## Binomial Heap (1978)
 
-**Wikipedia:** <https://en.wikipedia.org/wiki/Fibonacci_heap>
+**Wikipedia:** <https://en.wikipedia.org/wiki/Binomial_heap>
 
-**Fredman, M. L., & Tarjan, R. E. (1987).** Fibonacci heaps and their uses in
-improved network optimization algorithms. *Journal of the ACM*, 34(3), 596-615.
+**Vuillemin, J. (1978).** A data structure for manipulating priority queues.
+*Communications of the ACM*, 21(4), 309-315.
 
-- **ACM Digital Library:** <https://dl.acm.org/doi/10.1145/28869.28874>
-- **PDF (UMich):**
-  <https://web.eecs.umich.edu/~pettie/matching/Fredman-Tarjan-Fibonacci-Heaps.pdf>
+- **ACM Digital Library:** <https://dl.acm.org/doi/10.1145/359460.359478>
 
-This seminal paper introduces Fibonacci heaps (F-heaps), extending binomial
-queues proposed by Vuillemin. The key innovation is achieving O(1) amortized
-time for insert, find-min, decrease-key, and merge operations, while delete-min
-remains O(log n) amortized.
+This foundational paper introduces binomial queues (now commonly called
+binomial heaps), which represent a priority queue as a forest of binomial
+trees. Each binomial tree B_k has 2^k nodes, and a heap with n elements
+contains trees corresponding to the binary representation of n.
 
-The authors demonstrate the practical importance by improving Dijkstra's
-shortest path algorithm from O(E log V) to O(E + V log V), and providing
-similar improvements for minimum spanning tree algorithms. The name "Fibonacci"
-comes from the Fibonacci numbers appearing in the analysis of the maximum
-degree of nodes.
+The elegant insight is that merging two heaps mirrors binary addition: when two
+trees of the same order meet, they combine into a tree of the next higher
+order, just like carrying in addition.
 
-| Operation | Amortized Time |
-|-----------|----------------|
-| insert | O(1) |
-| find-min | O(1) |
+Vuillemin's design emphasizes efficient merging, achieving O(log n) merge
+time - a significant improvement over binary heaps which require O(n) to merge.
+
+| Operation | Worst-case Time |
+|-----------|-----------------|
+| insert | O(log n) |
+| find-min | O(1)* |
 | delete-min | O(log n) |
-| decrease-key | O(1) |
-| merge | O(1) |
+| decrease-key | O(log n) |
+| merge | O(log n) |
+
+*O(1) if minimum pointer is maintained
 
 ---
 
-## Pairing Heap
+## Pairing Heap (1986)
 
 **Wikipedia:** <https://en.wikipedia.org/wiki/Pairing_heap>
 
@@ -70,7 +83,108 @@ current best bound is o(log n) amortized, proven by Iacono and Özkan in 2014.
 
 ---
 
-## Rank-Pairing Heap
+## Fibonacci Heap (1987)
+
+**Wikipedia:** <https://en.wikipedia.org/wiki/Fibonacci_heap>
+
+**Fredman, M. L., & Tarjan, R. E. (1987).** Fibonacci heaps and their uses in
+improved network optimization algorithms. *Journal of the ACM*, 34(3), 596-615.
+
+- **ACM Digital Library:** <https://dl.acm.org/doi/10.1145/28869.28874>
+- **PDF (UMich):**
+  <https://web.eecs.umich.edu/~pettie/matching/Fredman-Tarjan-Fibonacci-Heaps.pdf>
+
+This seminal paper introduces Fibonacci heaps (F-heaps), extending binomial
+queues proposed by Vuillemin. The key innovation is achieving O(1) amortized
+time for insert, find-min, decrease-key, and merge operations, while delete-min
+remains O(log n) amortized.
+
+The authors demonstrate the practical importance by improving Dijkstra's
+shortest path algorithm from O(E log V) to O(E + V log V), and providing
+similar improvements for minimum spanning tree algorithms. The name "Fibonacci"
+comes from the Fibonacci numbers appearing in the analysis of the maximum
+degree of nodes.
+
+| Operation | Amortized Time |
+|-----------|----------------|
+| insert | O(1) |
+| find-min | O(1) |
+| delete-min | O(log n) |
+| decrease-key | O(1) |
+| merge | O(1) |
+
+---
+
+## Skew Binomial Heap (1996)
+
+**Wikipedia:** <https://en.wikipedia.org/wiki/Skew_binomial_heap>
+
+**Brodal, G. S., & Okasaki, C. (1996).** Optimal purely functional priority
+queues. *Journal of Functional Programming*, 6(6), 839-857.
+
+- **Cambridge:** <https://doi.org/10.1017/S095679680000201X>
+
+Related work: **Okasaki, C. (1996).** Purely Functional Data Structures. *PhD
+Thesis*, Carnegie Mellon University, CMU-CS-96-177.
+
+- **PDF:** <https://www.cs.cmu.edu/~rwh/students/okasaki.pdf>
+
+Skew binomial heaps extend binomial heaps to achieve O(1) worst-case insertion
+(vs O(log n) for binomial heaps). The key innovation is the **skew link**: a
+special linking operation that can combine three trees at once.
+
+The paper adapts Brodal's imperative data structure to a purely functional
+setting, demonstrating that optimal priority queue bounds are achievable
+without mutation. This was significant for functional programming languages.
+
+The "skew" in the name refers to the skew binary number system used to
+represent tree sizes, which allows constant-time increment operations.
+
+| Operation | Worst-case Time |
+|-----------|-----------------|
+| insert | O(1) |
+| find-min | O(1) |
+| delete-min | O(log n) |
+| decrease-key | O(log n) |
+| merge | O(log n) |
+
+---
+
+## 2-3 Heap (1999)
+
+**Takaoka, T. (1999).** Theory of 2-3 heaps. *Discrete Applied Mathematics*,
+126, 115-128.
+
+Earlier conference version:
+**Takaoka, T. (1999).** Theory of 2-3 heaps. *Computing and Combinatorics
+(COCOON)*, LNCS 1627, 41-50.
+
+- **SpringerLink:** <https://link.springer.com/chapter/10.1007/3-540-48686-0_4>
+
+The 2-3 heap is designed as a simpler alternative to Fibonacci heaps while
+maintaining the same amortized bounds. The name comes from the constraint that
+each internal node has either 2 or 3 children.
+
+The key insight is replacing Fibonacci heaps' cascading cuts with **rank
+propagation**: instead of cutting marked nodes, ranks are updated and
+propagated upward. This eliminates the complex marking mechanism while
+preserving efficiency.
+
+Takaoka emphasizes practical simplicity: "The merit of the 2-3 heap is that it
+is conceptually simpler and easier to implement" compared to other
+Fibonacci-like structures.
+
+| Operation | Amortized Time |
+|-----------|----------------|
+| insert | O(1) |
+| find-min | O(1) |
+| delete-min | O(log n) |
+| decrease-key | O(1) |
+| merge | O(1) |
+
+---
+
+## Rank-Pairing Heap (2011)
 
 **Wikipedia:** <https://en.wikipedia.org/wiki/Rank-pairing_heap>
 
@@ -108,40 +222,7 @@ heaps on typical inputs and better on worst-case sequences.
 
 ---
 
-## Binomial Heap
-
-**Wikipedia:** <https://en.wikipedia.org/wiki/Binomial_heap>
-
-**Vuillemin, J. (1978).** A data structure for manipulating priority queues.
-*Communications of the ACM*, 21(4), 309-315.
-
-- **ACM Digital Library:** <https://dl.acm.org/doi/10.1145/359460.359478>
-
-This foundational paper introduces binomial queues (now commonly called
-binomial heaps), which represent a priority queue as a forest of binomial
-trees. Each binomial tree B_k has 2^k nodes, and a heap with n elements
-contains trees corresponding to the binary representation of n.
-
-The elegant insight is that merging two heaps mirrors binary addition: when two
-trees of the same order meet, they combine into a tree of the next higher
-order, just like carrying in addition.
-
-Vuillemin's design emphasizes efficient merging, achieving O(log n) merge
-time - a significant improvement over binary heaps which require O(n) to merge.
-
-| Operation | Worst-case Time |
-|-----------|-----------------|
-| insert | O(log n) |
-| find-min | O(log n) or O(1)* |
-| delete-min | O(log n) |
-| decrease-key | O(log n) |
-| merge | O(log n) |
-
-*O(1) if minimum pointer is maintained
-
----
-
-## Strict Fibonacci Heap
+## Strict Fibonacci Heap (2012)
 
 **Wikipedia:** <https://en.wikipedia.org/wiki/Fibonacci_heap#Strict_Fibonacci_heap>
 
@@ -179,75 +260,6 @@ primarily of theoretical interest.
 
 ---
 
-## 2-3 Heap
-
-**Takaoka, T. (1999).** Theory of 2-3 heaps. *Discrete Applied Mathematics*,
-126, 115-128.
-
-Earlier conference version:
-**Takaoka, T. (1999).** Theory of 2-3 heaps. *Computing and Combinatorics
-(COCOON)*, LNCS 1627, 41-50.
-
-- **SpringerLink:** <https://link.springer.com/chapter/10.1007/3-540-48686-0_4>
-
-The 2-3 heap is designed as a simpler alternative to Fibonacci heaps while
-maintaining the same amortized bounds. The name comes from the constraint that
-each internal node has either 2 or 3 children.
-
-The key insight is replacing Fibonacci heaps' cascading cuts with **rank
-propagation**: instead of cutting marked nodes, ranks are updated and
-propagated upward. This eliminates the complex marking mechanism while
-preserving efficiency.
-
-Takaoka emphasizes practical simplicity: "The merit of the 2-3 heap is that it
-is conceptually simpler and easier to implement" compared to other
-Fibonacci-like structures.
-
-| Operation | Amortized Time |
-|-----------|----------------|
-| insert | O(1) |
-| find-min | O(1) |
-| delete-min | O(log n) |
-| decrease-key | O(1) |
-| merge | O(1) |
-
----
-
-## Skew Binomial Heap
-
-**Wikipedia:** <https://en.wikipedia.org/wiki/Skew_binomial_heap>
-
-**Brodal, G. S., & Okasaki, C. (1996).** Optimal purely functional priority
-queues. *Journal of Functional Programming*, 6(6), 839-857.
-
-- **Cambridge:** <https://doi.org/10.1017/S095679680000201X>
-
-Related work: **Okasaki, C. (1996).** Purely Functional Data Structures. *PhD
-Thesis*, Carnegie Mellon University, CMU-CS-96-177.
-
-- **PDF:** <https://www.cs.cmu.edu/~rwh/students/okasaki.pdf>
-
-Skew binomial heaps extend binomial heaps to achieve O(1) worst-case insertion
-(vs O(log n) for binomial heaps). The key innovation is the **skew link**: a
-special linking operation that can combine three trees at once.
-
-The paper adapts Brodal's imperative data structure to a purely functional
-setting, demonstrating that optimal priority queue bounds are achievable
-without mutation. This was significant for functional programming languages.
-
-The "skew" in the name refers to the skew binary number system used to
-represent tree sizes, which allows constant-time increment operations.
-
-| Operation | Worst-case Time |
-|-----------|-----------------|
-| insert | O(1) |
-| find-min | O(1) |
-| delete-min | O(log n) |
-| decrease-key | O(log n) |
-| merge | O(log n) |
-
----
-
 ## Additional Resources
 
 **Brodal, G. S. (2013).** A survey on priority queues.
@@ -277,7 +289,7 @@ implemented in this crate.
 
 ---
 
-### Brodal Heap (Brodal Queue)
+### Brodal Heap (1996)
 
 *Status: Not implemented in this crate.*
 

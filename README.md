@@ -11,27 +11,27 @@ maps paired with binary heaps, which only achieve O(log n) `decrease_key`
 operations. This crate implements advanced heap structures from computer
 science literature that provide better amortized bounds:
 
-- **Fibonacci Heap** (1987): O(1) amortized `decrease_key`
-- **Pairing Heap** (1986): o(log n) amortized `decrease_key`
-- **Rank-Pairing Heap** (2011): O(1) amortized `decrease_key`
-- **Strict Fibonacci Heap** (2012): O(1) worst-case `decrease_key`
-- **2-3 Heap** (1999): O(1) amortized `decrease_key`
-- **Binomial Heap** (1978): O(log n) `decrease_key` (but simpler implementation)
+- **Binomial Heap** (1978): O(log n) `decrease_key` - foundational, simple
+- **Pairing Heap** (1986): o(log n) amortized `decrease_key` - simple, fast
+- **Fibonacci Heap** (1987): O(1) amortized `decrease_key` - optimal amortized
 - **Skew Binomial Heap** (1996): O(1) insert, O(log n) `decrease_key`
+- **2-3 Heap** (1999): O(1) amortized `decrease_key` - simpler than Fibonacci
+- **Rank-Pairing Heap** (2011): O(1) amortized `decrease_key` - simple + optimal
+- **Strict Fibonacci Heap** (2012): O(1) worst-case `decrease_key`
 
 ## Features
 
 ### Implemented Heaps
 
-| Heap Type | Insert | Delete-min | Decrease-key | Merge | Notes |
-| --------- | ------ | ---------- | ------------ | ----- | ----- |
-| **Fibonacci** | O(1) am. | O(log n) am. | **O(1) am.** | O(1) | Complex but optimal |
-| **Pairing** | O(1) am. | O(log n) am. | **o(log n) am.** | O(1) | Simpler than Fibonacci |
-| **Rank-Pairing** | O(1) am. | O(log n) am. | **O(1) am.** | O(1) | Simpler than Fibonacci, optimal bounds |
-| **Strict Fibonacci** | O(1) worst | O(log n) worst | **O(1) worst** | O(1) worst | Optimal worst-case bounds |
-| **2-3 Heap** | O(1) am. | O(log n) am. | **O(1) am.** | O(1) am. | Simpler than Fibonacci |
-| **Binomial** | O(log n) | O(log n) | O(log n) | O(log n) | Simple, well-understood |
-| **Skew Binomial** | O(1) | O(log n) | O(log n) | O(1) | O(1) insert variant |
+| Heap Type | Year | Insert | Delete-min | Decrease-key | Merge |
+| --------- | ---- | ------ | ---------- | ------------ | ----- |
+| **Binomial** | 1978 | O(log n) | O(log n) | O(log n) | O(log n) |
+| **Pairing** | 1986 | O(1) am. | O(log n) am. | **o(log n) am.** | O(1) |
+| **Fibonacci** | 1987 | O(1) am. | O(log n) am. | **O(1) am.** | O(1) |
+| **Skew Binomial** | 1996 | O(1) | O(log n) | O(log n) | O(log n) |
+| **2-3 Heap** | 1999 | O(1) am. | O(log n) am. | **O(1) am.** | O(1) am. |
+| **Rank-Pairing** | 2011 | O(1) am. | O(log n) am. | **O(1) am.** | O(1) |
+| **Strict Fibonacci** | 2012 | O(1) worst | O(log n) worst | **O(1) worst** | O(1) worst |
 
 All times are amortized (am.) where applicable. See the [Wikipedia
 comparison table](https://en.wikipedia.org/wiki/Fibonacci_heap#Summary_of_running_times)
@@ -100,13 +100,13 @@ pub trait Heap<T, P: Ord> {
 
 ## Implementation Status
 
-- ✅ Fibonacci Heap (1987)
-- ✅ Pairing Heap (1986)
-- ✅ Rank-Pairing Heap (2011)
 - ✅ Binomial Heap (1978)
-- ✅ Strict Fibonacci Heap (2012)
-- ✅ 2-3 Heap (1999)
+- ✅ Pairing Heap (1986)
+- ✅ Fibonacci Heap (1987)
 - ✅ Skew Binomial Heap (1996)
+- ✅ 2-3 Heap (1999)
+- ✅ Rank-Pairing Heap (2011)
+- ✅ Strict Fibonacci Heap (2012)
 
 ## Performance Considerations
 
