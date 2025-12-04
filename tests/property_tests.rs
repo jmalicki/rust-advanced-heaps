@@ -222,10 +222,10 @@ fn test_len_invariant<H: Heap<i32, i32>>(ops: Vec<(bool, i32)>) -> Result<(), Te
     Ok(())
 }
 
-/// Test that pop works correctly and maintains heap property
+/// Test that pop works correctly and maintains length invariant
 ///
-/// This test verifies that pop returns elements in order and doesn't corrupt
-/// the heap structure.
+/// This test verifies that pop decrements the length by 1 and returns Some
+/// when the heap is non-empty. Ordering is verified by test_pop_order_invariant.
 fn test_pop_maintains_property<H: Heap<i32, i32>>(values: Vec<i32>) -> Result<(), TestCaseError> {
     let mut heap = H::new();
 
@@ -537,8 +537,8 @@ macro_rules! create_heap_tests {
                 }
 
                 #[test]
-                fn peek_idempotent(values in prop::collection::vec(-100i32..100, $values_size)) {
-                      test_pop_maintains_property::<$heap_type>(values)?;
+                fn pop_maintains_property(values in prop::collection::vec(-100i32..100, $values_size)) {
+                    test_pop_maintains_property::<$heap_type>(values)?;
                 }
 
                 #[test]
