@@ -269,7 +269,8 @@ impl<T, P: Ord + Clone> TwoThreeHeap<T, P> {
         }
 
         let mut min_node: Option<NodeRef<T, P>> = None;
-        let mut min_priority: Option<&P> = None;
+        // Keep the Ref guard alive across iterations so we can safely reference its priority
+        let mut min_borrow: Option<std::cell::Ref<'_, Node<T, P>>> = None;
 
         let mut mask = self.tree_mask;
         while mask != 0 {
@@ -277,10 +278,12 @@ impl<T, P: Ord + Clone> TwoThreeHeap<T, P> {
             mask &= !(1 << dim);
 
             if let Some(ref tree) = self.trees[dim] {
-                let dominated = min_priority.is_some_and(|mp| tree.borrow().priority >= *mp);
+                let tree_borrow = tree.borrow();
+                let dominated = min_borrow
+                    .as_ref()
+                    .is_some_and(|mb| tree_borrow.priority >= mb.priority);
                 if !dominated {
-                    // SAFETY: tree lives as long as self.trees
-                    min_priority = Some(unsafe { &*(&tree.borrow().priority as *const P) });
+                    min_borrow = Some(tree_borrow);
                     min_node = Some(Rc::clone(tree));
                 }
             }
