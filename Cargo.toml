@@ -16,6 +16,8 @@ categories = ["data-structures", "algorithms"]
 # Enable expensive O(n) invariant verification checks. Only use for debugging specific issues.
 # These checks significantly slow down all heap operations.
 expensive_verify = []
+# Enable hardware performance counter benchmarks (Linux only)
+perf-counters = ["perf-event"]
 
 [dependencies]
 # For stack-allocated vectors in fixed-arity heaps
@@ -34,8 +36,16 @@ big-o-test = "0.2"
 ctor = "0.2"
 parking_lot = "0.12"
 
+# Hardware performance counters (Linux only, optional)
+[target.'cfg(target_os = "linux")'.dependencies]
+perf-event = { version = "0.4", optional = true }
+
 [[bench]]
 name = "dimacs_benchmark"
+harness = false
+
+[[bench]]
+name = "heap_perf"
 harness = false
 
 # Commands for cargo-cmd (install with: cargo install cargo-cmd)
