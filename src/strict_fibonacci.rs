@@ -22,7 +22,7 @@
 //! This implementation uses:
 //! - Raw pointers (`NonNull<Node>`) for node management
 //! - Intrusive circular doubly-linked lists for sibling relationships
-//! - A `rank` field on each node (preparation for future phases)
+//! - Rank records for O(1) access to nodes by rank (Phase 2)
 //!
 //! # References
 //!
@@ -33,6 +33,140 @@
 use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError};
 use intrusive_circular_list::{container_of_mut, CircularLink, CircularListOps};
 use std::ptr::NonNull;
+
+// ============================================================================
+// Rank Record System
+// ============================================================================
+
+/// A rank record in the strict Fibonacci heap.
+///
+/// Rank records form a doubly-linked list ordered by rank value. Each rank record
+/// tracks nodes of that rank, enabling O(1) access to nodes by rank for the
+/// reduction operations that maintain worst-case bounds.
+///
+/// # Invariants
+///
+/// - Rank records are reference-counted by nodes
+/// - When `reference_count` drops to 0, the record is retired (deallocated)
+/// - The rank list is ordered by increasing rank values
+/// - Gaps in rank values are allowed (not all ranks need to exist)
+///
+/// # Future Extensions (Phase 3+)
+///
+/// - `free`: pointer to first free node of this rank (for free reductions)
+/// - `loss_one`: pointer to first loss-one node of this rank (for loss reductions)
+struct RankRecord {
+    /// Next rank record in the doubly-linked list (higher rank).
+    next: Option<NonNull<RankRecord>>,
+    /// Previous rank record in the doubly-linked list (lower rank).
+    prev: Option<NonNull<RankRecord>>,
+    /// The integer rank value.
+    rank: usize,
+    /// Number of nodes referencing this rank record.
+    /// When this reaches 0, the record is retired.
+    reference_count: usize,
+    // Future Phase 3+ fields (commented out for now):
+    // free: Option<NonNull<Node<T, P>>>,
+    // loss_one: Option<NonNull<Node<T, P>>>,
+}
+
+impl RankRecord {
+    /// Creates a new rank record with the given rank value.
+    fn new(rank: usize) -> Box<RankRecord> {
+        Box::new(RankRecord {
+            next: None,
+            prev: None,
+            rank,
+            reference_count: 0,
+        })
+    }
+
+    /// Increases the reference count.
+    fn increase_reference_count(&mut self) {
+        self.reference_count += 1;
+    }
+
+    /// Decreases the reference count.
+    ///
+    /// Returns true if the reference count reached zero (caller should retire).
+    fn decrease_reference_count(&mut self) -> bool {
+        debug_assert!(self.reference_count > 0, "Reference count underflow");
+        self.reference_count -= 1;
+        self.reference_count == 0
+    }
+
+    /// Gets or creates the next rank record (rank + 1).
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure this rank record is valid and not retired.
+    #[allow(dead_code)] // Will be used in later phases
+    unsafe fn get_or_create_next(&mut self) -> NonNull<RankRecord> {
+        let self_ptr = NonNull::from(&mut *self);
+        let next_rank = self.rank + 1;
+
+        // Check if next already exists and has the right rank
+        if let Some(next_ptr) = self.next {
+            if next_ptr.as_ref().rank == next_rank {
+                return next_ptr;
+            }
+        }
+
+        // Need to create a new rank record
+        let new_record = RankRecord::new(next_rank);
+        let new_ptr = NonNull::new(Box::into_raw(new_record)).unwrap();
+
+        // Insert new record after self
+        (*new_ptr.as_ptr()).prev = Some(self_ptr);
+        (*new_ptr.as_ptr()).next = self.next;
+
+        if let Some(mut next_ptr) = self.next {
+            next_ptr.as_mut().prev = Some(new_ptr);
+        }
+        self.next = Some(new_ptr);
+
+        new_ptr
+    }
+
+    /// Gets or creates the previous rank record (rank - 1).
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure this rank record is valid, not retired,
+    /// and has rank > 0.
+    #[allow(dead_code)] // Will be used in later phases
+    unsafe fn get_or_create_prev(&mut self) -> NonNull<RankRecord> {
+        debug_assert!(self.rank > 0, "Cannot get prev of rank 0");
+        let self_ptr = NonNull::from(&mut *self);
+        let prev_rank = self.rank - 1;
+
+        // Check if prev already exists and has the right rank
+        if let Some(prev_ptr) = self.prev {
+            if prev_ptr.as_ref().rank == prev_rank {
+                return prev_ptr;
+            }
+        }
+
+        // Need to create a new rank record
+        let new_record = RankRecord::new(prev_rank);
+        let new_ptr = NonNull::new(Box::into_raw(new_record)).unwrap();
+
+        // Insert new record before self
+        (*new_ptr.as_ptr()).next = Some(self_ptr);
+        (*new_ptr.as_ptr()).prev = self.prev;
+
+        if let Some(mut prev_ptr) = self.prev {
+            prev_ptr.as_mut().next = Some(new_ptr);
+        }
+        self.prev = Some(new_ptr);
+
+        new_ptr
+    }
+}
+
+// ============================================================================
+// Handle
+// ============================================================================
 
 /// Handle to an element in a Strict Fibonacci heap.
 ///
@@ -83,9 +217,14 @@ struct Node<T, P> {
     parent: Option<NonNull<Node<T, P>>>,
     /// Pointer to one child (entry point into children's circular list).
     child: Option<NonNull<Node<T, P>>>,
-    /// The rank of this node (number of children).
-    /// In strict Fibonacci heaps, this is used for consolidation.
-    rank: usize,
+    /// The rank of this node (number of fixed/active children).
+    /// This is tracked locally until the node becomes active and uses a RankRecord.
+    /// In the full algorithm, this matches the rank_record's rank value.
+    rank_count: usize,
+    /// Pointer to this node's rank record.
+    /// Active nodes have a rank record; passive nodes may have None.
+    /// The rank record is reference-counted.
+    rank_record: Option<NonNull<RankRecord>>,
     /// Whether this node is "active" in the strict Fibonacci sense.
     /// Active nodes are tracked specially to maintain worst-case bounds.
     active: bool,
@@ -93,6 +232,9 @@ struct Node<T, P> {
 
 impl<T, P> Node<T, P> {
     /// Creates a new node with the given priority and item.
+    ///
+    /// The node starts with no rank record (passive). Use `set_rank_record`
+    /// to assign a rank record when the node becomes active.
     fn new(priority: P, item: T) -> Box<Node<T, P>> {
         Box::new(Node {
             item,
@@ -100,7 +242,8 @@ impl<T, P> Node<T, P> {
             sibling_link: CircularLink::new(),
             parent: None,
             child: None,
-            rank: 0,
+            rank_count: 0,
+            rank_record: None,
             active: false,
         })
     }
@@ -109,6 +252,74 @@ impl<T, P> Node<T, P> {
     fn sibling_link_ptr(&self) -> NonNull<CircularLink> {
         NonNull::from(&self.sibling_link)
     }
+
+    /// Returns the rank of this node.
+    ///
+    /// If the node has an active rank record, returns the rank from that record.
+    /// Otherwise, returns the local rank_count (used for passive nodes).
+    fn rank(&self) -> usize {
+        // For passive nodes or nodes not yet assigned a rank record,
+        // use the local rank_count. Once rank records are fully integrated,
+        // active nodes will use the rank_record's value.
+        self.rank_record
+            .map(|ptr| unsafe { ptr.as_ref().rank })
+            .unwrap_or(self.rank_count)
+    }
+
+    /// Sets the rank record for this node, updating reference counts.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure any old rank record and the new rank record
+    /// are valid pointers.
+    #[allow(dead_code)] // Will be used in later phases
+    unsafe fn set_rank_record(&mut self, new_rank: Option<NonNull<RankRecord>>) {
+        // No-op if the rank record is unchanged.
+        if self.rank_record == new_rank {
+            return;
+        }
+
+        // Decrease reference count on old rank record
+        if let Some(mut old_ptr) = self.rank_record {
+            let should_retire = old_ptr.as_mut().decrease_reference_count();
+            if should_retire {
+                // This rank record has no more references, deallocate it
+                retire_rank_record(old_ptr);
+            }
+        }
+
+        // Set new rank record and increase reference count
+        self.rank_record = new_rank;
+        if let Some(mut new_ptr) = self.rank_record {
+            new_ptr.as_mut().increase_reference_count();
+        }
+    }
+}
+
+/// Retires (deallocates) a rank record, removing it from the rank list.
+///
+/// # Safety
+///
+/// The caller must ensure the rank record has reference_count == 0
+/// and is a valid pointer.
+unsafe fn retire_rank_record(rank_ptr: NonNull<RankRecord>) {
+    let rank = rank_ptr.as_ptr();
+
+    debug_assert!(
+        (*rank).reference_count == 0,
+        "Retiring rank record with non-zero reference_count"
+    );
+
+    // Unlink from the doubly-linked list
+    if let Some(mut prev_ptr) = (*rank).prev {
+        prev_ptr.as_mut().next = (*rank).next;
+    }
+    if let Some(mut next_ptr) = (*rank).next {
+        next_ptr.as_mut().prev = (*rank).prev;
+    }
+
+    // Deallocate
+    drop(Box::from_raw(rank));
 }
 
 /// Strict Fibonacci Heap.
@@ -133,6 +344,9 @@ pub struct StrictFibonacciHeap<T, P: Ord> {
     min: Option<NonNull<Node<T, P>>>,
     /// Number of elements in the heap.
     len: usize,
+    /// Head of the rank list (rank 0 if it exists).
+    /// The rank list is a doubly-linked list ordered by increasing rank.
+    rank_list: Option<NonNull<RankRecord>>,
 }
 
 impl<T, P: Ord> Default for StrictFibonacciHeap<T, P> {
@@ -147,7 +361,7 @@ unsafe impl<T: Send, P: Ord + Send> Send for StrictFibonacciHeap<T, P> {}
 
 impl<T, P: Ord> Drop for StrictFibonacciHeap<T, P> {
     fn drop(&mut self) {
-        // We need to deallocate all nodes.
+        // We need to deallocate all nodes and rank records.
         // Traverse all roots and their descendants.
         if let Some(root_ptr) = self.roots {
             let mut to_free: Vec<NonNull<Node<T, P>>> = Vec::new();
@@ -182,10 +396,23 @@ impl<T, P: Ord> Drop for StrictFibonacciHeap<T, P> {
             }
 
             // Free all nodes
+            // Note: In Phase 2, nodes don't have rank_records set yet (they're passive).
+            // When rank_records are fully integrated, we'll need to call
+            // set_rank_record(None) to properly decrement reference counts.
             for node_ptr in to_free {
                 unsafe {
                     drop(Box::from_raw(node_ptr.as_ptr()));
                 }
+            }
+        }
+
+        // Also free any remaining rank records (should be empty after nodes are freed,
+        // but just in case there's rank 0 with ref count issues during partial construction)
+        let mut rank_ptr = self.rank_list;
+        while let Some(current) = rank_ptr {
+            unsafe {
+                rank_ptr = current.as_ref().next;
+                drop(Box::from_raw(current.as_ptr()));
             }
         }
     }
@@ -197,6 +424,7 @@ impl<T, P: Ord> Heap<T, P> for StrictFibonacciHeap<T, P> {
             roots: None,
             min: None,
             len: 0,
+            rank_list: None,
         }
     }
 
@@ -592,7 +820,7 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
             let mut current = root;
 
             loop {
-                let rank = unsafe { current.as_ref().rank };
+                let rank = unsafe { current.as_ref().rank() };
 
                 if rank >= rank_table.len() {
                     rank_table.resize(rank + 2, None);
@@ -660,7 +888,7 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
             }
 
             // Increment parent's rank
-            (*parent).rank += 1;
+            (*parent).rank_count += 1;
         }
 
         parent_ptr
@@ -697,7 +925,11 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
             ops.unlink(node_link);
 
             // Decrement parent's rank
-            (*parent).rank -= 1;
+            debug_assert!(
+                (*parent).rank_count > 0,
+                "Parent rank_count underflow in cut()"
+            );
+            (*parent).rank_count -= 1;
 
             // Clear parent link
             (*node).parent = None;
