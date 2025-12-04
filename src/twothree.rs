@@ -33,6 +33,7 @@
 //! - Takaoka, T. (1999). "Theory of 2-3 heaps." *Computing and Combinatorics (COCOON)*,
 //!   LNCS 1627, 41-50. [Springer](https://link.springer.com/chapter/10.1007/3-540-48686-0_4)
 
+use crate::rank::Rank;
 use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError};
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
@@ -74,10 +75,16 @@ impl<T, P> std::fmt::Debug for TwoThreeHandle<T, P> {
 impl<T, P> Handle for TwoThreeHandle<T, P> {}
 
 /// Node in the 2-3 heap forest
+///
+/// **Cache Optimization**: Fields are ordered for cache locality:
+/// - Hot path first: `priority` is accessed on every comparison
+/// - Strong refs (ownership): pointers for tree navigation
+/// - Weak refs (navigation, always valid while in heap)
+/// - Small fields: `dim` uses `Rank` (u8) to save 7 bytes, `extra` is bool
+/// - Cold path last: `item` is only accessed when popping
 struct Node<T, P> {
-    item: T,
+    /// Priority for heap ordering - Hot path: accessed on every comparison
     priority: P,
-    dim: usize,
 
     // Strong refs (ownership):
     child: Option<NodeRef<T, P>>,   // First child (owns it)
@@ -89,22 +96,32 @@ struct Node<T, P> {
     prev: WeakNodeRef<T, P>,         // Previous sibling or parent
     partner_back: WeakNodeRef<T, P>, // Primary partner (extra uses this)
 
+    /// Dimension (rank). Uses Rank (u8) to save memory - max dim is O(log n).
+    dim: Rank,
     extra: bool, // Is this the extra partner in a trunk?
+
+    /// The item stored in the heap - Cold path: only accessed on pop
+    item: T,
 }
 
 impl<T, P> Node<T, P> {
     fn new(item: T, priority: P) -> Self {
         Node {
-            item,
+            // Hot path first
             priority,
-            dim: 0,
+            // Strong refs (ownership)
             child: None,
             sibling: None,
             partner: None,
+            // Weak refs (navigation)
             parent: Weak::new(),
             prev: Weak::new(),
             partner_back: Weak::new(),
+            // Small fields
+            dim: 0,
             extra: false,
+            // Cold path last
+            item,
         }
     }
 
@@ -326,7 +343,7 @@ impl<T, P: Ord + Clone> TwoThreeHeap<T, P> {
     /// Meld a tree into the forest (takes ownership)
     fn meld_node(&mut self, mut tree: NodeRef<T, P>) {
         loop {
-            let dim = tree.borrow().dim;
+            let dim = tree.borrow().dim as usize;
 
             while self.trees.len() <= dim {
                 self.trees.push(None);

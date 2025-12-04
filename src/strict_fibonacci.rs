@@ -235,10 +235,19 @@ impl<T, P> Handle for StrictFibonacciHandle<T, P> {}
 /// A node in the Strict Fibonacci heap.
 ///
 /// Uses intrusive circular linked lists for sibling relationships and fix-list.
+///
+/// **Cache Optimization**: Fields are ordered for cache locality:
+/// - Hot path first: `priority` is accessed on every comparison
+/// - Intrusive links: circular list pointers for sibling and fix-list navigation
+/// - Traversal fields: parent, child, rank_record pointers
+/// - Small fields: rank_count (usize for now - complex invariants), active, loss
+/// - Cold path last: `item` is only accessed when popping
+///
+/// Note: `rank_count` remains `usize` due to complex invariants in the strict
+/// Fibonacci heap algorithm that require careful analysis before changing.
 struct Node<T, P> {
-    /// The item stored in this node.
-    item: T,
     /// The priority of this node (smaller = higher priority for min-heap).
+    /// Hot path: accessed on every comparison.
     priority: P,
     /// Intrusive link for the sibling circular list.
     sibling_link: CircularLink,
@@ -248,14 +257,15 @@ struct Node<T, P> {
     parent: Option<NonNull<Node<T, P>>>,
     /// Pointer to one child (entry point into children's circular list).
     child: Option<NonNull<Node<T, P>>>,
-    /// The rank of this node (number of fixed/active children).
-    /// This is tracked locally until the node becomes active and uses a RankRecord.
-    /// In the full algorithm, this matches the rank_record's rank value.
-    rank_count: usize,
     /// Pointer to this node's rank record.
     /// Active nodes have a rank record; passive nodes may have None.
     /// The rank record is reference-counted.
     rank_record: Option<NonNull<RankRecord>>,
+    /// The rank of this node (number of fixed/active children).
+    /// This is tracked locally until the node becomes active and uses a RankRecord.
+    /// In the full algorithm, this matches the rank_record's rank value.
+    /// Note: Kept as usize due to complex invariants in the algorithm.
+    rank_count: usize,
     /// Whether this node is "active" in the strict Fibonacci sense.
     /// Active nodes are tracked specially to maintain worst-case bounds.
     active: bool,
@@ -266,6 +276,9 @@ struct Node<T, P> {
     ///
     /// For passive nodes, this field is ignored.
     loss: u8,
+    /// The item stored in this node.
+    /// Cold path: only accessed when popping.
+    item: T,
 }
 
 impl<T, P> Node<T, P> {
@@ -275,16 +288,21 @@ impl<T, P> Node<T, P> {
     /// Use `set_rank_record` to assign a rank record when the node becomes active.
     fn new(priority: P, item: T) -> Box<Node<T, P>> {
         Box::new(Node {
-            item,
+            // Hot path first
             priority,
+            // Circular links for sibling list and fix-list
             sibling_link: CircularLink::new(),
             fix_link: CircularLink::new(),
+            // Traversal fields
             parent: None,
             child: None,
-            rank_count: 0,
             rank_record: None,
+            // Small fields
+            rank_count: 0,
             active: false,
             loss: LOSS_FREE, // Passive nodes ignore this, but initialize to free
+            // Cold path last
+            item,
         })
     }
 

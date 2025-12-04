@@ -51,6 +51,7 @@
 //!   [SIAM](https://epubs.siam.org/doi/10.1137/100785351)
 //! - [Wikipedia: Rank-pairing heap](https://en.wikipedia.org/wiki/Rank-pairing_heap)
 
+use crate::rank::Rank;
 use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError};
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
@@ -91,12 +92,19 @@ impl<T, P> Handle for RankPairingHandle<T, P> {}
 /// Internal node structure for rank-pairing heap
 ///
 /// Each node maintains:
-/// - `item` and `priority`: The data stored in the heap
+/// - `priority`: The priority for heap ordering (hot path - accessed on every comparison)
 /// - `parent`: Weak reference to parent node (None if root)
 /// - `child`: Strong reference to first child (None if leaf)
 /// - `sibling`: Strong reference to next sibling in parent's child list (None if last child)
 /// - `rank`: Explicit rank value (critical for rank constraints)
 /// - `marked`: Flag indicating if node has lost one child (used in cut operations)
+/// - `item`: The data stored in the heap (cold path - only accessed on pop)
+///
+/// **Cache Optimization**: Fields are ordered for cache locality:
+/// - Hot path first: `priority` is accessed on every comparison
+/// - Traversal fields next: pointers for tree navigation
+/// - Small fields: `rank` uses `Rank` (u8) to save 7 bytes, `marked` is bool
+/// - Cold path last: `item` is only accessed when popping
 ///
 /// **Rank**: Explicit rank value computed from children's ranks. Rank constraints
 /// ensure the tree height is O(log n) while allowing efficient updates.
@@ -104,7 +112,7 @@ impl<T, P> Handle for RankPairingHandle<T, P> {}
 /// **Marking**: Similar to Fibonacci heaps, but simpler. A node can lose at most
 /// one child before being cut, maintaining the rank constraints.
 struct Node<T, P> {
-    item: T,
+    /// Priority for heap ordering - Hot path: accessed on every comparison
     priority: P,
     /// Parent node (None if root). Uses weak reference to avoid cycles.
     parent: Option<NodeWeak<T, P>>,
@@ -115,10 +123,13 @@ struct Node<T, P> {
     sibling: Option<NodeRef<T, P>>,
     /// Explicit rank: rank(v) = min(rank(w₁), rank(w₂)) + 1 where w₁, w₂ are
     /// children with smallest ranks. This bounds tree height at O(log n).
-    rank: usize,
+    /// Uses Rank (u8) to save memory - max rank is O(log n) which fits in u8.
+    rank: Rank,
     /// Marked flag (Type-A): false if no child lost, true if one child lost.
     /// After losing two children, the node is cut (cascading).
     marked: bool,
+    /// The item stored in the heap - Cold path: only accessed on pop
+    item: T,
 }
 
 /// Rank-Pairing Heap
@@ -316,13 +327,17 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for RankPairingHeap<T, P> {
     fn push_with_handle(&mut self, priority: P, item: T) -> Self::Handle {
         // Create new node with rank 0 (leaf node, no children)
         let node = Rc::new(RefCell::new(Node {
-            item,
+            // Hot path first
             priority,
+            // Traversal fields
             parent: None,
             child: None,
             sibling: None,
+            // Small fields
             rank: 0,       // Leaf nodes have rank 0
             marked: false, // New nodes are unmarked
+            // Cold path last
+            item,
         }));
 
         // Link new node into the tree structure

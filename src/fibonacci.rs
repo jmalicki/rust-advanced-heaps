@@ -93,16 +93,23 @@ impl<T, P> Handle for FibonacciHandle<T, P> {}
 /// Internal node structure for Fibonacci heap
 ///
 /// Each node maintains:
-/// - `item` and `priority`: The data stored in the heap
+/// - `priority`: The priority for heap ordering (hot path - accessed on every comparison)
 /// - `parent`: Weak reference to parent node (empty if root)
 /// - `children`: Vec of strong references to children
 /// - `marked`: Flag used in cascading cuts (see decrease_key)
+/// - `item`: The data stored in the heap (cold path - only accessed on pop)
+///
+/// **Cache Optimization**: Fields are ordered for cache locality:
+/// - Hot path first: `priority` is accessed on every comparison
+/// - Traversal fields next: pointers for tree navigation
+/// - Small fields: `marked` is bool
+/// - Cold path last: `item` is only accessed when popping
 ///
 /// Children are stored in a Vec rather than a circular linked list.
 /// This simplifies the implementation while maintaining the same
 /// asymptotic complexity (degree is O(log n)).
 struct Node<T, P> {
-    item: T,
+    /// Priority for heap ordering - Hot path: accessed on every comparison
     priority: P,
     /// Weak reference to parent node (empty if this is a root)
     parent: Weak<RefCell<Node<T, P>>>,
@@ -110,6 +117,8 @@ struct Node<T, P> {
     children: Vec<Rc<RefCell<Node<T, P>>>>,
     /// Marked flag: true if this node has lost a child (used in cascading cuts)
     marked: bool,
+    /// The item stored in the heap - Cold path: only accessed on pop
+    item: T,
 }
 
 /// Type alias for a reference-counted node pointer
@@ -118,11 +127,15 @@ type NodeRef<T, P> = Rc<RefCell<Node<T, P>>>;
 impl<T, P> Node<T, P> {
     fn new(item: T, priority: P) -> Self {
         Node {
-            item,
+            // Hot path first
             priority,
+            // Traversal fields
             parent: Weak::new(),
             children: Vec::new(),
+            // Small fields
             marked: false,
+            // Cold path last
+            item,
         }
     }
 
