@@ -29,6 +29,7 @@
 //!   [Cambridge](https://doi.org/10.1017/S095679680000201X)
 //! - [Wikipedia: Skew binomial heap](https://en.wikipedia.org/wiki/Skew_binomial_heap)
 
+use crate::rank::Rank;
 use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError};
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
@@ -64,14 +65,30 @@ impl<T, P> Eq for SkewBinomialHandle<T, P> {}
 
 impl<T, P> Handle for SkewBinomialHandle<T, P> {}
 
+/// Internal node structure for skew binomial heap
+///
+/// **Cache Optimization**: Fields are ordered for cache locality:
+/// - Hot path first: `priority` is accessed on every comparison
+/// - Traversal fields next: pointers for tree navigation
+/// - Small fields: `rank` uses `Rank` (u8) to save 7 bytes, `skew` is bool
+/// - Cold path last: `item` is only accessed when popping
 struct Node<T, P> {
-    item: Option<T>,
+    /// Priority for heap ordering - Hot path: accessed on every comparison
+    /// Uses Option for take() semantics on pop
     priority: Option<P>,
+    /// Parent node - weak reference to avoid cycles
     parent: WeakNodeRef<T, P>,
+    /// First child in child list - strong reference (None if leaf)
     child: OptNodeRef<T, P>,
+    /// Next sibling in parent's child list - strong reference (None if last child)
     sibling: OptNodeRef<T, P>,
-    rank: usize,
+    /// Rank: number of children. Uses Rank (u8) to save memory - max rank is O(log n).
+    rank: Rank,
+    /// Skew flag for skew link operations
     skew: bool,
+    /// The item stored in the heap - Cold path: only accessed on pop
+    /// Uses Option for take() semantics on pop
+    item: Option<T>,
 }
 
 /// Skew Binomial Heap
@@ -116,7 +133,7 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
         let min_ref = self.min.take()?;
 
         // Clear from trees
-        let rank = min_ref.borrow().rank;
+        let rank = min_ref.borrow().rank as usize;
         if rank < self.trees.len() {
             self.trees[rank] = None;
         }
@@ -197,13 +214,17 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for SkewBinomialHeap<T, P> {
 
     fn push_with_handle(&mut self, priority: P, item: T) -> Self::Handle {
         let node = Rc::new(RefCell::new(Node {
-            item: Some(item),
+            // Hot path first
             priority: Some(priority),
+            // Traversal fields
             parent: Weak::new(),
             child: None,
             sibling: None,
+            // Small fields
             rank: 0,
             skew: true,
+            // Cold path last
+            item: Some(item),
         }));
 
         let handle = SkewBinomialHandle {
@@ -335,12 +356,13 @@ impl<T, P: Ord> SkewBinomialHeap<T, P> {
         }
 
         // Get parent's old rank before modifying
-        let parent_old_rank = parent.borrow().rank;
+        let parent_old_rank = parent.borrow().rank as usize;
         let parent_is_root = parent.borrow().parent.upgrade().is_none();
 
         // Update parent's rank (one less child)
         {
-            parent.borrow_mut().rank = parent_old_rank.saturating_sub(1);
+            let mut parent_mut = parent.borrow_mut();
+            parent_mut.rank = parent_mut.rank.saturating_sub(1);
         }
 
         // If parent is a root, it needs to be repositioned in trees
@@ -367,7 +389,7 @@ impl<T, P: Ord> SkewBinomialHeap<T, P> {
 
     fn insert_tree(&mut self, mut tree: NodeRef<T, P>) {
         loop {
-            let rank = tree.borrow().rank;
+            let rank = tree.borrow().rank as usize;
 
             while self.trees.len() <= rank {
                 self.trees.push(None);
