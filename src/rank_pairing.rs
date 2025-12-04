@@ -92,11 +92,21 @@ impl<T, P> Handle for RankPairingHandle<T, P> {}
 ///
 /// Each node maintains:
 /// - `item` and `priority`: The data stored in the heap
-/// - `parent`: Weak reference to parent node (None if root)
+/// - `parent`: Weak reference to actual parent (for cascading cuts)
 /// - `child`: Strong reference to first child (None if leaf)
 /// - `sibling`: Strong reference to next sibling in parent's child list (None if last child)
+/// - `prev`: Weak reference to parent OR previous sibling (for O(1) cuts)
 /// - `rank`: Explicit rank value (critical for rank constraints)
 /// - `marked`: Flag indicating if node has lost one child (used in cut operations)
+///
+/// **Prev Pointer**: The `prev` pointer serves dual purpose:
+/// - For first child: points to parent
+/// - For other children: points to previous sibling
+///
+/// This enables O(1) removal from the sibling list during cuts.
+///
+/// **Parent Pointer**: Always points to the actual parent node.
+/// This is needed for the cascading cut mechanism in Type-A rank-pairing heaps.
 ///
 /// **Rank**: Explicit rank value computed from children's ranks. Rank constraints
 /// ensure the tree height is O(log n) while allowing efficient updates.
@@ -107,12 +117,19 @@ struct Node<T, P> {
     item: T,
     priority: P,
     /// Parent node (None if root). Uses weak reference to avoid cycles.
+    /// Always points to the actual parent, used for cascading cuts.
     parent: Option<NodeWeak<T, P>>,
     /// First child in child list (None if leaf). Uses strong reference (Rc) as parent owns children.
     child: Option<NodeRef<T, P>>,
     /// Next sibling in parent's child list (None if last child).
     /// Uses strong reference (Rc) as earlier siblings own later ones in the list.
     sibling: Option<NodeRef<T, P>>,
+    /// Parent node or previous sibling. Uses weak reference to avoid cycles.
+    /// - For first child: points to parent
+    /// - For other children: points to previous sibling
+    ///
+    /// This dual-purpose pointer enables O(1) cuts from the sibling list.
+    prev: Option<NodeWeak<T, P>>,
     /// Explicit rank: rank(v) = min(rank(w₁), rank(w₂)) + 1 where w₁, w₂ are
     /// children with smallest ranks. This bounds tree height at O(log n).
     rank: usize,
@@ -321,6 +338,7 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for RankPairingHeap<T, P> {
             parent: None,
             child: None,
             sibling: None,
+            prev: None,    // For O(1) cuts
             rank: 0,       // Leaf nodes have rank 0
             marked: false, // New nodes are unmarked
         }));
@@ -499,12 +517,13 @@ impl<T, P: Ord> RankPairingHeap<T, P> {
 
     /// Makes y a child of x, maintaining heap property and rank constraints
     ///
-    /// **Time Complexity**: O(1) amortized (rank update may be O(degree) but amortized to O(1))
+    /// **Time Complexity**: O(1)
     ///
     /// **Algorithm**:
-    /// 1. Set y's parent to x
-    /// 2. Add y to x's child list (as first child)
-    /// 3. Update x's rank based on its children's ranks
+    /// 1. Set y's prev to x (y becomes first child, so prev points to parent)
+    /// 2. Update the old first child's prev to point to y (its new previous sibling)
+    /// 3. Add y to x's child list (as first child)
+    /// 4. Update x's rank based on its children's ranks
     ///
     /// **Rank Update**: After adding y as a child, x's rank must be updated to satisfy
     /// rank constraints: rank(x) ≤ rank(w₁) + 1 and rank(x) ≤ rank(w₂) + 1 where
@@ -513,10 +532,25 @@ impl<T, P: Ord> RankPairingHeap<T, P> {
     /// **Invariant**: This operation maintains the heap property (parent <= child)
     /// and updates ranks to maintain rank constraints.
     fn make_child(x: &NodeRef<T, P>, y: &NodeRef<T, P>) {
-        // Set parent-child relationship
+        // Get the old first child (if any)
+        let old_first_child = x.borrow().child.clone();
+
+        // Set y's parent to x (for cascading cuts)
         y.borrow_mut().parent = Some(Rc::downgrade(x));
-        // Add y to x's child list (insert at front)
-        y.borrow_mut().sibling = x.borrow().child.clone();
+
+        // Set y's prev to x (y is becoming the first child, so prev points to parent)
+        y.borrow_mut().prev = Some(Rc::downgrade(x));
+
+        // Set y's sibling to the old first child
+        y.borrow_mut().sibling = old_first_child.clone();
+
+        // Update the old first child's prev to point to y (its new previous sibling)
+        // Note: The old first child's parent stays pointing to x
+        if let Some(ref old_child) = old_first_child {
+            old_child.borrow_mut().prev = Some(Rc::downgrade(y));
+        }
+
+        // Make y the first child of x
         x.borrow_mut().child = Some(Rc::clone(y));
 
         // Update rank: x's rank must be recomputed based on its children
@@ -525,59 +559,38 @@ impl<T, P: Ord> RankPairingHeap<T, P> {
         Self::update_rank(x);
     }
 
-    /// Updates the rank of a node based on its children's ranks
+    /// Updates the rank of a node based on its first child's rank
     ///
-    /// **Time Complexity**: O(degree) where degree is the number of children
-    /// - Amortized to O(1) over a sequence of operations
+    /// **Time Complexity**: O(1)
     ///
-    /// **Algorithm (Rank Constraint)**:
-    /// For node v with children w₁, w₂, ..., wₖ:
-    /// - Find two children with smallest ranks: r₁ = min(ranks), r₂ = second min(ranks)
-    /// - New rank: rank(v) = max(r₁, r₂) + 1
-    /// - This ensures rank(v) ≤ rank(w₁) + 1 and rank(v) ≤ rank(w₂) + 1
+    /// **Algorithm (Simplified Rank Constraint)**:
+    /// For rank-pairing heaps, when a new child is added (always at the front of
+    /// the child list), the parent's rank is:
+    /// - rank(parent) = max(rank(parent), rank(first_child) + 1)
+    ///
+    /// This is O(1) because we only look at the first child, which is the newly
+    /// added child in make_child operations.
+    ///
+    /// **Why This Works**:
+    /// In our implementation, make_child always adds the new child at the front
+    /// of the child list. The rank only needs to increase if the new child's
+    /// rank + 1 is greater than the current rank. This maintains the invariant
+    /// that rank(parent) >= rank(any_child) + 1 for all children.
     ///
     /// **Special Cases**:
     /// - No children: rank = 0 (leaf node)
-    /// - One child: rank = child_rank + 1
-    /// - Two or more children: rank = max(r₁, r₂) + 1 where r₁, r₂ are smallest two ranks
-    ///
-    /// **Why max(r₁, r₂) + 1?**
-    /// The rank constraint requires rank(v) ≤ rank(w₁) + 1 and rank(v) ≤ rank(w₂) + 1.
-    /// Setting rank(v) = max(r₁, r₂) + 1 satisfies both constraints.
+    /// - With children: rank = max(current_rank, first_child_rank + 1)
     fn update_rank(node: &NodeRef<T, P>) {
         let child_opt = node.borrow().child.clone();
 
         if let Some(child) = child_opt {
-            // Collect all children's ranks
-            // We need to find the two smallest ranks to compute the new rank
-            let mut ranks = Vec::new();
-            let mut current = Some(child);
-
-            // Traverse child list to collect all ranks
-            while let Some(curr) = current {
-                ranks.push(curr.borrow().rank);
-                current = curr.borrow().sibling.clone();
-            }
-
-            // Sort ranks to find smallest two
-            ranks.sort();
-            ranks.reverse(); // Largest first (for easier indexing)
-
-            // Compute rank based on rank constraint
-            // rank(v) = max(r₁, r₂) + 1 where r₁, r₂ are smallest ranks
-            if ranks.len() >= 2 {
-                // Two or more children: use two smallest ranks
-                let r1 = ranks[0]; // Second smallest (largest in reversed list)
-                let r2 = ranks[1]; // Smallest
-                                   // rank(v) = max(r₁, r₂) + 1 satisfies both constraints
-                node.borrow_mut().rank = (r1.max(r2)) + 1;
-            } else if ranks.len() == 1 {
-                // One child: rank = child_rank + 1
-                node.borrow_mut().rank = ranks[0] + 1;
-            } else {
-                // No children (shouldn't happen, but handle gracefully)
-                node.borrow_mut().rank = 0;
-            }
+            // O(1): Only look at the first child's rank
+            let child_rank = child.borrow().rank;
+            let current_rank = node.borrow().rank;
+            // The new rank is the maximum of current rank and first_child_rank + 1
+            // This ensures rank(parent) >= rank(child) + 1 for the new child
+            let new_rank = current_rank.max(child_rank + 1);
+            node.borrow_mut().rank = new_rank;
         } else {
             // Leaf node: rank is 0
             node.borrow_mut().rank = 0;
@@ -589,12 +602,16 @@ impl<T, P: Ord> RankPairingHeap<T, P> {
     /// **Time Complexity**: O(1) amortized (cascading cuts amortized to O(1))
     ///
     /// **Algorithm (Type-A Cascading Cuts)**:
-    /// 1. Remove node from parent's child list
-    /// 2. Clear node's parent and sibling pointers
+    /// 1. Remove node from parent's child list using prev pointer (O(1))
+    /// 2. Clear node's prev and sibling pointers
     /// 3. **Marking rule**: If parent is not marked, mark it
     /// 4. **Cascading**: If parent is already marked, cut it too (cascade upward)
-    /// 5. Update parent's rank after losing a child
-    /// 6. Return all cut nodes so they can be merged with the root
+    /// 5. Return all cut nodes so they can be merged with the root
+    ///
+    /// **O(1) Cut Using Prev Pointer**:
+    /// The prev pointer enables O(1) removal from the sibling list:
+    /// - If prev.child == node, then node is first child (prev is parent)
+    /// - Otherwise, prev.sibling == node (prev is previous sibling)
     ///
     /// **Marking Rule (Type-A)**:
     /// - A node can lose at most one child before being cut
@@ -603,7 +620,7 @@ impl<T, P: Ord> RankPairingHeap<T, P> {
     /// - This maintains rank constraints and bounds tree height
     ///
     /// **Why O(1) amortized?**
-    /// - Most cuts are cheap (cutting near root, parent not marked)
+    /// - Each cut operation is O(1) using the prev pointer
     /// - Cascading cuts are bounded: each node can be cut at most once
     /// - Amortized analysis shows average cascade depth is O(1)
     ///
@@ -611,7 +628,21 @@ impl<T, P: Ord> RankPairingHeap<T, P> {
     /// to be merged with the root.
     #[allow(clippy::only_used_in_recursion)]
     fn cut(&mut self, node: &NodeRef<T, P>) -> Vec<NodeRef<T, P>> {
-        // Get parent (if none, node is already root or orphaned)
+        // Get prev node (if none, node is already root or orphaned)
+        let prev = {
+            let node_ref = node.borrow();
+            match &node_ref.prev {
+                Some(prev_weak) => prev_weak.upgrade(),
+                None => return Vec::new(),
+            }
+        };
+
+        let prev = match prev {
+            Some(p) => p,
+            None => return Vec::new(), // Prev node was already dropped
+        };
+
+        // Get parent directly (O(1) - no need to search)
         let parent = {
             let node_ref = node.borrow();
             match &node_ref.parent {
@@ -625,41 +656,39 @@ impl<T, P: Ord> RankPairingHeap<T, P> {
             None => return Vec::new(), // Parent was already dropped
         };
 
-        // Step 1: Remove node from parent's child list
-        // Check if node is the first child or a later child
-        let is_first_child = parent
+        // Get node's sibling (the next node in the sibling chain)
+        let node_sibling = node.borrow().sibling.clone();
+
+        // Check if prev is the parent (node is first child) or previous sibling
+        // By checking if prev.child == node
+        let is_first_child = prev
             .borrow()
             .child
             .as_ref()
             .map(|c| Rc::ptr_eq(c, node))
             .unwrap_or(false);
 
-        let node_sibling = node.borrow().sibling.clone();
-
+        // Step 1: Remove node from the sibling list (O(1) using prev pointer)
         if is_first_child {
             // Node is first child: parent's first child becomes node's sibling
-            parent.borrow_mut().child = node_sibling;
+            prev.borrow_mut().child = node_sibling.clone();
+            // Update the new first child's prev to point to parent
+            if let Some(ref sibling) = node_sibling {
+                sibling.borrow_mut().prev = Some(Rc::downgrade(&prev));
+            }
         } else {
-            // Node is not first child: find it in sibling chain and remove
-            // This requires traversing the sibling list
-            let mut current = parent.borrow().child.clone();
-            while let Some(curr) = current {
-                let curr_sibling = curr.borrow().sibling.clone();
-                if curr_sibling
-                    .as_ref()
-                    .map(|s| Rc::ptr_eq(s, node))
-                    .unwrap_or(false)
-                {
-                    // Found node: skip it in sibling chain
-                    curr.borrow_mut().sibling = node_sibling.clone();
-                    break;
-                }
-                current = curr_sibling;
+            // Node is not first child: prev is the previous sibling
+            // Update prev's sibling to skip over node
+            prev.borrow_mut().sibling = node_sibling.clone();
+            // Update the next sibling's prev to point to prev
+            if let Some(ref sibling) = node_sibling {
+                sibling.borrow_mut().prev = Some(Rc::downgrade(&prev));
             }
         }
 
-        // Step 2: Clear node's parent and sibling pointers (it's now a root)
+        // Step 2: Clear node's parent, prev and sibling pointers (it's now a root)
         node.borrow_mut().parent = None;
+        node.borrow_mut().prev = None;
         node.borrow_mut().sibling = None;
         node.borrow_mut().marked = false; // Reset mark when cut
 
@@ -674,8 +703,9 @@ impl<T, P: Ord> RankPairingHeap<T, P> {
             // Parent hasn't lost a child yet: mark it
             // Next time it loses a child, it will be cut (cascading)
             parent.borrow_mut().marked = true;
-            // Update parent's rank (it lost a child, rank may decrease)
-            Self::update_rank(&parent);
+            // Note: We don't update rank here. The marking mechanism handles
+            // rank violations - a node can have at most one rank violation
+            // before being cut, which maintains the amortized bounds.
         } else {
             // Parent already marked (has lost one child): cut it now (cascading)
             // This prevents nodes from losing too many children
@@ -694,8 +724,9 @@ impl<T, P: Ord> RankPairingHeap<T, P> {
 
         while let Some(curr) = current {
             let next = curr.borrow().sibling.clone();
-            // Clear parent and sibling pointers (each child becomes a root)
+            // Clear parent, prev and sibling pointers (each child becomes a root)
             curr.borrow_mut().parent = None;
+            curr.borrow_mut().prev = None;
             curr.borrow_mut().sibling = None;
             children.push(curr);
             current = next;
