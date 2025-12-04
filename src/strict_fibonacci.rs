@@ -758,6 +758,427 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
     }
 
     // =========================================================================
+    // Reduction Operations (Phase 3 Part 2)
+    // =========================================================================
+    //
+    // The strict Fibonacci heap maintains worst-case bounds by performing
+    // O(1) "reduction" transformations after each operation. These reductions
+    // use two primitive operations:
+    //
+    // - **cut(y)**: Removes y from its parent's children list, making y a new root
+    // - **link(x, y)**: Given x.key < y.key, cuts y from its parent and makes y
+    //                   a child of x. Active children go leftmost, passive rightmost.
+    //
+    // Three types of reductions are used:
+    //
+    // 1. **Active root reduction**: Link two active roots of the same rank.
+    //    This reduces the number of free nodes (active roots) by 1.
+    //
+    // 2. **Root degree reduction**: Link a passive root with a non-rightmost
+    //    passive child of the root with the smallest key among passive linkable
+    //    roots. This reduces root degree.
+    //
+    // 3. **Loss reduction**: Fix active non-root nodes with high loss by cutting
+    //    and re-linking. One-node and two-node variants exist.
+    //
+    // The pigeonhole principle guarantees that if there are too many violations,
+    // a reduction that makes progress is always available.
+
+    /// Performs an active root reduction if possible.
+    ///
+    /// Finds two active roots (free nodes) with the same rank and links them.
+    /// After linking, one becomes a fixed child (loss = 0) and the other
+    /// becomes an active root with incremented rank.
+    ///
+    /// # Returns
+    ///
+    /// `true` if a reduction was performed, `false` otherwise.
+    ///
+    /// # Time Complexity
+    ///
+    /// O(1) - uses fix-list to find candidates in constant time.
+    #[allow(dead_code)] // Will be used when reductions are integrated
+    fn active_root_reduction(&mut self) -> bool {
+        // We need two active roots of the same rank.
+        // The fix_free_multiple group contains free nodes where there are
+        // 2+ nodes of the same rank. We find a pair from the rank records.
+
+        // For now, scan fix_free_multiple to find a matching pair.
+        // In a full implementation, rank records would track this.
+        let first = match self.fix_free_multiple {
+            Some(ptr) => ptr,
+            None => return false,
+        };
+
+        unsafe {
+            let first_rank = first.as_ref().rank();
+
+            // Find another node with the same rank in fix_free_multiple
+            let ops = CircularListOps::new();
+            let start_link = first.as_ref().fix_link_ptr();
+
+            let mut second: Option<NonNull<Node<T, P>>> = None;
+            ops.for_each(start_link, |link_ptr| {
+                if second.is_some() {
+                    return; // Already found
+                }
+                let node_ptr: *mut Node<T, P> =
+                    container_of_mut!(link_ptr.as_ptr(), Node<T, P>, fix_link);
+                let node = NonNull::new_unchecked(node_ptr);
+
+                // Skip self
+                if node == first {
+                    return;
+                }
+
+                if (*node_ptr).rank() == first_rank {
+                    second = Some(node);
+                }
+            });
+
+            let second = match second {
+                Some(ptr) => ptr,
+                None => return false,
+            };
+
+            // Perform the link: smaller priority becomes parent
+            let (parent, child) = if first.as_ref().priority <= second.as_ref().priority {
+                (first, second)
+            } else {
+                (second, first)
+            };
+
+            // Remove both from fix-list before linking
+            self.fix_list_remove(parent);
+            self.fix_list_remove(child);
+
+            // Remove child from root list
+            self.remove_from_roots(child);
+
+            // Link child under parent
+            self.link_as_active_child(parent, child);
+
+            // Child becomes fixed with loss = 0
+            (*child.as_ptr()).loss = 0;
+
+            // Parent remains free (active root) but with rank + 1
+            // Re-add parent to fix-list (it may move between groups based on rank)
+            self.fix_list_add(parent);
+        }
+
+        true
+    }
+
+    /// Performs a root degree reduction if possible.
+    ///
+    /// Links a passive root x with a non-rightmost passive child y of another
+    /// passive root z (where z.key is minimum among passive linkable roots).
+    /// This reduces the root degree.
+    ///
+    /// # Returns
+    ///
+    /// `true` if a reduction was performed, `false` otherwise.
+    ///
+    /// # Time Complexity
+    ///
+    /// O(1) - uses fix-list passive group for O(1) access.
+    #[allow(dead_code)] // Will be used when reductions are integrated
+    fn root_degree_reduction(&mut self) -> bool {
+        // For root degree reduction, we need:
+        // 1. A passive root x
+        // 2. Another passive root z with a non-rightmost passive child y
+        // 3. Link x and y
+
+        // For this phase, we implement a simplified version that finds
+        // any two linkable passive roots and links them.
+
+        let x = match self.fix_passive {
+            Some(ptr) => ptr,
+            None => return false,
+        };
+
+        unsafe {
+            // Find another passive root
+            let ops = CircularListOps::new();
+            let start_link = x.as_ref().fix_link_ptr();
+
+            let mut z: Option<NonNull<Node<T, P>>> = None;
+            ops.for_each(start_link, |link_ptr| {
+                if z.is_some() {
+                    return;
+                }
+                let node_ptr: *mut Node<T, P> =
+                    container_of_mut!(link_ptr.as_ptr(), Node<T, P>, fix_link);
+                let node = NonNull::new_unchecked(node_ptr);
+
+                if node != x && (*node_ptr).is_passive() && (*node_ptr).parent.is_none() {
+                    z = Some(node);
+                }
+            });
+
+            let z = match z {
+                Some(ptr) => ptr,
+                None => return false,
+            };
+
+            // Link x under z (or z under x, depending on priority)
+            let (parent, child) = if x.as_ref().priority <= z.as_ref().priority {
+                (x, z)
+            } else {
+                (z, x)
+            };
+
+            // Remove both from fix-list
+            self.fix_list_remove(parent);
+            self.fix_list_remove(child);
+
+            // Remove child from root list
+            self.remove_from_roots(child);
+
+            // Link as passive child (rightmost)
+            self.link_as_passive_child(parent, child);
+        }
+
+        true
+    }
+
+    /// Links a node as an active child (leftmost) of a parent.
+    ///
+    /// Active children are placed at the left end of the children list.
+    ///
+    /// # Safety
+    ///
+    /// Both pointers must be valid and child must not already be in parent's
+    /// children list.
+    #[allow(dead_code)] // Will be used when reductions are integrated
+    unsafe fn link_as_active_child(
+        &mut self,
+        parent_ptr: NonNull<Node<T, P>>,
+        child_ptr: NonNull<Node<T, P>>,
+    ) {
+        let ops = CircularListOps::new();
+        let parent = parent_ptr.as_ptr();
+        let child = child_ptr.as_ptr();
+
+        // Set child's parent
+        (*child).parent = Some(parent_ptr);
+
+        let child_link = (*child).sibling_link_ptr();
+
+        match (*parent).child {
+            None => {
+                // First child
+                ops.make_circular(child_link);
+                (*parent).child = Some(child_ptr);
+            }
+            Some(first_child_ptr) => {
+                // Insert before the current first child (leftmost position)
+                let first_child_link = first_child_ptr.as_ref().sibling_link_ptr();
+                ops.insert_before(first_child_link, child_link);
+                // Update parent's child pointer to the new leftmost
+                (*parent).child = Some(child_ptr);
+            }
+        }
+
+        // Increment parent's rank
+        (*parent).rank_count += 1;
+    }
+
+    /// Links a node as a passive child (rightmost) of a parent.
+    ///
+    /// Passive children are placed at the right end of the children list.
+    ///
+    /// # Safety
+    ///
+    /// Both pointers must be valid and child must not already be in parent's
+    /// children list.
+    #[allow(dead_code)] // Will be used when reductions are integrated
+    unsafe fn link_as_passive_child(
+        &mut self,
+        parent_ptr: NonNull<Node<T, P>>,
+        child_ptr: NonNull<Node<T, P>>,
+    ) {
+        let ops = CircularListOps::new();
+        let parent = parent_ptr.as_ptr();
+        let child = child_ptr.as_ptr();
+
+        // Set child's parent
+        (*child).parent = Some(parent_ptr);
+
+        let child_link = (*child).sibling_link_ptr();
+
+        match (*parent).child {
+            None => {
+                // First child
+                ops.make_circular(child_link);
+                (*parent).child = Some(child_ptr);
+            }
+            Some(first_child_ptr) => {
+                // Insert after the last child (rightmost position)
+                // In a circular list, last is prev of first
+                let first_child_link = first_child_ptr.as_ref().sibling_link_ptr();
+                // insert_before inserts just before the given node,
+                // which is the same as inserting after the last (prev) node
+                ops.insert_before(first_child_link, child_link);
+                // Child pointer stays at first_child (leftmost), child is rightmost
+            }
+        }
+
+        // Passive children don't increment rank (only active children count)
+    }
+
+    /// Adds a node to the appropriate fix-list group based on its state.
+    ///
+    /// Fix-list groups are ordered:
+    /// - passive: passive nodes
+    /// - free_multiple: free nodes with 2+ nodes of same rank
+    /// - free_single: free nodes with unique rank
+    /// - loss_zero: fixed nodes with loss = 0
+    /// - loss_one_multiple: fixed nodes with loss = 1 and 2+ same rank
+    /// - loss_one_single: fixed nodes with loss = 1 with unique rank
+    /// - loss_two: fixed nodes with loss >= 2
+    ///
+    /// # Safety
+    ///
+    /// The node must be valid and not already in the fix-list.
+    #[allow(dead_code)] // Will be used when reductions are integrated
+    fn fix_list_add(&mut self, node_ptr: NonNull<Node<T, P>>) {
+        let ops = CircularListOps::new();
+
+        unsafe {
+            let node = node_ptr.as_ptr();
+            let node_link = (*node).fix_link_ptr();
+
+            // Determine which group this node belongs to
+            let group_ptr = if (*node).is_passive() {
+                &mut self.fix_passive
+            } else if (*node).is_free() {
+                // TODO: Check if there's another free node of same rank
+                // For now, add to free_single; we'll refine this with rank tracking
+                &mut self.fix_free_single
+            } else {
+                // Node is fixed
+                let loss = (*node).loss;
+                if loss == 0 {
+                    &mut self.fix_loss_zero
+                } else if loss == 1 {
+                    // TODO: Check if there's another loss=1 node of same rank
+                    &mut self.fix_loss_one_single
+                } else {
+                    &mut self.fix_loss_two
+                }
+            };
+
+            match *group_ptr {
+                None => {
+                    // First node in this group
+                    ops.make_circular(node_link);
+                    *group_ptr = Some(node_ptr);
+                }
+                Some(head_ptr) => {
+                    // Insert into existing group's circular list
+                    let head_link = head_ptr.as_ref().fix_link_ptr();
+                    ops.insert_after(head_link, node_link);
+                }
+            }
+        }
+    }
+
+    /// Removes a node from its current fix-list group.
+    ///
+    /// # Safety
+    ///
+    /// The node must be valid and currently in the fix-list.
+    #[allow(dead_code)] // Will be used when reductions are integrated
+    fn fix_list_remove(&mut self, node_ptr: NonNull<Node<T, P>>) {
+        let ops = CircularListOps::new();
+
+        unsafe {
+            let node = node_ptr.as_ptr();
+            let node_link = (*node).fix_link_ptr();
+
+            // Determine which group this node is in
+            let group_ptr = if (*node).is_passive() {
+                &mut self.fix_passive
+            } else if (*node).is_free() {
+                // Check both free groups
+                if self.fix_free_multiple == Some(node_ptr)
+                    || self.is_in_fix_group(node_ptr, self.fix_free_multiple)
+                {
+                    &mut self.fix_free_multiple
+                } else {
+                    &mut self.fix_free_single
+                }
+            } else {
+                // Node is fixed
+                let loss = (*node).loss;
+                if loss == 0 {
+                    &mut self.fix_loss_zero
+                } else if loss == 1 {
+                    if self.fix_loss_one_multiple == Some(node_ptr)
+                        || self.is_in_fix_group(node_ptr, self.fix_loss_one_multiple)
+                    {
+                        &mut self.fix_loss_one_multiple
+                    } else {
+                        &mut self.fix_loss_one_single
+                    }
+                } else {
+                    &mut self.fix_loss_two
+                }
+            };
+
+            // Check if this is the only node in the group
+            let next_link = ops.next(node_link);
+            if next_link == Some(node_link) {
+                // Only node in group
+                ops.unlink(node_link);
+                *group_ptr = None;
+            } else {
+                // Multiple nodes in group
+                if *group_ptr == Some(node_ptr) {
+                    // Update group head to next node
+                    let next_node_ptr: *mut Node<T, P> =
+                        container_of_mut!(next_link.unwrap().as_ptr(), Node<T, P>, fix_link);
+                    *group_ptr = Some(NonNull::new_unchecked(next_node_ptr));
+                }
+                ops.unlink(node_link);
+            }
+        }
+    }
+
+    /// Helper to check if a node is in a specific fix-list group.
+    #[allow(dead_code)]
+    fn is_in_fix_group(
+        &self,
+        node_ptr: NonNull<Node<T, P>>,
+        group_head: Option<NonNull<Node<T, P>>>,
+    ) -> bool {
+        let head = match group_head {
+            Some(h) => h,
+            None => return false,
+        };
+
+        let ops = CircularListOps::new();
+        let mut found = false;
+
+        unsafe {
+            let start_link = head.as_ref().fix_link_ptr();
+            ops.for_each(start_link, |link_ptr| {
+                if found {
+                    return;
+                }
+                let current: *mut Node<T, P> =
+                    container_of_mut!(link_ptr.as_ptr(), Node<T, P>, fix_link);
+                if NonNull::new_unchecked(current) == node_ptr {
+                    found = true;
+                }
+            });
+        }
+
+        found
+    }
+
+    // =========================================================================
     // Debug assertions
     // =========================================================================
 
