@@ -45,6 +45,7 @@
 //!   [ACM DL](https://dl.acm.org/doi/10.1145/359460.359478)
 //! - [Wikipedia: Binomial heap](https://en.wikipedia.org/wiki/Binomial_heap)
 
+use crate::rank::Rank;
 use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError};
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
@@ -95,11 +96,12 @@ impl<T, P> Handle for BinomialHandle<T, P> {}
 /// Internal node structure for binomial heap
 ///
 /// Each node maintains:
-/// - `item` and `priority`: The data stored in the heap
+/// - `priority`: The priority for heap ordering (hot path - accessed on every comparison)
 /// - `parent`: Weak reference to parent node (None if root)
 /// - `child`: Strong reference to first child (None if leaf)
 /// - `sibling`: Strong reference to next sibling in parent's child list (None if last child)
 /// - `degree`: Number of children (critical for merge operations)
+/// - `item`: The data stored in the heap (cold path - only accessed on pop)
 ///
 /// **Memory Model**: Strong references flow from roots downward (child, sibling).
 /// Weak references flow upward (parent) to avoid reference cycles.
@@ -107,8 +109,14 @@ impl<T, P> Handle for BinomialHandle<T, P> {}
 /// **Binomial Tree Structure**: Nodes form binomial trees where a node of degree k
 /// has exactly k children with degrees 0, 1, 2, ..., k-1. This ensures the tree
 /// has exactly 2ᵏ nodes.
+///
+/// **Cache Optimization**: Fields are ordered for cache locality:
+/// - Hot path first: `priority` is accessed on every comparison
+/// - Traversal fields next: pointers for tree navigation
+/// - Small fields: `degree` uses `Rank` (u8) to save 7 bytes
+/// - Cold path last: `item` is only accessed when popping
 struct Node<T, P> {
-    item: T,
+    /// Priority for heap ordering - Hot path: accessed on every comparison
     priority: P,
     /// Parent node - weak reference to avoid cycles (None if root)
     parent: Option<WeakNodeRef<T, P>>,
@@ -116,8 +124,11 @@ struct Node<T, P> {
     child: NodePtr<T, P>,
     /// Next sibling in parent's child list - strong reference (None if last child)
     sibling: NodePtr<T, P>,
-    /// Degree: number of children. A binomial tree Bₖ has root degree k and 2ᵏ nodes
-    degree: usize,
+    /// Degree: number of children. A binomial tree Bₖ has root degree k and 2ᵏ nodes.
+    /// Uses Rank (u8) to save memory - max degree is O(log n) which fits in u8.
+    degree: Rank,
+    /// The item stored in the heap - Cold path: only accessed on pop
+    item: T,
 }
 
 /// Binomial Heap
@@ -311,12 +322,16 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for BinomialHeap<T, P> {
     fn push_with_handle(&mut self, priority: P, item: T) -> Self::Handle {
         // Create new single-node tree (B₀ tree, degree 0)
         let node = Rc::new(RefCell::new(Node {
-            item,
+            // Hot path first
             priority,
+            // Traversal fields
             parent: None,
             child: None,
             sibling: None,
+            // Small fields
             degree: 0,
+            // Cold path last
+            item,
         }));
 
         // Create handle (weak reference) before we move node into carry propagation
@@ -431,7 +446,7 @@ impl<T, P: Ord> BinomialHeap<T, P> {
             for child_node in children {
                 let mut node_to_add = child_node;
                 loop {
-                    let degree = node_to_add.borrow().degree;
+                    let degree = node_to_add.borrow().degree as usize;
 
                     // Ensure child_heap.trees array is large enough
                     while child_heap.trees.len() <= degree {
@@ -565,7 +580,7 @@ impl<T, P: Ord> BinomialHeap<T, P> {
                 let b = trees.pop().unwrap();
                 let linked = self.link_trees(a, b);
 
-                let linked_degree = linked.borrow().degree;
+                let linked_degree = linked.borrow().degree as usize;
                 if linked_degree == degree + 1 {
                     // Linked tree has degree+1: it becomes carry for next degree
                     carry = Some(linked);
@@ -577,7 +592,7 @@ impl<T, P: Ord> BinomialHeap<T, P> {
 
             // Step 4: Place remaining tree (if any) at this degree slot
             if let Some(tree) = trees.pop() {
-                let tree_degree = tree.borrow().degree;
+                let tree_degree = tree.borrow().degree as usize;
                 if tree_degree == degree {
                     self.trees[degree] = Some(tree);
                 } else {
@@ -588,7 +603,7 @@ impl<T, P: Ord> BinomialHeap<T, P> {
 
         // Step 5: Handle final carry
         if let Some(c) = carry {
-            let degree = c.borrow().degree;
+            let degree = c.borrow().degree as usize;
             while self.trees.len() <= degree {
                 self.trees.push(None);
             }
@@ -652,7 +667,7 @@ impl<T, P: Ord> BinomialHeap<T, P> {
         // because the degree changed but the slot didn't
         if did_swap && current.borrow().parent.is_none() {
             // Current is a root - find it in trees and move to correct slot
-            let current_degree = current.borrow().degree;
+            let current_degree = current.borrow().degree as usize;
 
             // Find and remove current from its old slot
             let mut old_slot = None;
@@ -682,7 +697,7 @@ impl<T, P: Ord> BinomialHeap<T, P> {
                         if let Some(existing) = self.trees[target_degree].take() {
                             // Conflict - merge and try next slot
                             tree_to_place = self.link_trees(tree_to_place, existing);
-                            target_degree = tree_to_place.borrow().degree;
+                            target_degree = tree_to_place.borrow().degree as usize;
                             while self.trees.len() <= target_degree {
                                 self.trees.push(None);
                             }

@@ -90,16 +90,22 @@ impl<T, P> Handle for PairingHandle<T, P> {}
 /// Internal node structure for pairing heap
 ///
 /// Each node maintains:
-/// - `item` and `priority`: The data stored in the heap
+/// - `priority`: The priority for heap ordering (hot path - accessed on every comparison)
 /// - `child`: Strong reference to the first child in the child list
 /// - `sibling`: Strong reference to the next sibling in the parent's child list
 /// - `prev`: Weak reference to parent or previous sibling (backlink for efficient cutting)
+/// - `item`: The data stored in the heap (cold path - only accessed on pop)
+///
+/// **Cache Optimization**: Fields are ordered for cache locality:
+/// - Hot path first: `priority` is accessed on every comparison
+/// - Traversal fields next: pointers for tree navigation
+/// - Cold path last: `item` is only accessed when popping
 ///
 /// The structure forms a multi-way tree where children are linked via sibling pointers.
 /// Strong references flow downward (parent to child), weak references point upward (child to parent).
 /// This prevents reference cycles while allowing O(1) insertion and merging.
 struct Node<T, P> {
-    item: T,
+    /// Priority for heap ordering - Hot path: accessed on every comparison
     priority: P,
     /// First child in the child list. None if this node is a leaf.
     /// Uses strong reference (Rc) as parent owns children.
@@ -113,6 +119,8 @@ struct Node<T, P> {
     /// - Efficiently removing nodes from child lists
     /// - Maintaining bidirectional links for O(1) updates
     prev: Option<NodeWeak<T, P>>,
+    /// The item stored in the heap - Cold path: only accessed on pop
+    item: T,
 }
 
 /// Pairing Heap
@@ -324,11 +332,14 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for PairingHeap<T, P> {
     fn push_with_handle(&mut self, priority: P, item: T) -> Self::Handle {
         // Create new node with no children or siblings yet
         let node = Rc::new(RefCell::new(Node {
-            item,
+            // Hot path first
             priority,
+            // Traversal fields
             child: None,
             sibling: None,
             prev: None,
+            // Cold path last
+            item,
         }));
 
         // Link new node into the tree structure
