@@ -25,12 +25,12 @@ priority updates. Requires `DecreaseKeyHeap` trait.
 **Lazy Dijkstra** (`_lazy` suffix): Uses re-insertion instead of `decrease_key`.
 Works with any `Heap` trait implementation.
 
-| Heap              | `decrease_key`     | Variants   | Why Include                            |
-| ----------------- | ------------------ | ---------- | -------------------------------------- |
-| **Fibonacci**     | O(1) amortized     | opt, lazy  | Optimal theoretical bounds             |
-| **Pairing**       | o(log n) amortized | opt, lazy  | Simpler, often faster in practice      |
-| **Rank-Pairing**  | O(1) amortized     | opt, lazy  | Optimal bounds, simpler than Fibonacci |
-| **Simple Binary** | N/A                | lazy only  | Baseline comparison                    |
+| Heap | `decrease_key` | Variants | Why Include |
+| --- | --- | --- | --- |
+| **Fibonacci** | O(1) amortized | opt, lazy | Optimal theoretical bounds |
+| **Pairing** | o(log n) amortized | opt, lazy | Simpler, often faster in practice |
+| **Rank-Pairing** | O(1) amortized | opt, lazy | Optimal bounds, simpler than Fibonacci |
+| **Simple Binary** | N/A | lazy only | Baseline comparison |
 
 This allows comparing:
 
@@ -129,12 +129,12 @@ cargo bench-quick                     # Quick random queries only
 
 The project includes convenient cargo aliases in `.cargo/config.toml`:
 
-| Alias                   | Description                                        |
-| ----------------------- | -------------------------------------------------- |
-| `cargo bench-all`       | Run all benchmarks                                 |
+| Alias | Description |
+| --- | --- |
+| `cargo bench-all` | Run all benchmarks |
 | `cargo bench-synthetic` | Run only synthetic benchmarks (no download needed) |
-| `cargo bench-dimacs`    | Run only real DIMACS benchmarks                    |
-| `cargo bench-quick`     | Quick benchmark with random queries only           |
+| `cargo bench-dimacs` | Run only real DIMACS benchmarks |
+| `cargo bench-quick` | Quick benchmark with random queries only |
 
 ## Benchmark Groups
 
@@ -148,11 +148,11 @@ graph. This is the DIMACS-standard way to measure average query performance.
 Groups queries by Dijkstra rank (number of nodes settled before reaching
 target), following Sanders/Schultes methodology:
 
-| Rank | Meaning                             |
-| ---- | ----------------------------------- |
-| 2^10 | ~1K nodes settled (local queries)   |
-| 2^12 | ~4K nodes settled                   |
-| 2^14 | ~16K nodes settled (long-distance)  |
+| Rank | Meaning |
+| --- | --- |
+| 2^10 | ~1K nodes settled (local queries) |
+| 2^12 | ~4K nodes settled |
+| 2^14 | ~16K nodes settled (long-distance) |
 
 This shows how heap performance varies with query difficulty. Local queries
 (low rank) may favor simpler heaps, while long-distance queries (high rank)
@@ -189,14 +189,14 @@ Download road network datasets from the
 
 The `data/` directory is git-ignored. Available datasets:
 
-| Dataset        | Nodes | Edges | Description       |
-| -------------- | ----- | ----- | ----------------- |
-| USA-road-d.NY  | 264K  | 730K  | New York          |
-| USA-road-d.BAY | 321K  | 800K  | San Francisco Bay |
-| USA-road-d.COL | 436K  | 1M    | Colorado          |
-| USA-road-d.FLA | 1.1M  | 2.7M  | Florida           |
-| USA-road-d.NE  | 1.5M  | 3.9M  | Northeast USA     |
-| USA-road-d.CAL | 1.9M  | 4.7M  | California/Nevada |
+| Dataset | Nodes | Edges | Description |
+| --- | --- | --- | --- |
+| USA-road-d.NY | 264K | 730K | New York |
+| USA-road-d.BAY | 321K | 800K | San Francisco Bay |
+| USA-road-d.COL | 436K | 1M | Colorado |
+| USA-road-d.FLA | 1.1M | 2.7M | Florida |
+| USA-road-d.NE | 1.5M | 3.9M | Northeast USA |
+| USA-road-d.CAL | 1.9M | 4.7M | California/Nevada |
 
 ## DIMACS Format
 
@@ -276,12 +276,12 @@ Criterion reports:
 
 Based on theoretical complexity and typical benchmarks:
 
-| Query Type       | Expected Winner        | Why                                       |
-| ---------------- | ---------------------- | ----------------------------------------- |
-| Local (low rank) | Pairing                | Lower constant factors dominate           |
-| Long-distance    | Rank-Pairing/Fibonacci | O(1) `decrease_key` pays off              |
-| Small graphs     | Pairing                | Overhead of advanced heaps not amortized  |
-| Large graphs     | Rank-Pairing           | Best balance of theory and practice       |
+| Query Type | Expected Winner | Why |
+| --- | --- | --- |
+| Local (low rank) | Pairing | Lower constant factors dominate |
+| Long-distance | Rank-Pairing/Fibonacci | O(1) `decrease_key` pays off |
+| Small graphs | Pairing | Overhead of advanced heaps not amortized |
+| Large graphs | Rank-Pairing | Best balance of theory and practice |
 
 ### Viewing Reports
 

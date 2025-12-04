@@ -1,3 +1,8 @@
+# Build settings for benchmarks
+# Use native CPU features for maximum performance
+[build]
+rustflags = ["-C", "target-cpu=native"]
+
 # Cargo aliases for convenience
 [alias]
 # Download DIMACS benchmark data (requires: cargo install cargo-cmd)

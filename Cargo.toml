@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/intrusive-circular-list"]
+members = [".", "crates/intrusive-circular-list", "crates/perf-measurement"]
 
 [package]
 name = "rust-advanced-heaps"
@@ -16,6 +16,9 @@ categories = ["data-structures", "algorithms"]
 # Enable expensive O(n) invariant verification checks. Only use for debugging specific issues.
 # These checks significantly slow down all heap operations.
 expensive_verify = []
+# Enable hardware performance counter benchmarks (Linux only)
+# The feature flag controls which measurement type is used in benchmarks
+perf-counters = []
 # Enable experimental arena-based storage using slotmap for better cache locality.
 # This provides alternative heap types with *Arena suffix (e.g., SkewBinomialHeapArena).
 arena-storage = ["slotmap"]
@@ -34,15 +37,36 @@ slotmap = { version = "1.0", optional = true }
 
 [dev-dependencies]
 proptest = "1.4"
-criterion = "0.5"
+criterion = "0.8"
 big-o-test = "0.2"
 ctor = "0.2"
 parking_lot = "0.12"
+# CPU pinning for more stable benchmarks
+core_affinity = "0.8"
+
+# Hardware performance counters for benchmarks (Linux only)
+# Use with: cargo bench --features perf-counters
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+perf-measurement = { path = "crates/perf-measurement" }
+perf-event = "0.4"
 
 [[bench]]
 name = "dimacs_benchmark"
 harness = false
 
+[[bench]]
+name = "perf_benchmark"
+harness = false
+
+[[bench]]
+name = "perf_table"
+harness = false
+
 # Commands for cargo-cmd (install with: cargo install cargo-cmd)
 [package.metadata.commands]
 download-dimacs = "./scripts/download-dimacs.sh"
+
+# Maximum optimization for benchmarks
+[profile.bench]
+lto = "thin"
+codegen-units = 1

@@ -30,7 +30,7 @@
 //! - Line 'p sp n m' defines problem: n nodes, m edges
 //! - Lines 'a u v w' define edge from node u to node v with weight w
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use rust_advanced_heaps::binomial::BinomialHeap;
 use rust_advanced_heaps::fibonacci::FibonacciHeap;
 use rust_advanced_heaps::hollow::HollowHeap;
@@ -44,6 +44,7 @@ use rust_advanced_heaps::strict_fibonacci::StrictFibonacciHeap;
 use rust_advanced_heaps::twothree::TwoThreeHeap;
 use std::collections::HashMap;
 use std::fs::File;
+use std::hint::black_box;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::sync::Arc;
