@@ -10,7 +10,7 @@ project.
 2. **Test coverage** - Expand test coverage, especially edge cases and
    property-based testing
 3. **Documentation** - Improve API documentation, examples, and explanations
-4. **Additional heap variants** - Skew heap, Leftist heap, Brodal queue, etc.
+4. **Additional heap variants** - Skew heap, Leftist heap, etc.
 
 ## Development Setup
 
