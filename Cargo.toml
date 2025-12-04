@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/intrusive-circular-list"]
+members = [".", "crates/intrusive-circular-list", "crates/optlike"]
 
 [package]
 name = "rust-advanced-heaps"
