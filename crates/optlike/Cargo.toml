@@ -1,0 +1,13 @@
+[package]
+name = "optlike"
+version = "0.1.0"
+edition = "2021"
+description = "Option-like storage with pluggable strategies for sentinel-based optimization"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+
+[features]
+default = []
+
+[dependencies]
+nonmax = "0.5"
