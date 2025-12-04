@@ -29,7 +29,18 @@ use criterion::{
     Throughput,
 };
 use perf_event::{events::Hardware, Builder, Counter, Group};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
+
+// Thread-local accumulators for printing summary after each benchmark
+// We accumulate across iterations and print periodically
+thread_local! {
+    static ITER_COUNT: AtomicU64 = const { AtomicU64::new(0) };
+    static TOTAL_INSTRUCTIONS: AtomicU64 = const { AtomicU64::new(0) };
+    static TOTAL_CYCLES: AtomicU64 = const { AtomicU64::new(0) };
+    static TOTAL_CACHE_REFS: AtomicU64 = const { AtomicU64::new(0) };
+    static TOTAL_CACHE_MISSES: AtomicU64 = const { AtomicU64::new(0) };
+}
 
 /// Holds multiple perf counter values measured simultaneously.
 #[derive(Clone, Debug, Default)]
@@ -166,17 +177,49 @@ impl Measurement for PerfMultiMeasurement {
             .read()
             .expect("Failed to read perf group");
 
-        MultiValue {
-            duration,
-            counters: PerfCounters {
-                instructions: counts[&intermediate.instructions],
-                cycles: counts[&intermediate.cycles],
-                branches: counts[&intermediate.branches],
-                branch_misses: counts[&intermediate.branch_misses],
-                cache_refs: counts[&intermediate.cache_refs],
-                cache_misses: counts[&intermediate.cache_misses],
-            },
-        }
+        let counters = PerfCounters {
+            instructions: counts[&intermediate.instructions],
+            cycles: counts[&intermediate.cycles],
+            branches: counts[&intermediate.branches],
+            branch_misses: counts[&intermediate.branch_misses],
+            cache_refs: counts[&intermediate.cache_refs],
+            cache_misses: counts[&intermediate.cache_misses],
+        };
+
+        // Accumulate stats and print summary periodically
+        ITER_COUNT.with(|c| {
+            let count = c.fetch_add(1, Ordering::Relaxed) + 1;
+            TOTAL_INSTRUCTIONS.with(|i| i.fetch_add(counters.instructions, Ordering::Relaxed));
+            TOTAL_CYCLES.with(|cy| cy.fetch_add(counters.cycles, Ordering::Relaxed));
+            TOTAL_CACHE_REFS.with(|r| r.fetch_add(counters.cache_refs, Ordering::Relaxed));
+            TOTAL_CACHE_MISSES.with(|m| m.fetch_add(counters.cache_misses, Ordering::Relaxed));
+
+            // Print summary every 10 iterations (covers warmup + measurement)
+            if count % 10 == 0 {
+                let total_instr = TOTAL_INSTRUCTIONS.with(|i| i.swap(0, Ordering::Relaxed));
+                let total_cycles = TOTAL_CYCLES.with(|cy| cy.swap(0, Ordering::Relaxed));
+                let total_refs = TOTAL_CACHE_REFS.with(|r| r.swap(0, Ordering::Relaxed));
+                let total_misses = TOTAL_CACHE_MISSES.with(|m| m.swap(0, Ordering::Relaxed));
+                c.store(0, Ordering::Relaxed);
+
+                let ipc = if total_cycles > 0 {
+                    total_instr as f64 / total_cycles as f64
+                } else {
+                    0.0
+                };
+                let miss_rate = if total_refs > 0 {
+                    total_misses as f64 / total_refs as f64 * 100.0
+                } else {
+                    0.0
+                };
+                eprintln!(
+                    "    [perf avg: IPC={:.2}, cache_miss={:.1}%]",
+                    ipc, miss_rate
+                );
+            }
+        });
+
+        MultiValue { duration, counters }
     }
 
     fn add(&self, v1: &Self::Value, v2: &Self::Value) -> Self::Value {

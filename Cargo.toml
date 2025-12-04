@@ -43,6 +43,7 @@ core_affinity = "0.8"
 # Use with: cargo bench --features perf-counters
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 perf-measurement = { path = "crates/perf-measurement" }
+perf-event = "0.4"
 
 [[bench]]
 name = "dimacs_benchmark"
@@ -50,6 +51,10 @@ harness = false
 
 [[bench]]
 name = "perf_benchmark"
+harness = false
+
+[[bench]]
+name = "perf_table"
 harness = false
 
 # Commands for cargo-cmd (install with: cargo install cargo-cmd)

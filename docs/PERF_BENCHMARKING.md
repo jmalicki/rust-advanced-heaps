@@ -1,211 +1,200 @@
 # Performance Counter Benchmarking
 
-This document explores options for integrating hardware performance counters
-(cache misses, branch mispredictions, etc.) into the heap benchmarking suite.
+This document describes the hardware performance counter benchmarking infrastructure
+and presents results from Dijkstra shortest-path benchmarks.
 
-## Motivation
+## Overview
 
-Wall-clock time benchmarks (via Criterion) tell us *how fast* each heap is, but
-not *why*. Hardware counters can reveal:
+The benchmarks measure heap performance in a realistic pathfinding workload using
+Dijkstra's algorithm on synthetic sparse graphs. We capture:
 
-- **Cache misses**: L1/L2/L3 data cache misses indicate poor memory locality
-- **Branch mispredictions**: High misprediction rates suggest unpredictable
-  control flow
-- **Instructions per cycle (IPC)**: Low IPC often indicates memory stalls
-- **TLB misses**: Page table overhead from scattered memory access
+- **Wall-clock time**: Total execution time
+- **IPC (Instructions Per Cycle)**: CPU efficiency (higher = better)
+- **LLC Miss Rate**: Last-Level Cache (L3) miss percentage
 
-For heap data structures, cache behavior is often the dominant factor. Heaps
-like Fibonacci and Hollow use pointer-chasing which can cause poor cache
-locality, while array-based heaps (binary heap) have better spatial locality.
-
-## Options Evaluated
-
-### 1. iai-callgrind (Recommended for CI)
-
-**Pros:**
-
-- Deterministic instruction counts (no noise)
-- Works in virtualized CI environments
-- Measures cache simulation via Callgrind
-- Generates flamegraphs for detailed analysis
-- Stable, well-maintained fork of iai
-
-**Cons:**
-
-- Uses Valgrind simulation, not real hardware counters
-- Slower than native execution (10-50x)
-- Linux-only (no Windows/macOS)
-- Cache simulation may not match real CPU behavior exactly
-
-**Best for:** CI regression detection, consistent cross-system comparisons
-
-### 2. perf-event / perf-event2 (Recommended for Local Analysis)
-
-**Pros:**
-
-- Real hardware counters via Linux perf_event_open
-- Measures actual cache misses, branch mispredictions
-- Low overhead when counters are running
-- Can measure any perf event the CPU supports
-
-**Cons:**
-
-- Linux-only
-- Requires permissions (CAP_PERFMON or perf_event_paranoid <= 1)
-- Results vary between runs due to system noise
-- Not integrated with Criterion directly
-
-**Best for:** Deep local analysis, understanding *why* something is slow
-
-### 3. perfcnt Crate
-
-Similar to perf-event but older API. perf-event2 is more actively maintained.
-
-### 4. Criterion with External Profiling
-
-Run Criterion benchmarks under `perf stat` or `perf record`:
-
-```bash
-perf stat -e cache-misses,cache-references,branches,branch-misses \
-    cargo bench -- --bench dimacs_benchmark
-```
-
-**Pros:** No code changes needed
-**Cons:** Measures entire benchmark including setup/teardown
-
-## Recommended Approach
-
-### Phase 1: Add perf-event Feature (Local Analysis)
-
-Add an optional feature that enables hardware counter collection during
-benchmarks. This won't replace Criterion but will provide additional metrics.
-
-```toml
-[features]
-perf-counters = ["perf-event2"]
-
-[target.'cfg(target_os = "linux")'.dependencies]
-perf-event2 = { version = "0.7", optional = true }
-```
-
-### Phase 2: Add iai-callgrind Benchmarks (CI)
-
-Create a separate benchmark file using iai-callgrind for instruction-level
-metrics that can run in CI:
-
-```toml
-[dev-dependencies]
-iai-callgrind = "0.14"
-
-[[bench]]
-name = "heap_iai"
-harness = false
-```
-
-### Phase 3: Custom Perf Harness
-
-Create a custom benchmark harness that wraps operations with perf counters:
-
-```rust
-#[cfg(feature = "perf-counters")]
-pub fn measure_with_perf<F, R>(f: F) -> (R, PerfMetrics)
-where
-    F: FnOnce() -> R,
-{
-    use perf_event::{Builder, Group};
-    use perf_event::events::{Hardware, Cache, CacheOp, CacheResult};
-
-    let mut group = Group::new().unwrap();
-    let cycles = Builder::new().group(&mut group).kind(Hardware::CPU_CYCLES).build().unwrap();
-    let instructions = Builder::new().group(&mut group).kind(Hardware::INSTRUCTIONS).build().unwrap();
-    let cache_refs = Builder::new().group(&mut group).kind(Hardware::CACHE_REFERENCES).build().unwrap();
-    let cache_misses = Builder::new().group(&mut group).kind(Hardware::CACHE_MISSES).build().unwrap();
-    let branches = Builder::new().group(&mut group).kind(Hardware::BRANCH_INSTRUCTIONS).build().unwrap();
-    let branch_misses = Builder::new().group(&mut group).kind(Hardware::BRANCH_MISSES).build().unwrap();
-
-    group.enable().unwrap();
-    let result = f();
-    group.disable().unwrap();
-
-    let counts = group.read().unwrap();
-    let metrics = PerfMetrics {
-        cycles: counts[&cycles],
-        instructions: counts[&instructions],
-        cache_references: counts[&cache_refs],
-        cache_misses: counts[&cache_misses],
-        branches: counts[&branches],
-        branch_misses: counts[&branch_misses],
-    };
-
-    (result, metrics)
-}
-```
-
-## Metrics to Collect
-
-| Metric | Event | Interpretation |
-|--------|-------|----------------|
-| Instructions | INSTRUCTIONS | Work done |
-| Cycles | CPU_CYCLES | Time spent |
-| IPC | instructions/cycles | Efficiency (higher = better) |
-| L1D Cache Misses | L1D_CACHE/MISS | Local data locality |
-| LLC Misses | CACHE_MISSES | Memory bandwidth pressure |
-| Branch Misses | BRANCH_MISSES | Control flow predictability |
-| TLB Misses | DTLB_MISSES | Memory access pattern |
-
-## Expected Insights
-
-Based on heap structure, we expect:
-
-| Heap | Expected Cache Behavior |
-|------|------------------------|
-| SimpleBinaryHeap | Good - array-based, sequential access |
-| FibonacciHeap | Poor - pointer-chasing, scattered nodes |
-| HollowHeap | Poor - similar to Fibonacci |
-| PairingHeap | Moderate - tree structure but simpler |
-| RadixHeap | Good - array-based buckets |
-| SkipListHeap | Moderate - some locality in levels |
-
-## Implementation Plan
-
-1. [ ] Add `perf-counters` feature flag
-2. [ ] Create `src/bench_utils.rs` with perf measurement helpers
-3. [ ] Add `benches/heap_perf.rs` for perf-based benchmarks
-4. [ ] Add iai-callgrind benchmarks in `benches/heap_iai.rs`
-5. [ ] Create comparison script to correlate metrics with wall-clock time
-6. [ ] Document how to run perf benchmarks (permissions, kernel settings)
-
-## Running Perf Benchmarks
+## Running Benchmarks
 
 ### Prerequisites (Linux)
 
 ```bash
-# Option 1: Set perf_event_paranoid (temporary)
+# Enable perf counters for non-root users
 sudo sysctl kernel.perf_event_paranoid=1
-
-# Option 2: Add CAP_PERFMON capability (permanent for binary)
-sudo setcap cap_perfmon+ep ./target/release/deps/heap_perf-*
-
-# Option 3: Run as root (not recommended)
-sudo cargo bench --features perf-counters
 ```
 
-### Running
+### Quick Start
 
 ```bash
-# Standard Criterion benchmarks (wall-clock time)
-cargo bench
+# Run the multi-metric table benchmark
+cargo bench --features perf-counters --bench perf_table
 
-# Perf counter benchmarks (cache misses, etc.)
-cargo bench --features perf-counters --bench heap_perf
+# Run with CPU pinning for stable results
+BENCH_PIN_CPU=0 cargo bench --features perf-counters --bench perf_table
 
-# iai-callgrind benchmarks (instruction counts)
-cargo bench --bench heap_iai
+# Run specific rank sizes in parallel
+BENCH_PIN_CPU=0 cargo bench --features perf-counters --bench perf_table -- 8 &
+BENCH_PIN_CPU=1 cargo bench --features perf-counters --bench perf_table -- 12 &
+BENCH_PIN_CPU=2 cargo bench --features perf-counters --bench perf_table -- 16 &
+BENCH_PIN_CPU=3 cargo bench --features perf-counters --bench perf_table -- 20 &
+wait
 ```
+
+## Benchmark Results
+
+Benchmarks run on a 2M node synthetic sparse graph (avg degree 6). The "rank" is
+the Dijkstra rank - how many nodes are settled before finding the target.
+
+### 2^8 (256 nodes settled) - Fits in L1/L2 Cache
+
+| Algorithm | Time | IPC | LLC Miss% |
+|-----------|------|-----|-----------|
+| simple_binary | 3.2ms | 1.36 | 12.6 |
+| strict_fib_opt | 6.6ms | 1.71 | 8.5 |
+| twothree_opt | 6.8ms | 1.75 | 9.8 |
+| fibonacci_lazy | 7.2ms | 1.71 | 10.5 |
+| pairing_lazy | 8.2ms | 1.56 | 13.6 |
+| skew_binom_opt | 8.2ms | 1.50 | 12.2 |
+| pairing_opt | 8.7ms | 1.48 | 13.5 |
+| strict_fib_lazy | 8.9ms | 1.28 | 12.2 |
+| fibonacci_opt | 9.2ms | 1.34 | 16.3 |
+| twothree_lazy | 9.4ms | 1.28 | 17.6 |
+| hollow_opt | 9.7ms | 1.95 | 12.7 |
+| skew_binom_lazy | 10.6ms | 1.18 | 15.9 |
+| binomial_opt | 11.0ms | 1.47 | 12.9 |
+| rank_pair_lazy | 11.3ms | 1.67 | 11.2 |
+| hollow_lazy | 11.9ms | 1.37 | 13.5 |
+| binomial_lazy | 12.9ms | 1.26 | 13.8 |
+| skiplist_lazy | 20.1ms | 1.48 | 14.0 |
+
+### 2^12 (4096 nodes settled) - Fits in L3 Cache
+
+| Algorithm | Time | IPC | LLC Miss% |
+|-----------|------|-----|-----------|
+| simple_binary | 75.6ms | 0.96 | 22.6 |
+| pairing_lazy | 132.8ms | 1.58 | 28.1 |
+| strict_fib_lazy | 145.6ms | 1.31 | 32.7 |
+| strict_fib_opt | 146.7ms | 1.31 | 34.9 |
+| pairing_opt | 150.7ms | 1.43 | 28.5 |
+| twothree_opt | 151.2ms | 1.33 | 30.9 |
+| twothree_lazy | 151.2ms | 1.35 | 31.1 |
+| fibonacci_lazy | 155.6ms | 1.34 | 34.7 |
+| fibonacci_opt | 166.0ms | 1.25 | 36.1 |
+| skew_binom_lazy | 167.9ms | 1.24 | 30.0 |
+| skew_binom_opt | 176.1ms | 1.21 | 30.8 |
+| hollow_lazy | 187.9ms | 1.50 | 29.5 |
+| rank_pair_lazy | 204.5ms | 1.59 | 30.9 |
+| binomial_lazy | 205.0ms | 1.56 | 29.1 |
+| binomial_opt | 207.8ms | 1.55 | 30.5 |
+| hollow_opt | 237.5ms | 1.37 | 37.6 |
+| skiplist_lazy | 334.7ms | 1.48 | 26.6 |
+
+### 2^16 (65536 nodes settled) - Exceeds L3 Cache
+
+| Algorithm | Time | IPC | LLC Miss% |
+|-----------|------|-----|-----------|
+| simple_binary | 2.15s | 0.60 | 37.0 |
+| pairing_opt | 3.97s | 0.87 | 40.1 |
+| pairing_lazy | 3.97s | 0.89 | 40.0 |
+| twothree_lazy | 4.37s | 0.77 | 42.9 |
+| hollow_lazy | 4.54s | 1.04 | 37.2 |
+| fibonacci_lazy | 4.65s | 0.73 | 47.4 |
+| strict_fib_opt | 4.65s | 0.69 | 44.9 |
+| skew_binom_lazy | 4.69s | 0.77 | 43.4 |
+| strict_fib_lazy | 4.70s | 0.71 | 44.5 |
+| twothree_opt | 4.75s | 0.69 | 44.4 |
+| skew_binom_opt | 4.99s | 0.72 | 44.5 |
+| fibonacci_opt | 5.02s | 0.67 | 49.4 |
+| rank_pair_lazy | 5.27s | 1.05 | 41.2 |
+| binomial_lazy | 5.28s | 1.15 | 40.5 |
+| binomial_opt | 5.59s | 1.08 | 43.2 |
+| hollow_opt | 6.56s | 0.85 | 49.9 |
+| skiplist_lazy | 7.93s | 0.98 | 31.8 |
+
+## Key Findings
+
+### 1. Simple Binary Heap Dominates
+
+Despite O(log n) `decrease_key` vs O(1) amortized for Fibonacci heap, simple binary
+heap is 2-3x faster across all sizes. The cache locality of a contiguous array
+beats the theoretical advantage of pointer-based structures.
+
+### 2. IPC Drops Dramatically at Scale
+
+| Size | simple_binary IPC | Advanced heaps IPC |
+|------|-------------------|-------------------|
+| 2^8  | 1.36              | 1.3-1.9           |
+| 2^12 | 0.96              | 1.2-1.6           |
+| 2^16 | 0.60              | 0.67-1.15         |
+
+As working set exceeds cache, the CPU spends more cycles waiting for memory.
+
+### 3. LLC Miss Rates Correlate with Performance
+
+| Size | LLC Miss Rate |
+|------|---------------|
+| 2^8  | 8-17%         |
+| 2^12 | 22-37%        |
+| 2^16 | 37-50%        |
+
+The transition from 2^12 to 2^16 crosses the L3 cache boundary, causing dramatic
+slowdowns.
+
+### 4. Lazy vs Decrease-Key is a Wash
+
+Contrary to theory, `pairing_lazy` (re-insertion) ties or beats `pairing_opt`
+(decrease_key) at all sizes. Possible explanations:
+
+- Re-insertion has better cache behavior (no pointer manipulation)
+- The constant factors in decrease_key are higher than expected
+- Graph structure favors certain access patterns
+
+### 5. Skiplist is Consistently Slowest
+
+SkipList heap is ~2x slower than other heaps at all sizes, likely due to its
+probabilistic structure and multi-level pointer chasing.
+
+## Metrics Collected
+
+| Metric | Event | What it Measures |
+|--------|-------|------------------|
+| Instructions | INSTRUCTIONS | CPU instructions retired |
+| Cycles | CPU_CYCLES | CPU clock cycles |
+| IPC | instructions/cycles | CPU efficiency |
+| LLC Refs | CACHE_REFERENCES | Last-level cache accesses |
+| LLC Misses | CACHE_MISSES | LLC misses (went to DRAM) |
+
+## Architecture
+
+### perf-measurement Crate
+
+Located in `crates/perf-measurement/`, provides:
+
+- `PerfMultiMeasurement`: Criterion `Measurement` implementation
+- Captures time + hardware counters atomically via `perf_event::Group`
+- Thread-local accumulation for periodic stats output
+
+### perf_table Benchmark
+
+Located in `benches/perf_table.rs`, provides:
+
+- Direct multi-metric output (bypasses Criterion's single-value limitation)
+- Command-line filtering for parallel execution by rank
+- CSV output for easy parsing
+
+### CPU Pinning
+
+Set `BENCH_PIN_CPU=N` to pin the benchmark to CPU N. This reduces noise from
+CPU migration and improves result stability.
+
+## Questions for Further Investigation
+
+1. **Crossover point**: At what size (if any) do advanced heaps beat binary heap?
+2. **Lazy competitiveness**: Why does re-insertion compete with O(1) decrease_key?
+3. **Graph sensitivity**: Would different topologies (grid, scale-free, road
+   networks) change results?
+4. **Node size**: How does heap node size affect cache behavior?
 
 ## References
 
-- [perf-event2 crate](https://crates.io/crates/perf-event2)
-- [iai-callgrind](https://github.com/iai-callgrind/iai-callgrind)
+- [perf-event crate](https://crates.io/crates/perf-event)
 - [Linux perf_event_open man page](https://man7.org/linux/man-pages/man2/perf_event_open.2.html)
 - [Brendan Gregg's perf examples](https://www.brendangregg.com/perf.html)
