@@ -1,0 +1,10 @@
+[package]
+name = "perf-measurement"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Multi-metric Criterion measurement using Linux perf counters"
+
+[dependencies]
+criterion = "0.8"
+perf-event = "0.4"

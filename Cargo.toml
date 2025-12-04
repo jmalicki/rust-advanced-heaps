@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/intrusive-circular-list"]
+members = [".", "crates/intrusive-circular-list", "crates/perf-measurement"]
 
 [package]
 name = "rust-advanced-heaps"
@@ -36,11 +36,13 @@ criterion = "0.8"
 big-o-test = "0.2"
 ctor = "0.2"
 parking_lot = "0.12"
+# CPU pinning for more stable benchmarks
+core_affinity = "0.8"
 
 # Hardware performance counters for benchmarks (Linux only)
 # Use with: cargo bench --features perf-counters
 [target.'cfg(target_os = "linux")'.dev-dependencies]
-criterion-linux-perf = { git = "https://github.com/jmalicki/criterion-linux-perf" }
+perf-measurement = { path = "crates/perf-measurement" }
 
 [[bench]]
 name = "dimacs_benchmark"
@@ -53,3 +55,8 @@ harness = false
 # Commands for cargo-cmd (install with: cargo install cargo-cmd)
 [package.metadata.commands]
 download-dimacs = "./scripts/download-dimacs.sh"
+
+# Maximum optimization for benchmarks
+[profile.bench]
+lto = "thin"
+codegen-units = 1
