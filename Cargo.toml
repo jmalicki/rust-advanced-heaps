@@ -44,10 +44,6 @@ perf-event = { version = "0.4", optional = true }
 name = "dimacs_benchmark"
 harness = false
 
-[[bench]]
-name = "heap_perf"
-harness = false
-
 # Commands for cargo-cmd (install with: cargo install cargo-cmd)
 [package.metadata.commands]
 download-dimacs = "./scripts/download-dimacs.sh"
