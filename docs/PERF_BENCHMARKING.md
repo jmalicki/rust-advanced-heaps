@@ -1,12 +1,12 @@
 # Performance Counter Benchmarking
 
-This document describes the hardware performance counter benchmarking infrastructure
-and presents results from Dijkstra shortest-path benchmarks.
+This document describes the hardware performance counter benchmarking
+infrastructure and presents results from Dijkstra shortest-path benchmarks.
 
 ## Overview
 
-The benchmarks measure heap performance in a realistic pathfinding workload using
-Dijkstra's algorithm on synthetic sparse graphs. We capture:
+The benchmarks measure heap performance in a realistic pathfinding workload
+using Dijkstra's algorithm on synthetic sparse graphs. We capture:
 
 - **Wall-clock time**: Total execution time
 - **IPC (Instructions Per Cycle)**: CPU efficiency (higher = better)
@@ -40,13 +40,13 @@ wait
 
 ## Benchmark Results
 
-Benchmarks run on a 2M node synthetic sparse graph (avg degree 6). The "rank" is
-the Dijkstra rank - how many nodes are settled before finding the target.
+Benchmarks run on a 2M node synthetic sparse graph (avg degree 6). The "rank"
+is the Dijkstra rank - how many nodes are settled before finding the target.
 
 ### 2^8 (256 nodes settled) - Fits in L1/L2 Cache
 
 | Algorithm | Time | IPC | LLC Miss% |
-|-----------|------|-----|-----------|
+| --- | ---: | ---: | ---: |
 | simple_binary | 3.2ms | 1.36 | 12.6 |
 | strict_fib_opt | 6.6ms | 1.71 | 8.5 |
 | twothree_opt | 6.8ms | 1.75 | 9.8 |
@@ -68,7 +68,7 @@ the Dijkstra rank - how many nodes are settled before finding the target.
 ### 2^12 (4096 nodes settled) - Fits in L3 Cache
 
 | Algorithm | Time | IPC | LLC Miss% |
-|-----------|------|-----|-----------|
+| --- | ---: | ---: | ---: |
 | simple_binary | 75.6ms | 0.96 | 22.6 |
 | pairing_lazy | 132.8ms | 1.58 | 28.1 |
 | strict_fib_lazy | 145.6ms | 1.31 | 32.7 |
@@ -90,7 +90,7 @@ the Dijkstra rank - how many nodes are settled before finding the target.
 ### 2^16 (65536 nodes settled) - Exceeds L3 Cache
 
 | Algorithm | Time | IPC | LLC Miss% |
-|-----------|------|-----|-----------|
+| --- | ---: | ---: | ---: |
 | simple_binary | 2.15s | 0.60 | 37.0 |
 | pairing_opt | 3.97s | 0.87 | 40.1 |
 | pairing_lazy | 3.97s | 0.89 | 40.0 |
@@ -113,30 +113,30 @@ the Dijkstra rank - how many nodes are settled before finding the target.
 
 ### 1. Simple Binary Heap Dominates
 
-Despite O(log n) `decrease_key` vs O(1) amortized for Fibonacci heap, simple binary
-heap is 2-3x faster across all sizes. The cache locality of a contiguous array
-beats the theoretical advantage of pointer-based structures.
+Despite O(log n) `decrease_key` vs O(1) amortized for Fibonacci heap, simple
+binary heap is 2-3x faster across all sizes. The cache locality of a
+contiguous array beats the theoretical advantage of pointer-based structures.
 
 ### 2. IPC Drops Dramatically at Scale
 
 | Size | simple_binary IPC | Advanced heaps IPC |
-|------|-------------------|-------------------|
-| 2^8  | 1.36              | 1.3-1.9           |
-| 2^12 | 0.96              | 1.2-1.6           |
-| 2^16 | 0.60              | 0.67-1.15         |
+| --- | ---: | ---: |
+| 2^8 | 1.36 | 1.3-1.9 |
+| 2^12 | 0.96 | 1.2-1.6 |
+| 2^16 | 0.60 | 0.67-1.15 |
 
 As working set exceeds cache, the CPU spends more cycles waiting for memory.
 
 ### 3. LLC Miss Rates Correlate with Performance
 
 | Size | LLC Miss Rate |
-|------|---------------|
-| 2^8  | 8-17%         |
-| 2^12 | 22-37%        |
-| 2^16 | 37-50%        |
+| --- | ---: |
+| 2^8 | 8-17% |
+| 2^12 | 22-37% |
+| 2^16 | 37-50% |
 
-The transition from 2^12 to 2^16 crosses the L3 cache boundary, causing dramatic
-slowdowns.
+The transition from 2^12 to 2^16 crosses the L3 cache boundary, causing
+dramatic slowdowns.
 
 ### 4. Lazy vs Decrease-Key is a Wash
 
@@ -155,7 +155,7 @@ probabilistic structure and multi-level pointer chasing.
 ## Metrics Collected
 
 | Metric | Event | What it Measures |
-|--------|-------|------------------|
+| --- | --- | --- |
 | Instructions | INSTRUCTIONS | CPU instructions retired |
 | Cycles | CPU_CYCLES | CPU clock cycles |
 | IPC | instructions/cycles | CPU efficiency |
@@ -187,8 +187,10 @@ CPU migration and improves result stability.
 
 ## Questions for Further Investigation
 
-1. **Crossover point**: At what size (if any) do advanced heaps beat binary heap?
-2. **Lazy competitiveness**: Why does re-insertion compete with O(1) decrease_key?
+1. **Crossover point**: At what size (if any) do advanced heaps beat binary
+   heap?
+2. **Lazy competitiveness**: Why does re-insertion compete with O(1)
+   decrease_key?
 3. **Graph sensitivity**: Would different topologies (grid, scale-free, road
    networks) change results?
 4. **Node size**: How does heap node size affect cache behavior?

@@ -264,7 +264,7 @@ mod perf_benches {
         type Cost = u32;
 
         fn successors(&self) -> Vec<(Self, Self::Cost)> {
-            if self.id as usize > self.graph.adjacency.len() {
+            if self.id as usize >= self.graph.adjacency.len() {
                 return vec![];
             }
 

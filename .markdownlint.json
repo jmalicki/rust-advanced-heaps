@@ -7,5 +7,7 @@
     "headings": false,
     "stern": false
   },
-  "MD060": false
+  "MD060": {
+    "style": "compact"
+  }
 }
