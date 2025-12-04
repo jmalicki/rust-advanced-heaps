@@ -1242,6 +1242,9 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
             // Re-add node to fix-list as a free root
             self.fix_list_add(node);
 
+            // Update minimum pointer - the cut node may have smaller priority
+            self.update_min(node);
+
             // Check if parent needs fix-list update due to loss increment
             // This is handled by cut_with_loss_tracking, but we need to
             // update fix-list if parent moved to a different loss group
@@ -1345,6 +1348,9 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
             // Re-add loser to fix-list as fixed with loss = 0
             self.fix_list_add(loser);
 
+            // Update minimum pointer - the winner may have smaller priority than current min
+            self.update_min(winner);
+
             // Update parents' fix-list membership if needed
             if let Some(parent_ptr) = winner_parent {
                 if (*parent_ptr.as_ptr()).is_fixed() {
@@ -1352,12 +1358,16 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
                     self.fix_list_add(parent_ptr);
                 }
             }
-            if let Some(parent_ptr) = loser_parent {
-                if parent_ptr != winner_parent.unwrap_or(winner)
-                    && (*parent_ptr.as_ptr()).is_fixed()
-                {
-                    self.fix_list_remove(parent_ptr);
-                    self.fix_list_add(parent_ptr);
+            // Only update loser's parent if it's different from winner's parent
+            // and is a fixed node
+            if let Some(loser_parent_ptr) = loser_parent {
+                let should_update = match winner_parent {
+                    Some(winner_parent_ptr) => loser_parent_ptr != winner_parent_ptr,
+                    None => true, // winner had no parent, so loser's parent is different
+                };
+                if should_update && (*loser_parent_ptr.as_ptr()).is_fixed() {
+                    self.fix_list_remove(loser_parent_ptr);
+                    self.fix_list_add(loser_parent_ptr);
                 }
             }
         }
@@ -2033,7 +2043,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cut_with_loss_tracking_basic() {
+    fn test_consolidation_preserves_heap_order() {
         let mut heap: StrictFibonacciHeap<i32, i32> = StrictFibonacciHeap::new();
 
         // Build a small tree structure
@@ -2069,6 +2079,13 @@ mod tests {
         // Still no candidates (nodes are passive, not in fix_loss_two)
         assert!(!heap.one_node_loss_reduction());
     }
+
+    // TODO: Add test_one_node_loss_reduction_with_candidates when fix-list
+    // population is integrated (requires nodes to become active/fixed during
+    // heap operations, which will be implemented in a later phase).
+
+    // TODO: Add test_two_node_loss_reduction_with_candidates when fix-list
+    // population is integrated.
 
     #[test]
     fn test_two_node_loss_reduction_no_candidates() {
