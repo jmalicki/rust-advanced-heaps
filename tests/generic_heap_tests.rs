@@ -712,3 +712,202 @@ base_heap_tests!(
     rust_advanced_heaps::hollow::HollowHeap<&'static str, i32>
 );
 decrease_key_heap_tests!(hollow_decrease, rust_advanced_heaps::hollow::HollowHeap<i32, i32>);
+
+// ============================================================================
+// Radix Heap - specialized tests (monotone, unsigned keys only)
+// ============================================================================
+// Note: RadixHeap cannot use the standard base_heap_tests or decrease_key_heap_tests
+// because it:
+// 1. Only supports unsigned integer priorities (not i32)
+// 2. Is monotone: cannot insert keys < last extracted minimum
+// 3. Uses non-negative priorities only
+//
+// See src/radix.rs for comprehensive unit tests specific to RadixHeap.
+
+mod radix_specialized {
+    use rust_advanced_heaps::radix::RadixHeap;
+    use rust_advanced_heaps::traits::HeapError;
+    use rust_advanced_heaps::{DecreaseKeyHeap, Heap};
+
+    #[test]
+    fn test_empty_heap() {
+        let mut heap: RadixHeap<&str, u32> = RadixHeap::new();
+        assert!(heap.is_empty());
+        assert_eq!(heap.len(), 0);
+        assert_eq!(heap.peek(), None);
+        assert_eq!(heap.pop(), None);
+    }
+
+    #[test]
+    fn test_basic_operations() {
+        let mut heap: RadixHeap<&str, u32> = RadixHeap::new();
+        heap.push(5, "five");
+        heap.push(1, "one");
+        heap.push(10, "ten");
+        heap.push(3, "three");
+
+        assert!(!heap.is_empty());
+        assert_eq!(heap.len(), 4);
+
+        assert_eq!(heap.pop(), Some((1, "one")));
+        assert_eq!(heap.pop(), Some((3, "three")));
+        assert_eq!(heap.pop(), Some((5, "five")));
+        assert_eq!(heap.pop(), Some((10, "ten")));
+        assert_eq!(heap.pop(), None);
+        assert!(heap.is_empty());
+    }
+
+    #[test]
+    fn test_merge_operations() {
+        let mut heap1: RadixHeap<&str, u32> = RadixHeap::new();
+        heap1.push(5, "five");
+        heap1.push(1, "one");
+
+        let mut heap2: RadixHeap<&str, u32> = RadixHeap::new();
+        heap2.push(10, "ten");
+        heap2.push(3, "three");
+
+        heap1.merge(heap2);
+
+        assert_eq!(heap1.len(), 4);
+        assert_eq!(heap1.pop(), Some((1, "one")));
+        assert_eq!(heap1.pop(), Some((3, "three")));
+        assert_eq!(heap1.pop(), Some((5, "five")));
+        assert_eq!(heap1.pop(), Some((10, "ten")));
+    }
+
+    #[test]
+    fn test_decrease_key_operations() {
+        let mut heap: RadixHeap<u32, u32> = RadixHeap::new();
+
+        let _h1 = heap.push_with_handle(100, 1);
+        let h2 = heap.push_with_handle(200, 2);
+        let _h3 = heap.push_with_handle(300, 3);
+        let h4 = heap.push_with_handle(400, 4);
+
+        assert!(heap.decrease_key(&h2, 50).is_ok());
+        assert!(heap.decrease_key(&h4, 25).is_ok());
+        assert!(heap.decrease_key(&h4, 1).is_ok());
+
+        assert_eq!(heap.pop(), Some((1, 4)));
+        assert_eq!(heap.pop(), Some((50, 2)));
+        assert_eq!(heap.pop(), Some((100, 1)));
+        assert_eq!(heap.pop(), Some((300, 3)));
+    }
+
+    #[test]
+    fn test_multiple_decrease_keys() {
+        let mut heap: RadixHeap<u32, u32> = RadixHeap::new();
+        let mut handles = Vec::new();
+
+        for i in 0u32..20 {
+            handles.push(heap.push_with_handle((i + 1) * 100, i));
+        }
+
+        // Decrease all to their index value
+        for (i, handle) in handles.iter().enumerate() {
+            assert!(heap.decrease_key(handle, i as u32).is_ok());
+        }
+
+        // Verify extraction order
+        for i in 0u32..20 {
+            assert_eq!(heap.pop(), Some((i, i)));
+        }
+        assert!(heap.is_empty());
+    }
+
+    #[test]
+    fn test_decrease_key_same() {
+        let mut heap: RadixHeap<u32, u32> = RadixHeap::new();
+        let handle = heap.push_with_handle(10, 1);
+
+        assert_eq!(
+            heap.decrease_key(&handle, 10),
+            Err(HeapError::PriorityNotDecreased)
+        );
+
+        assert_eq!(heap.peek(), Some((&10, &1)));
+    }
+
+    #[test]
+    fn test_dijkstra_pattern() {
+        // Simulate Dijkstra's algorithm pattern
+        let mut heap: RadixHeap<u32, u32> = RadixHeap::new();
+
+        // Insert source with distance 0
+        let _h0 = heap.push_with_handle(0, 0);
+
+        // Insert neighbors with initial distances
+        let h1 = heap.push_with_handle(10, 1);
+        let h2 = heap.push_with_handle(5, 2);
+        let _h3 = heap.push_with_handle(u32::MAX, 3);
+
+        // Extract minimum (node 0, distance 0)
+        assert_eq!(heap.pop(), Some((0, 0)));
+
+        // Relax edge 0->1: new distance = 0 + 3 = 3 < 10
+        heap.decrease_key(&h1, 3).unwrap();
+
+        // Extract minimum (node 1, distance 3)
+        assert_eq!(heap.pop(), Some((3, 1)));
+
+        // Relax edge 1->2: new distance = 3 + 1 = 4 < 5
+        heap.decrease_key(&h2, 4).unwrap();
+
+        // Extract node 2
+        assert_eq!(heap.pop(), Some((4, 2)));
+    }
+
+    #[test]
+    fn test_large_sequence() {
+        let mut heap: RadixHeap<u32, u32> = RadixHeap::new();
+        let mut handles = Vec::new();
+
+        for i in 0u32..500 {
+            handles.push(heap.push_with_handle(i * 10, i));
+        }
+
+        // Decrease every 10th element
+        for i in (0..500).step_by(10) {
+            let new_pri = (i as u32).saturating_sub(1);
+            if new_pri < i as u32 * 10 {
+                assert!(heap.decrease_key(&handles[i], new_pri).is_ok());
+            }
+        }
+
+        // Pop some elements
+        for _ in 0..50 {
+            heap.pop();
+        }
+
+        // Add more elements (must respect monotone property)
+        // After popping, last_min is at least 0, so we can insert anything >= 0
+        for i in 500u32..600 {
+            heap.push(i * 10, i);
+        }
+
+        assert!(!heap.is_empty());
+
+        // Drain and verify order
+        let mut last = 0u32;
+        let mut count = 0;
+        while let Some((priority, _)) = heap.pop() {
+            assert!(priority >= last);
+            last = priority;
+            count += 1;
+        }
+        assert_eq!(count, 550);
+    }
+
+    #[test]
+    fn test_u64_keys() {
+        let mut heap: RadixHeap<&str, u64> = RadixHeap::new();
+        heap.push(1_000_000_000_000u64, "trillion");
+        heap.push(1_000_000u64, "million");
+        heap.push(1_000u64, "thousand");
+
+        assert_eq!(heap.pop(), Some((1_000, "thousand")));
+        assert_eq!(heap.pop(), Some((1_000_000, "million")));
+        assert_eq!(heap.pop(), Some((1_000_000_000_000, "trillion")));
+    }
+}

@@ -81,7 +81,7 @@ impl Lcg {
 // ============================================================================
 
 /// Adjacency list graph representation
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct DimacsGraph {
     /// Number of nodes
     pub num_nodes: usize,
@@ -401,7 +401,7 @@ pub fn generate_queries_for_rank(
 // ============================================================================
 
 /// Node for pathfinding on a DIMACS graph
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct DimacsNode {
     pub id: u32,
     pub goal: u32,
@@ -1044,6 +1044,11 @@ fn benchmark_all_heaps_by_rank(c: &mut Criterion) {
             |b, qs| b.iter(|| black_box(run_queries_pairing_lazy(&graph, qs))),
         );
         group.bench_with_input(
+            BenchmarkId::new("rank_pairing_lazy", &rank_label),
+            &queries,
+            |b, qs| b.iter(|| black_box(run_queries_rank_pairing_lazy(&graph, qs))),
+        );
+        group.bench_with_input(
             BenchmarkId::new("binomial_lazy", &rank_label),
             &queries,
             |b, qs| b.iter(|| black_box(run_queries_binomial_lazy(&graph, qs))),
@@ -1174,6 +1179,11 @@ fn benchmark_california_high_rank(c: &mut Criterion) {
             BenchmarkId::new("pairing_lazy", &rank_label),
             &queries,
             |b, qs| b.iter(|| black_box(run_queries_pairing_lazy(&graph, qs))),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("rank_pairing_lazy", &rank_label),
+            &queries,
+            |b, qs| b.iter(|| black_box(run_queries_rank_pairing_lazy(&graph, qs))),
         );
     }
 
