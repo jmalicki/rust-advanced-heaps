@@ -178,12 +178,12 @@ impl<T, P: Ord + Clone> Heap<T, P> for HollowHeap<T, P> {
                 // Root should never be hollow in a well-formed heap
                 None
             } else {
-                // SAFETY: We're returning references to data inside RefCell.
-                // This is safe because:
-                // 1. The Rc keeps the node alive as long as the heap exists
-                // 2. We only read the data, never mutate through this path
-                // 3. The heap's borrow checker ensures no mutable operations
-                //    happen while these references exist
+                // SAFETY: We bypass RefCell's dynamic borrow checking to return
+                // references with lifetime tied to `&self`. This is safe because:
+                // 1. The Rc in `self.root` keeps the node alive for `&self`'s lifetime
+                // 2. Rust's borrow checker prevents `&mut self` calls while these
+                //    references exist, so no mutation can occur
+                // 3. The root is never hollow in a well-formed heap (checked above)
                 unsafe {
                     let ptr = root_rc.as_ptr();
                     let item_ref = (*ptr).item.as_ref().unwrap();
@@ -388,9 +388,9 @@ impl<T, P: Ord> HollowHeap<T, P> {
                 // we might need to handle it (but the item already moved)
                 // The second_parent reference is just for the DAG structure
             } else {
-                // Non-hollow node: add to full_nodes for ranked linking
-                // Clear its child list since children are already in to_process
-                // Actually, we should not clear - only the old_root's children are processed
+                // Non-hollow node: collect for ranked linking.
+                // We keep its child list intact - only the old root's direct
+                // children are processed, not grandchildren.
                 full_nodes.push(node_rc);
             }
         }

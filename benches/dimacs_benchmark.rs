@@ -1156,6 +1156,11 @@ fn benchmark_california_high_rank(c: &mut Criterion) {
 
         // Lazy implementations - simpler, but O(log n) per relaxation
         group.bench_with_input(
+            BenchmarkId::new("hollow_lazy", &rank_label),
+            &queries,
+            |b, qs| b.iter(|| black_box(run_queries_hollow_lazy(&graph, qs))),
+        );
+        group.bench_with_input(
             BenchmarkId::new("simple_binary_lazy", &rank_label),
             &queries,
             |b, qs| b.iter(|| black_box(run_queries_simple_binary_lazy(&graph, qs))),
