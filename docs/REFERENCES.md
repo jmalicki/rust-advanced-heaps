@@ -5,19 +5,22 @@ structures implemented in this crate, ordered by publication date.
 
 ## Summary
 
-| Heap             | Year | decrease-key | Notes                     |
-| ---------------- | ---- | ------------ | ------------------------- |
-| Simple Binary    | 1964 | -            | No decrease_key support   |
-| Binomial         | 1978 | O(log n)     | Foundational, simple      |
-| Pairing          | 1986 | o(log n) am. | Simple, fast in practice  |
-| Fibonacci        | 1987 | O(1) am.     | Optimal amortized bounds  |
-| Skip List        | 1990 | O(log n + m)*| Simple wrapper, good cache|
-| Skew Binomial    | 1996 | O(log n)     | O(1) insert               |
-| 2-3 Heap         | 1999 | O(1) am.     | Simpler than Fibonacci    |
-| Rank-Pairing     | 2011 | O(1) am.     | Simple + optimal bounds   |
-| Strict Fibonacci | 2012 | O(1) worst   | Optimal worst-case        |
+| Heap             | Year | decrease-key  | Notes                     |
+| ---------------- | ---- | ------------- | ------------------------- |
+| Simple Binary    | 1964 | -             | No decrease_key support   |
+| Binomial         | 1978 | O(log n)      | Foundational, simple      |
+| Pairing          | 1986 | o(log n) am.  | Simple, fast in practice  |
+| Fibonacci        | 1987 | O(1) am.      | Optimal amortized bounds  |
+| Radix            | 1990 | O(k)†         | Monotone, integer keys    |
+| Skip List        | 1990 | O(log n + m)* | Simple wrapper, good cache|
+| Skew Binomial    | 1996 | O(log n)      | O(1) insert               |
+| 2-3 Heap         | 1999 | O(1) am.      | Simpler than Fibonacci    |
+| Rank-Pairing     | 2011 | O(1) am.      | Simple + optimal bounds   |
+| Strict Fibonacci | 2012 | O(1) worst    | Optimal worst-case        |
 
 *m = duplicate (priority, id) pairs, typically 1
+
+†k = bucket size; O(1) expected in typical Dijkstra usage, O(n) worst case
 
 ---
 
@@ -235,6 +238,74 @@ degree of nodes.
 | delete-min   | O(log n)       |
 | decrease-key | O(1)           |
 | merge        | O(1)           |
+
+---
+
+## Radix Heap (1990)
+
+**Wikipedia:** <https://en.wikipedia.org/wiki/Radix_heap>
+
+**Ahuja, R. K., Mehlhorn, K., Orlin, J. B., & Tarjan, R. E. (1990).** Faster
+algorithms for the shortest path problem. *Journal of the ACM*, 37(2), 213-223.
+
+- **ACM Digital Library:** <https://dl.acm.org/doi/10.1145/77600.77615>
+
+Radix heaps are a specialized priority queue for Dijkstra's algorithm with
+integer edge weights. They exploit the **monotone property**: in Dijkstra,
+extracted distances are non-decreasing. This allows bucketing elements by the
+highest differing bit from the last extracted minimum.
+
+The key insight is that when we extract the minimum, all remaining elements
+have keys ≥ that minimum. Elements are stored in buckets based on the position
+of the highest bit that differs from the current minimum. When bucket 0 (exact
+matches) is empty, we find the minimum in the smallest non-empty bucket,
+update our reference point, and redistribute elements into finer buckets.
+
+**Why not wrap the `radix-heap` crate?**
+
+The existing `radix-heap` crate (v0.4.2) is incompatible with our `Heap` trait:
+
+1. **No decrease-key**: The crate provides no mechanism to update priorities
+2. **Max-heap orientation**: The crate is a max-heap; our heaps are min-heaps
+3. **No merge support**: The crate lacks a `merge` operation
+4. **Different key bounds**: Requires `Radix + Ord + Copy` vs our `P: Ord`
+
+Our implementation provides a min-heap radix heap with native decrease-key
+support, matching the API of our other heap implementations.
+
+**Cache Performance:**
+
+Radix heaps have excellent cache locality because:
+
+- Buckets are contiguous vectors
+- Most operations touch only 1-2 buckets
+- No pointer chasing (unlike Fibonacci/Pairing heaps)
+
+Empirically, radix heaps are ~2x faster than binary heaps for Dijkstra on
+road networks with integer edge weights.
+
+**Constraints:**
+
+- **Monotone**: Cannot insert a key smaller than the last extracted minimum
+- **Integer keys**: Requires unsigned integer priorities (`u8`, `u16`, `u32`,
+  `u64`, `u128`, `usize`)
+
+These constraints are naturally satisfied by Dijkstra's algorithm with
+non-negative integer edge weights.
+
+| Operation    | Time Complexity |
+| ------------ | --------------- |
+| insert       | O(1)            |
+| find-min     | O(1)*           |
+| delete-min   | O(log C) am.    |
+| decrease-key | O(k)**          |
+| merge        | O(n)            |
+
+*O(1) after redistribution; C = max difference between inserted key and
+minimum at insertion time. For bounded edge weights, effectively O(1).
+
+**k = bucket size. O(1) expected in typical Dijkstra usage with well-distributed
+priorities. Worst case (all elements in one bucket) is O(n).
 
 ---
 

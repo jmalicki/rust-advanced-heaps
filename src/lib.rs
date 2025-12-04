@@ -27,9 +27,13 @@
 //! | [`strict_fibonacci::StrictFibonacciHeap`] | O(1) worst | O(log n) worst | O(1) worst | `DecreaseKeyHeap` |
 //! | [`twothree::TwoThreeHeap`] | O(1) am. | O(log n) am. | O(1) am. | `DecreaseKeyHeap` |
 //! | [`skew_binomial::SkewBinomialHeap`] | O(1) | O(log n) | O(log n) | `DecreaseKeyHeap` |
+//! | [`radix::RadixHeap`] | O(1) | O(log C) am.† | O(1) | `DecreaseKeyHeap` |
 //!
 //! *SkipListHeap: m = duplicate (priority,id) pairs (typically 1).
 //! Requires `P: Copy`, `T: Default` for `decrease_key`.
+//!
+//! †RadixHeap: C = max key difference. Monotone heap (requires extracted keys to be non-decreasing).
+//! Requires `P: RadixKey` (unsigned integers). Ideal for Dijkstra with integer edge weights.
 //!
 //! # Basic Example
 //!
@@ -61,6 +65,7 @@ pub mod binomial;
 pub mod fibonacci;
 pub mod pairing;
 pub mod pathfinding;
+pub mod radix;
 pub mod rank_pairing;
 pub mod simple_binary;
 pub mod skew_binomial;
