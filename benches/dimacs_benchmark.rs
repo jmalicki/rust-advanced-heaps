@@ -313,40 +313,78 @@ pub fn group_queries_by_rank(queries: Vec<Query>) -> HashMap<u32, Vec<Query>> {
     groups
 }
 
-/// Generate queries targeting specific Dijkstra rank ranges
+/// Generate queries with exact Dijkstra ranks using Sanders/Schultes methodology.
+///
+/// For each query:
+/// 1. Pick a random source node
+/// 2. Run Dijkstra from source, recording settlement order
+/// 3. Pick the target as the node settled at exactly rank 2^target_log_rank
+///
+/// This guarantees exact ranks and is more efficient than trial-and-error.
 pub fn generate_queries_for_rank(
     graph: &DimacsGraph,
     target_log_rank: u32,
     num_queries: usize,
     seed: u64,
 ) -> Vec<Query> {
+    use std::cmp::Reverse;
+    use std::collections::BinaryHeap;
+
     let mut rng = Lcg::new(seed);
     let mut queries = Vec::new();
-    let mut attempts = 0;
-    let max_attempts = num_queries * 100;
+    let target_rank = 1u32 << target_log_rank;
 
-    let min_rank = 1u32 << target_log_rank.saturating_sub(1);
-    let max_rank = 1u32 << target_log_rank;
-
-    while queries.len() < num_queries && attempts < max_attempts {
-        attempts += 1;
+    for _ in 0..num_queries * 2 {
+        // Try more sources than needed
+        if queries.len() >= num_queries {
+            break;
+        }
 
         let source = rng.next_range(1, graph.num_nodes as u32 + 1);
-        let target = rng.next_range(1, graph.num_nodes as u32 + 1);
 
-        if source == target {
-            continue;
+        // Run Dijkstra from source, find the node settled at target_rank
+        let mut dist: HashMap<u32, u32> = HashMap::new();
+        let mut heap = BinaryHeap::new();
+        let mut settled_count = 0u32;
+
+        dist.insert(source, 0);
+        heap.push(Reverse((0u32, source)));
+
+        while let Some(Reverse((d, node))) = heap.pop() {
+            if let Some(&best) = dist.get(&node) {
+                if d > best {
+                    continue;
+                }
+            }
+
+            settled_count += 1;
+
+            // Found our target: the node settled at exactly target_rank
+            if settled_count == target_rank {
+                queries.push(Query {
+                    source,
+                    target: node,
+                    dijkstra_rank: target_rank,
+                });
+                break;
+            }
+
+            if let Some(neighbors) = graph.adjacency.get(node as usize) {
+                for &(neighbor, weight) in neighbors {
+                    let new_dist = d + weight;
+                    let should_update = dist
+                        .get(&neighbor)
+                        .map(|&old| new_dist < old)
+                        .unwrap_or(true);
+
+                    if should_update {
+                        dist.insert(neighbor, new_dist);
+                        heap.push(Reverse((new_dist, neighbor)));
+                    }
+                }
+            }
         }
-
-        let rank = compute_dijkstra_rank(graph, source, target);
-
-        if rank >= min_rank && rank < max_rank {
-            queries.push(Query {
-                source,
-                target,
-                dijkstra_rank: rank,
-            });
-        }
+        // If we didn't reach target_rank nodes, this source doesn't work - try next
     }
 
     queries
