@@ -17,3 +17,4 @@ Thumbs.db
 # Test output
 solver_output.log
 tmp_*.csv
+kani*.log

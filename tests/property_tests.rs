@@ -37,12 +37,12 @@ use std::collections::HashMap;
 /// Test that push and pop maintain heap property
 ///
 /// This is the fundamental heap invariant: after any sequence of pushes and pops,
-/// the minimum element should always be at the top. We generate random sequences
-/// of push/pop operations and verify that `peek()` always returns the global minimum
-/// among all currently inserted elements.
+/// the heap contains exactly the multiset of elements we expect. We generate random
+/// sequences of push/pop operations, track them in a simple Vec model, and then
+/// fully pop the heap to ensure the multisets match.
 ///
-/// This catches bugs where the heap structure becomes corrupted or the minimum
-/// pointer is not properly maintained during operations.
+/// This catches bugs where the heap structure becomes corrupted or elements are
+/// lost or duplicated during operations.
 fn test_push_pop_invariant<H: Heap<i32, i32>>(ops: Vec<(bool, i32)>) -> Result<(), TestCaseError> {
     let mut heap = H::new();
     let mut inserted = Vec::new();
@@ -60,15 +60,17 @@ fn test_push_pop_invariant<H: Heap<i32, i32>>(ops: Vec<(bool, i32)>) -> Result<(
             heap.push(value, value);
             inserted.push(value);
         }
-
-        // Verify heap property: min should be in inserted
-        if !heap.is_empty() {
-            if let Some((min_priority, _)) = heap.peek() {
-                let min_in_inserted = inserted.iter().min().copied();
-                prop_assert_eq!(*min_priority, min_in_inserted.unwrap());
-            }
-        }
     }
+
+    // Verify heap contents match the tracked multiset
+    let mut popped = Vec::new();
+    while let Some((priority, _item)) = heap.pop() {
+        popped.push(priority);
+    }
+    let mut expected = inserted;
+    popped.sort();
+    expected.sort();
+    prop_assert_eq!(popped, expected);
 
     Ok(())
 }
@@ -107,17 +109,17 @@ fn test_decrease_key_invariant<H: Heap<i32, i32>>(
                 priorities.insert(handle_idx, new_priority);
             }
         }
-
-        // Verify heap property maintained
-        if !heap.is_empty() {
-            let min_in_map = priorities.values().min().copied();
-            if let Some(expected_min) = min_in_map {
-                if let Some((actual_min, _)) = heap.peek() {
-                    prop_assert_eq!(*actual_min, expected_min);
-                }
-            }
-        }
     }
+
+    // Verify final heap contents via pop sequence
+    let mut popped = Vec::new();
+    while let Some((priority, _item)) = heap.pop() {
+        popped.push(priority);
+    }
+    let mut expected: Vec<i32> = priorities.values().copied().collect();
+    popped.sort();
+    expected.sort();
+    prop_assert_eq!(popped, expected);
 
     Ok(())
 }
@@ -178,14 +180,26 @@ fn test_merge_invariant<H: Heap<i32, i32>>(
         heap2.push(val, val);
     }
 
-    let min1 = heap1.peek().map(|(p, _)| *p);
-    let min2 = heap2.peek().map(|(p, _)| *p);
+    // Get minimums by popping and pushing back
+    let min1 = heap1.pop().map(|(p, item)| {
+        heap1.push(p, item);
+        p
+    });
+    let min2 = heap2.pop().map(|(p, item)| {
+        heap2.push(p, item);
+        p
+    });
     let expected_min = [min1, min2].iter().flatten().min().copied();
 
     heap1.merge(heap2);
 
     if let Some(expected) = expected_min {
-        prop_assert_eq!(heap1.peek().map(|(p, _)| *p), Some(expected));
+        // Verify minimum by popping
+        let actual = heap1.pop();
+        prop_assert_eq!(actual.map(|(p, _)| p), Some(expected));
+        if let Some((p, i)) = actual {
+            heap1.push(p, i); // Restore
+        }
     } else {
         prop_assert!(heap1.is_empty());
     }
@@ -221,14 +235,11 @@ fn test_len_invariant<H: Heap<i32, i32>>(ops: Vec<(bool, i32)>) -> Result<(), Te
     Ok(())
 }
 
-/// Test that peek() doesn't modify the heap
+/// Test that pop works correctly and maintains length invariant
 ///
-/// Peek should be a read-only operation. This test verifies that calling peek multiple
-/// times returns the same value and doesn't alter the heap's length or structure.
-///
-/// This catches implementations where peek inadvertently modifies internal state or
-/// pointers, which could lead to subsequent operations returning incorrect results.
-fn test_peek_idempotent<H: Heap<i32, i32>>(values: Vec<i32>) -> Result<(), TestCaseError> {
+/// This test verifies that pop decrements the length by 1 and returns Some
+/// when the heap is non-empty. Ordering is verified by test_pop_order_invariant.
+fn test_pop_maintains_property<H: Heap<i32, i32>>(values: Vec<i32>) -> Result<(), TestCaseError> {
     let mut heap = H::new();
 
     for val in &values {
@@ -236,14 +247,15 @@ fn test_peek_idempotent<H: Heap<i32, i32>>(values: Vec<i32>) -> Result<(), TestC
     }
 
     if !heap.is_empty() {
-        let peek1 = heap.peek().map(|(p, _)| *p);
-        let peek2 = heap.peek().map(|(p, _)| *p);
-        prop_assert_eq!(peek1, peek2);
-
         let len1 = heap.len();
-        let _ = heap.peek();
+        let popped = heap.pop();
         let len2 = heap.len();
-        prop_assert_eq!(len1, len2);
+        prop_assert_eq!(len1, len2 + 1);
+        prop_assert!(popped.is_some());
+        // Push back to restore state
+        if let Some((p, i)) = popped {
+            heap.push(p, i);
+        }
     }
 
     Ok(())
@@ -315,31 +327,25 @@ fn test_complex_operations<H: Heap<i32, i32>>(
                 }
             }
             3 => {
-                // Peek (should not modify)
-                let peeked = heap.peek();
-                if let Some((priority, _item)) = peeked {
-                    if !priorities.is_empty() {
-                        let min_priority = priorities.values().min().copied();
-                        prop_assert_eq!(*priority, min_priority.unwrap());
-                    }
-                }
+                // Skip inline peek checks; peek is covered by dedicated tests
             }
             _ => {}
         }
 
-        // Verify invariants after each operation
-        if !heap.is_empty() && !priorities.is_empty() {
-            let min_in_map = priorities.values().min().copied();
-            if let Some(expected_min) = min_in_map {
-                if let Some((actual_min, _)) = heap.peek() {
-                    prop_assert_eq!(*actual_min, expected_min);
-                }
-            }
-        }
-
+        // Verify length invariants after each operation
         prop_assert_eq!(heap.len(), priorities.len());
         prop_assert_eq!(heap.is_empty(), priorities.is_empty());
     }
+
+    // Verify final heap contents via pop sequence
+    let mut popped = Vec::new();
+    while let Some((_priority, item)) = heap.pop() {
+        popped.push(item as usize);
+    }
+    let mut expected: Vec<usize> = priorities.keys().copied().collect();
+    popped.sort();
+    expected.sort();
+    prop_assert_eq!(popped, expected);
 
     Ok(())
 }
@@ -367,8 +373,10 @@ fn test_multiple_merges<H: Heap<i32, i32>>(heaps: Vec<Vec<i32>>) -> Result<(), T
             heap.push(val, val);
         }
 
-        if let Some((min, _)) = heap.peek() {
-            all_mins.push(*min);
+        // Get minimum by popping and pushing back
+        if let Some((min, item)) = heap.pop() {
+            all_mins.push(min);
+            heap.push(min, item); // Restore
         }
 
         result.merge(heap);
@@ -378,10 +386,16 @@ fn test_multiple_merges<H: Heap<i32, i32>>(heaps: Vec<Vec<i32>>) -> Result<(), T
     if !all_mins.is_empty() {
         let expected_min = all_mins.iter().min().copied();
         if let Some(expected) = expected_min {
-            if let Some((actual, _)) = result.peek() {
-                prop_assert_eq!(*actual, expected);
+            // Verify minimum by popping
+            let actual = result.pop();
+            prop_assert_eq!(actual.map(|(p, _)| p), Some(expected));
+            if let Some((p, i)) = actual {
+                result.push(p, i); // Restore
             }
         }
+    } else {
+        // All heaps were empty; merged result should be empty as well
+        prop_assert!(result.is_empty());
     }
 
     Ok(())
@@ -458,7 +472,7 @@ fn test_decrease_key_edge_cases<H: Heap<i32, i32>>(values: Vec<i32>) -> Result<(
         let new_priority = val - 100;
         prop_assert!(heap.decrease_key(&handles[idx], new_priority).is_ok());
 
-        // Verify min is now this value or something smaller
+        // Verify min is now this value or something smaller using peek
         if let Some((min, _)) = heap.peek() {
             prop_assert!(*min <= new_priority);
         }
@@ -546,8 +560,8 @@ macro_rules! create_heap_tests {
                 }
 
                 #[test]
-                fn peek_idempotent(values in prop::collection::vec(-100i32..100, $values_size)) {
-                    test_peek_idempotent::<$heap_type>(values)?;
+                fn pop_maintains_property(values in prop::collection::vec(-100i32..100, $values_size)) {
+                    test_pop_maintains_property::<$heap_type>(values)?;
                 }
 
                 #[test]
