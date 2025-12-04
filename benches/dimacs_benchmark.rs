@@ -33,6 +33,7 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use rust_advanced_heaps::binomial::BinomialHeap;
 use rust_advanced_heaps::fibonacci::FibonacciHeap;
+use rust_advanced_heaps::hollow::HollowHeap;
 use rust_advanced_heaps::pairing::PairingHeap;
 use rust_advanced_heaps::pathfinding::{shortest_path, shortest_path_lazy, SearchNode};
 use rust_advanced_heaps::rank_pairing::RankPairingHeap;
@@ -509,6 +510,7 @@ run_queries_optimized!(run_queries_binomial_opt, BinomialHeap<usize, _>);
 run_queries_optimized!(run_queries_strict_fibonacci_opt, StrictFibonacciHeap<usize, _>);
 run_queries_optimized!(run_queries_twothree_opt, TwoThreeHeap<usize, _>);
 run_queries_optimized!(run_queries_skew_binomial_opt, SkewBinomialHeap<usize, _>);
+run_queries_optimized!(run_queries_hollow_opt, HollowHeap<usize, _>);
 // DISABLED: skiplist_opt is 8x slower than skiplist_lazy
 // run_queries_optimized!(run_queries_skiplist_opt, SkipListHeap<usize, _>);
 
@@ -522,6 +524,7 @@ run_queries_lazy!(run_queries_strict_fibonacci_lazy, StrictFibonacciHeap<usize, 
 run_queries_lazy!(run_queries_twothree_lazy, TwoThreeHeap<usize, _>);
 run_queries_lazy!(run_queries_skew_binomial_lazy, SkewBinomialHeap<usize, _>);
 run_queries_lazy!(run_queries_skiplist_lazy, SkipListHeap<usize, _>);
+run_queries_lazy!(run_queries_hollow_lazy, HollowHeap<usize, _>);
 
 // ============================================================================
 // Benchmarks
@@ -1011,6 +1014,11 @@ fn benchmark_all_heaps_by_rank(c: &mut Criterion) {
             &queries,
             |b, qs| b.iter(|| black_box(run_queries_skew_binomial_opt(&graph, qs))),
         );
+        group.bench_with_input(
+            BenchmarkId::new("hollow_opt", &rank_label),
+            &queries,
+            |b, qs| b.iter(|| black_box(run_queries_hollow_opt(&graph, qs))),
+        );
         // DISABLED: SkipListHeap optimized is 8x slower than lazy variant
         // The lazy (re-insertion) approach is far more efficient for this heap
         // group.bench_with_input(
@@ -1059,6 +1067,11 @@ fn benchmark_all_heaps_by_rank(c: &mut Criterion) {
             BenchmarkId::new("skiplist_lazy", &rank_label),
             &queries,
             |b, qs| b.iter(|| black_box(run_queries_skiplist_lazy(&graph, qs))),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("hollow_lazy", &rank_label),
+            &queries,
+            |b, qs| b.iter(|| black_box(run_queries_hollow_lazy(&graph, qs))),
         );
     }
 
@@ -1134,6 +1147,11 @@ fn benchmark_california_high_rank(c: &mut Criterion) {
             BenchmarkId::new("twothree_opt", &rank_label),
             &queries,
             |b, qs| b.iter(|| black_box(run_queries_twothree_opt(&graph, qs))),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("hollow_opt", &rank_label),
+            &queries,
+            |b, qs| b.iter(|| black_box(run_queries_hollow_opt(&graph, qs))),
         );
 
         // Lazy implementations - simpler, but O(log n) per relaxation

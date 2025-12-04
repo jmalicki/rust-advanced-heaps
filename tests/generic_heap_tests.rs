@@ -705,3 +705,10 @@ base_heap_tests!(
     rust_advanced_heaps::skiplist::SkipListHeap<&'static str, i32>
 );
 decrease_key_heap_tests!(skiplist_decrease, rust_advanced_heaps::skiplist::SkipListHeap<i32, i32>);
+
+// Hollow Heap
+base_heap_tests!(
+    hollow_base,
+    rust_advanced_heaps::hollow::HollowHeap<&'static str, i32>
+);
+decrease_key_heap_tests!(hollow_decrease, rust_advanced_heaps::hollow::HollowHeap<i32, i32>);
