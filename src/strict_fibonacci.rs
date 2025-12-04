@@ -274,6 +274,11 @@ impl<T, P> Node<T, P> {
     /// are valid pointers.
     #[allow(dead_code)] // Will be used in later phases
     unsafe fn set_rank_record(&mut self, new_rank: Option<NonNull<RankRecord>>) {
+        // No-op if the rank record is unchanged.
+        if self.rank_record == new_rank {
+            return;
+        }
+
         // Decrease reference count on old rank record
         if let Some(mut old_ptr) = self.rank_record {
             let should_retire = old_ptr.as_mut().decrease_reference_count();
@@ -285,7 +290,7 @@ impl<T, P> Node<T, P> {
 
         // Set new rank record and increase reference count
         self.rank_record = new_rank;
-        if let Some(mut new_ptr) = new_rank {
+        if let Some(mut new_ptr) = self.rank_record {
             new_ptr.as_mut().increase_reference_count();
         }
     }
