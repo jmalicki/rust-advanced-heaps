@@ -35,11 +35,14 @@
 //! | `push`         | O(1)                |
 //! | `pop`          | O(log C) amortized* |
 //! | `peek`         | O(1)                |
-//! | `decrease_key` | O(1)                |
+//! | `decrease_key` | O(k)**              |
 //! | `merge`        | O(n)                |
 //!
 //! *Where C is the maximum difference between any key and the minimum key when inserted.
 //! For Dijkstra with bounded edge weights, this is effectively O(1).
+//!
+//! **Where k is the bucket size. In typical Dijkstra usage with well-distributed priorities,
+//! k is small and this is effectively O(1). Worst case (all elements in one bucket) is O(n).
 //!
 //! # Cache Performance
 //!
@@ -452,7 +455,9 @@ impl<T, P: RadixKey> DecreaseKeyHeap<T, P> for RadixHeap<T, P> {
             .position(|e| e.id == handle.id)
             .ok_or(HeapError::InvalidHandle)?;
 
-        // If bucket doesn't change, just update priority
+        // If bucket doesn't change, just update priority in place.
+        // The entry.priority and handle.priority share the same Rc<Cell<P>>,
+        // so updating entry.priority also updates handle.priority.
         if old_bucket == new_bucket {
             self.buckets[old_bucket][entry_idx]
                 .priority
@@ -463,9 +468,6 @@ impl<T, P: RadixKey> DecreaseKeyHeap<T, P> for RadixHeap<T, P> {
             entry.priority.set(new_priority);
             self.buckets[new_bucket].push(entry);
         }
-
-        // Also update the handle's shared cell (so future operations see new priority)
-        handle.priority.set(new_priority);
 
         Ok(())
     }
