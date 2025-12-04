@@ -21,6 +21,7 @@
 //! | [`simple_binary::SimpleBinaryHeap`] | O(log n) | O(log n) | - | `Heap` only |
 //! | [`skiplist::SkipListHeap`] | O(log n) | O(log n) | O(log n + m)* | `DecreaseKeyHeap` |
 //! | [`fibonacci::FibonacciHeap`] | O(1) am. | O(log n) am. | O(1) am. | `DecreaseKeyHeap` |
+//! | [`hollow::HollowHeap`] | O(1) | O(log n) am. | O(1) am. | `DecreaseKeyHeap` |
 //! | [`pairing::PairingHeap`] | O(1) am. | O(log n) am. | o(log n) am. | `DecreaseKeyHeap` |
 //! | [`rank_pairing::RankPairingHeap`] | O(1) am. | O(log n) am. | O(1) am. | `DecreaseKeyHeap` |
 //! | [`binomial::BinomialHeap`] | O(log n) | O(log n) | O(log n) | `DecreaseKeyHeap` |
@@ -63,6 +64,7 @@
 
 pub mod binomial;
 pub mod fibonacci;
+pub mod hollow;
 pub mod pairing;
 pub mod pathfinding;
 pub mod radix;

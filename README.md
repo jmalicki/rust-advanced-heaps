@@ -21,6 +21,7 @@ science literature that provide better amortized bounds:
 - **2-3 Heap** (1999): O(1) amortized `decrease_key` - simpler than Fibonacci
 - **Rank-Pairing Heap** (2011): O(1) amortized `decrease_key` - simple + optimal
 - **Strict Fibonacci Heap** (2012): O(1) worst-case `decrease_key`
+- **Hollow Heap** (2015): O(1) amortized `decrease_key` - simple, lazy deletion
 
 ## Features
 
@@ -47,6 +48,7 @@ This allows algorithms to be generic over heaps at the appropriate level of abst
 | **2-3 Heap** | 1999 | O(1) am. | O(log n) am. | **O(1) am.** | O(1) am. |
 | **Rank-Pairing** | 2011 | O(1) am. | O(log n) am. | **O(1) am.** | O(1) |
 | **Strict Fibonacci** | 2012 | O(1) worst | O(log n) worst | **O(1) worst** | O(1) worst |
+| **Hollow** | 2015 | O(1) am. | O(log n) am. | **O(1) am.** | O(1) |
 
 *m = duplicate (priority, id) pairs after merge, typically 1.
 Requires `T: Default`, `P: Copy`.
@@ -168,6 +170,7 @@ pub trait DecreaseKeyHeap<T, P: Ord>: Heap<T, P> {
 - ✅ 2-3 Heap (1999)
 - ✅ Rank-Pairing Heap (2011)
 - ✅ Strict Fibonacci Heap (2012)
+- ✅ Hollow Heap (2015)
 
 ## Performance Considerations
 
@@ -240,3 +243,4 @@ Quick links:
 - [Skip List - Wikipedia](https://en.wikipedia.org/wiki/Skip_list)
 - [Rank-Pairing Heap - Wikipedia](https://en.wikipedia.org/wiki/Rank-pairing_heap)
 - [Skew Binomial Heap - Wikipedia](https://en.wikipedia.org/wiki/Skew_binomial_heap)
+- [Hollow Heap - arXiv](https://arxiv.org/abs/1510.06535)

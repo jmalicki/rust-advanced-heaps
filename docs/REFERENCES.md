@@ -17,6 +17,7 @@ structures implemented in this crate, ordered by publication date.
 | 2-3 Heap         | 1999 | O(1) am.      | Simpler than Fibonacci    |
 | Rank-Pairing     | 2011 | O(1) am.      | Simple + optimal bounds   |
 | Strict Fibonacci | 2012 | O(1) worst    | Optimal worst-case        |
+| Hollow           | 2015 | O(1) am.      | Simple, lazy deletion     |
 
 *m = duplicate (priority, id) pairs, typically 1
 
@@ -451,6 +452,57 @@ primarily of theoretical interest.
 | delete-min   | O(log n)        |
 | decrease-key | O(1)            |
 | merge        | O(1)            |
+
+---
+
+## Hollow Heap (2015)
+
+**Hansen, T. D., Kaplan, H., Tarjan, R. E., & Zwick, U. (2015).** Hollow Heaps.
+*Proceedings of the 42nd International Colloquium on Automata, Languages, and
+Programming (ICALP)*, 689-700.
+
+- **arXiv:** <https://arxiv.org/abs/1510.06535>
+- **ACM Digital Library:** <https://dl.acm.org/doi/10.1145/3093240>
+
+Journal version:
+**Hansen, T. D., Kaplan, H., Tarjan, R. E., & Zwick, U. (2017).** Hollow Heaps.
+*ACM Transactions on Algorithms*, 13(3), Article 42.
+
+Hollow heaps achieve the same amortized bounds as Fibonacci heaps but with a
+simpler implementation. The key innovations are:
+
+1. **Lazy deletion for decrease-key**: Instead of restructuring the heap when
+   decreasing a key, hollow heaps create a new node with the lower key and mark
+   the old node as "hollow" (empty). The hollow node remains in the structure
+   until it naturally gets removed during delete-min.
+
+2. **DAG structure**: Hollow nodes can have a "second parent" pointer, creating
+   a directed acyclic graph (DAG) instead of a forest of trees. This allows
+   efficient handling of the hollow nodes during consolidation.
+
+3. **Simple ranked linking**: During delete-min, the heap performs ranked
+   linking similar to Fibonacci heaps, but without the complexity of cascading
+   cuts or node marking.
+
+The paper notes that hollow heaps are "the simplest heap structure known that
+achieves the optimal amortized bounds" for priority queue operations. The
+structure was developed by Robert Tarjan and collaborators as part of ongoing
+work to find simpler data structures with optimal complexity.
+
+**Trade-offs vs Fibonacci heaps:**
+
+- Simpler decrease-key (no cascading cuts, no marking)
+- Same amortized bounds
+- Potentially more hollow nodes in memory (lazy cleanup)
+- Requires P: Clone for the priority type
+
+| Operation    | Amortized Time |
+| ------------ | -------------- |
+| insert       | O(1)           |
+| find-min     | O(1)           |
+| delete-min   | O(log n)       |
+| decrease-key | O(1)           |
+| merge        | O(1)           |
 
 ---
 
