@@ -11,6 +11,19 @@
 //! This implementation uses Rc/Weak references instead of raw pointers,
 //! providing memory safety for tree structure management.
 //!
+//! # Storage Strategies
+//!
+//! This heap supports pluggable storage strategies for priority values via the
+//! [`optlike`] crate:
+//!
+//! - **`Optimized`** (default): Uses sentinel-based storage that halves memory
+//!   usage for integer/float priorities. The sentinel value (e.g., `i32::MAX`)
+//!   cannot be used as a priority.
+//!
+//! - **`PlainOption`**: Uses standard `Option<P>` storage with no restrictions
+//!   on priority values. Useful for benchmarking or when the full priority
+//!   range is needed.
+//!
 //! # Why Skew Binomial Heaps?
 //!
 //! Skew binomial heaps extend binomial heaps to achieve O(1) worst-case insertion
@@ -30,23 +43,25 @@
 //! - [Wikipedia: Skew binomial heap](https://en.wikipedia.org/wiki/Skew_binomial_heap)
 
 use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError};
+use optlike::{OptLike, Optimized, PlainOption, StorageStrategy};
 use std::cell::RefCell;
+use std::marker::PhantomData;
 use std::rc::{Rc, Weak};
 
 /// Type alias for strong node reference
-type NodeRef<T, P> = Rc<RefCell<Node<T, P>>>;
+type NodeRef<T, P, S> = Rc<RefCell<Node<T, P, S>>>;
 /// Type alias for weak node reference (used for parent backlinks)
-type WeakNodeRef<T, P> = Weak<RefCell<Node<T, P>>>;
+type WeakNodeRef<T, P, S> = Weak<RefCell<Node<T, P, S>>>;
 /// Type alias for optional strong node reference
-type OptNodeRef<T, P> = Option<NodeRef<T, P>>;
+type OptNodeRef<T, P, S> = Option<NodeRef<T, P, S>>;
 
 /// Handle to an element in a Skew binomial heap
 #[derive(Debug)]
-pub struct SkewBinomialHandle<T, P> {
-    node: WeakNodeRef<T, P>,
+pub struct SkewBinomialHandle<T, P: OptLike<S>, S: StorageStrategy = Optimized> {
+    node: WeakNodeRef<T, P, S>,
 }
 
-impl<T, P> Clone for SkewBinomialHandle<T, P> {
+impl<T, P: OptLike<S>, S: StorageStrategy> Clone for SkewBinomialHandle<T, P, S> {
     fn clone(&self) -> Self {
         SkewBinomialHandle {
             node: self.node.clone(),
@@ -54,39 +69,94 @@ impl<T, P> Clone for SkewBinomialHandle<T, P> {
     }
 }
 
-impl<T, P> PartialEq for SkewBinomialHandle<T, P> {
+impl<T, P: OptLike<S>, S: StorageStrategy> PartialEq for SkewBinomialHandle<T, P, S> {
     fn eq(&self, other: &Self) -> bool {
         self.node.ptr_eq(&other.node)
     }
 }
 
-impl<T, P> Eq for SkewBinomialHandle<T, P> {}
+impl<T, P: OptLike<S>, S: StorageStrategy> Eq for SkewBinomialHandle<T, P, S> {}
 
-impl<T, P> Handle for SkewBinomialHandle<T, P> {}
+impl<T, P: OptLike<S>, S: StorageStrategy> Handle for SkewBinomialHandle<T, P, S> {}
 
-struct Node<T, P> {
+struct Node<T, P: OptLike<S>, S: StorageStrategy = Optimized> {
     item: Option<T>,
-    priority: Option<P>,
-    parent: WeakNodeRef<T, P>,
-    child: OptNodeRef<T, P>,
-    sibling: OptNodeRef<T, P>,
+    priority: P::Storage,
+    parent: WeakNodeRef<T, P, S>,
+    child: OptNodeRef<T, P, S>,
+    sibling: OptNodeRef<T, P, S>,
     rank: usize,
     skew: bool,
 }
 
-/// Skew Binomial Heap
-pub struct SkewBinomialHeap<T, P: Ord> {
-    trees: Vec<OptNodeRef<T, P>>,
-    min: OptNodeRef<T, P>,
+/// Skew Binomial Heap with configurable priority storage strategy.
+///
+/// The strategy parameter `S` controls how priorities are stored:
+/// - [`Optimized`]: Uses sentinel-based storage (half the memory for integers)
+/// - [`PlainOption`]: Uses standard `Option<P>` (no value restrictions)
+///
+/// # Example
+///
+/// ```rust
+/// use rust_advanced_heaps::Heap;
+/// use rust_advanced_heaps::skew_binomial::SkewBinomialHeap;
+///
+/// // Uses optimized storage by default
+/// let mut heap: SkewBinomialHeap<&str, i32> = SkewBinomialHeap::new();
+/// heap.push(3, "three");
+/// heap.push(1, "one");
+/// assert_eq!(heap.pop(), Some((1, "one")));
+/// ```
+pub struct SkewBinomialHeapImpl<T, P: OptLike<S>, S: StorageStrategy = Optimized> {
+    trees: Vec<OptNodeRef<T, P, S>>,
+    min: OptNodeRef<T, P, S>,
     len: usize,
+    _strategy: PhantomData<S>,
 }
 
-impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
+/// Skew Binomial Heap with plain Option storage (default).
+///
+/// This is the default type alias for backward compatibility. It uses
+/// standard `Option<P>` for priority storage with no restrictions on
+/// priority values.
+///
+/// For optimized storage with integer/float priorities, use
+/// [`SkewBinomialHeapOpt`] instead.
+pub type SkewBinomialHeap<T, P> = SkewBinomialHeapImpl<T, P, PlainOption>;
+
+/// Skew Binomial Heap with optimized priority storage.
+///
+/// This variant uses sentinel-based storage for priorities, halving
+/// memory usage for integer and float priority types:
+/// - Integers use `NonMax*` types (sentinel = MAX value)
+/// - Floats use NaN as sentinel
+///
+/// **Note**: The sentinel value cannot be used as a priority:
+/// - For integers: `i32::MAX`, `u64::MAX`, etc.
+/// - For floats: `NaN`
+///
+/// # Example
+///
+/// ```rust
+/// use rust_advanced_heaps::Heap;
+/// use rust_advanced_heaps::skew_binomial::SkewBinomialHeapOpt;
+///
+/// let mut heap: SkewBinomialHeapOpt<&str, i32> = SkewBinomialHeapOpt::new();
+/// heap.push(3, "three");
+/// heap.push(1, "one");
+/// assert_eq!(heap.pop(), Some((1, "one")));
+/// ```
+pub type SkewBinomialHeapOpt<T, P> = SkewBinomialHeapImpl<T, P, Optimized>;
+
+impl<T, P: OptLike<S> + Ord + Clone, S: StorageStrategy> Heap<T, P>
+    for SkewBinomialHeapImpl<T, P, S>
+{
     fn new() -> Self {
         Self {
             trees: Vec::new(),
             min: None,
             len: 0,
+            _strategy: PhantomData,
         }
     }
 
@@ -103,12 +173,15 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
     }
 
     fn peek(&self) -> Option<(&P, &T)> {
-        self.min.as_ref().map(|min_ref| unsafe {
+        // For PlainOption strategy, we can return a reference to the priority.
+        // For Optimized strategy, get_ref returns None because NonMax types
+        // store XOR'd values internally.
+        self.min.as_ref().and_then(|min_ref| unsafe {
             let ptr = min_ref.as_ptr();
-            (
-                (*ptr).priority.as_ref().unwrap_unchecked(),
-                (*ptr).item.as_ref().unwrap_unchecked(),
-            )
+            let item_ref = (*ptr).item.as_ref().unwrap_unchecked();
+            // get_ref works for PlainOption (returns Some(&P))
+            // but returns None for Optimized (XOR'd storage)
+            P::get_ref(&(*ptr).priority).map(|priority_ref| (priority_ref, item_ref))
         })
     }
 
@@ -123,7 +196,7 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
 
         // Collect all children
         let first_child = min_ref.borrow_mut().child.take();
-        let mut children_to_insert: Vec<NodeRef<T, P>> = Vec::new();
+        let mut children_to_insert: Vec<NodeRef<T, P, S>> = Vec::new();
 
         if let Some(first) = first_child {
             let mut current = Some(first);
@@ -137,7 +210,10 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
 
         let (priority, item) = {
             let mut node = min_ref.borrow_mut();
-            (node.priority.take().unwrap(), node.item.take().unwrap())
+            (
+                P::take(&mut node.priority).unwrap(),
+                node.item.take().unwrap(),
+            )
         };
 
         drop(min_ref);
@@ -173,7 +249,7 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
             return;
         }
 
-        let mut other_trees: Vec<NodeRef<T, P>> = Vec::new();
+        let mut other_trees: Vec<NodeRef<T, P, S>> = Vec::new();
         for tree_opt in other.trees.iter_mut() {
             if let Some(tree) = tree_opt.take() {
                 other_trees.push(tree);
@@ -192,13 +268,15 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
     }
 }
 
-impl<T, P: Ord> DecreaseKeyHeap<T, P> for SkewBinomialHeap<T, P> {
-    type Handle = SkewBinomialHandle<T, P>;
+impl<T, P: OptLike<S> + Ord + Clone, S: StorageStrategy> DecreaseKeyHeap<T, P>
+    for SkewBinomialHeapImpl<T, P, S>
+{
+    type Handle = SkewBinomialHandle<T, P, S>;
 
     fn push_with_handle(&mut self, priority: P, item: T) -> Self::Handle {
         let node = Rc::new(RefCell::new(Node {
             item: Some(item),
-            priority: Some(priority),
+            priority: P::some(priority),
             parent: Weak::new(),
             child: None,
             sibling: None,
@@ -227,10 +305,10 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for SkewBinomialHeap<T, P> {
         // Check if node has been deleted (priority is None)
         {
             let node = node_ref.borrow();
-            if node.priority.is_none() {
+            if P::is_none(&node.priority) {
                 return Err(HeapError::InvalidHandle);
             }
-            if new_priority >= *node.priority.as_ref().unwrap() {
+            if new_priority >= P::get(&node.priority).unwrap() {
                 return Err(HeapError::PriorityNotDecreased);
             }
         }
@@ -240,7 +318,7 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for SkewBinomialHeap<T, P> {
 
         if !has_parent {
             // Node is a root, just update priority and min
-            node_ref.borrow_mut().priority = Some(new_priority);
+            node_ref.borrow_mut().priority = P::some(new_priority);
             self.find_and_update_min();
             return Ok(());
         }
@@ -252,7 +330,7 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for SkewBinomialHeap<T, P> {
     }
 }
 
-impl<T, P: Ord> SkewBinomialHeap<T, P> {
+impl<T, P: OptLike<S> + Ord + Clone, S: StorageStrategy> SkewBinomialHeapImpl<T, P, S> {
     /// Counts all nodes reachable from the trees array (debug only)
     #[cfg(feature = "expensive_verify")]
     fn count_all_nodes(&self) -> usize {
@@ -264,11 +342,11 @@ impl<T, P: Ord> SkewBinomialHeap<T, P> {
     }
 
     #[cfg(feature = "expensive_verify")]
-    fn count_subtree(node: &NodeRef<T, P>) -> usize {
+    fn count_subtree(node: &NodeRef<T, P, S>) -> usize {
         let node_ref = node.borrow();
         // Verify node has valid priority
         assert!(
-            node_ref.priority.is_some(),
+            P::is_some(&node_ref.priority),
             "Found node with None priority in tree"
         );
 
@@ -287,7 +365,7 @@ impl<T, P: Ord> SkewBinomialHeap<T, P> {
     }
 
     /// Cuts a node from its parent and reinserts it with a new priority
-    fn cut_and_reinsert(&mut self, node: NodeRef<T, P>, new_priority: P) {
+    fn cut_and_reinsert(&mut self, node: NodeRef<T, P, S>, new_priority: P) {
         // Get parent before we modify anything
         let parent_weak = node.borrow().parent.clone();
         let parent = parent_weak.upgrade().unwrap();
@@ -328,7 +406,7 @@ impl<T, P: Ord> SkewBinomialHeap<T, P> {
 
         if !found {
             // Node might already be detached, just update priority
-            node.borrow_mut().priority = Some(new_priority);
+            node.borrow_mut().priority = P::some(new_priority);
             node.borrow_mut().parent = Weak::new();
             self.find_and_update_min();
             return;
@@ -356,7 +434,7 @@ impl<T, P: Ord> SkewBinomialHeap<T, P> {
         node.borrow_mut().sibling = None;
 
         // Update priority
-        node.borrow_mut().priority = Some(new_priority);
+        node.borrow_mut().priority = P::some(new_priority);
 
         // Reinsert the node (with its subtree intact) as a new tree
         self.insert_tree(node);
@@ -365,7 +443,7 @@ impl<T, P: Ord> SkewBinomialHeap<T, P> {
         self.find_and_update_min();
     }
 
-    fn insert_tree(&mut self, mut tree: NodeRef<T, P>) {
+    fn insert_tree(&mut self, mut tree: NodeRef<T, P, S>) {
         loop {
             let rank = tree.borrow().rank;
 
@@ -383,20 +461,20 @@ impl<T, P: Ord> SkewBinomialHeap<T, P> {
         }
     }
 
-    fn link_trees(a: NodeRef<T, P>, b: NodeRef<T, P>) -> NodeRef<T, P> {
+    fn link_trees(a: NodeRef<T, P, S>, b: NodeRef<T, P, S>) -> NodeRef<T, P, S> {
         let a_priority_greater = {
             let a_b = a.borrow();
             let b_b = b.borrow();
             // Debug assertions to catch nodes with invalid priorities
             debug_assert!(
-                a_b.priority.is_some(),
+                P::is_some(&a_b.priority),
                 "link_trees: node 'a' has None priority"
             );
             debug_assert!(
-                b_b.priority.is_some(),
+                P::is_some(&b_b.priority),
                 "link_trees: node 'b' has None priority"
             );
-            a_b.priority.as_ref().unwrap() > b_b.priority.as_ref().unwrap()
+            P::get(&a_b.priority).unwrap() > P::get(&b_b.priority).unwrap()
         };
 
         if a_priority_greater {
@@ -427,8 +505,8 @@ impl<T, P: Ord> SkewBinomialHeap<T, P> {
         for root_opt in self.trees.iter().flatten() {
             let should_update = match &self.min {
                 Some(min_ref) => {
-                    root_opt.borrow().priority.as_ref().unwrap()
-                        < min_ref.borrow().priority.as_ref().unwrap()
+                    P::get(&root_opt.borrow().priority).unwrap()
+                        < P::get(&min_ref.borrow().priority).unwrap()
                 }
                 None => true,
             };
@@ -440,7 +518,7 @@ impl<T, P: Ord> SkewBinomialHeap<T, P> {
     }
 }
 
-impl<T, P: Ord> Default for SkewBinomialHeap<T, P> {
+impl<T, P: OptLike<S> + Ord + Clone, S: StorageStrategy> Default for SkewBinomialHeapImpl<T, P, S> {
     fn default() -> Self {
         Self::new()
     }

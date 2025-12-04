@@ -135,6 +135,20 @@ pub trait OptLike<S: StorageStrategy = Optimized>: Sized + Clone {
     /// so we cannot return a reference to the "real" value.
     fn get(storage: &Self::Storage) -> Option<Self>;
 
+    /// Get a reference to the stored value, or `None` if empty.
+    ///
+    /// This is only available for `PlainOption` strategy. For `Optimized`
+    /// strategy, this returns `None` because `NonMax*` types store values
+    /// XOR'd with MAX internally, so the stored bytes don't represent the
+    /// actual value.
+    ///
+    /// If you need to access the value by reference, use `PlainOption` strategy.
+    fn get_ref(storage: &Self::Storage) -> Option<&Self> {
+        // Default implementation returns None (for Optimized)
+        let _ = storage;
+        None
+    }
+
     /// Take the value out, leaving empty storage.
     fn take(storage: &mut Self::Storage) -> Option<Self>;
 
@@ -143,6 +157,44 @@ pub trait OptLike<S: StorageStrategy = Optimized>: Sized + Clone {
         let old = Self::take(storage);
         *storage = Self::some(val);
         old
+    }
+}
+
+// =============================================================================
+// Blanket Implementation for PlainOption (any Clone type)
+// =============================================================================
+
+impl<T: Clone> OptLike<PlainOption> for T {
+    type Storage = Option<T>;
+
+    #[inline]
+    fn none() -> Self::Storage {
+        None
+    }
+
+    #[inline]
+    fn some(val: Self) -> Self::Storage {
+        Some(val)
+    }
+
+    #[inline]
+    fn is_none(storage: &Self::Storage) -> bool {
+        storage.is_none()
+    }
+
+    #[inline]
+    fn get(storage: &Self::Storage) -> Option<Self> {
+        storage.clone()
+    }
+
+    #[inline]
+    fn get_ref(storage: &Self::Storage) -> Option<&Self> {
+        storage.as_ref()
+    }
+
+    #[inline]
+    fn take(storage: &mut Self::Storage) -> Option<Self> {
+        storage.take()
     }
 }
 
@@ -182,35 +234,6 @@ macro_rules! impl_optlike_integer {
             #[inline]
             fn take(storage: &mut Self::Storage) -> Option<Self> {
                 storage.take().map(|nm| nm.get())
-            }
-        }
-
-        impl OptLike<PlainOption> for $int {
-            type Storage = Option<$int>;
-
-            #[inline]
-            fn none() -> Self::Storage {
-                None
-            }
-
-            #[inline]
-            fn some(val: Self) -> Self::Storage {
-                Some(val)
-            }
-
-            #[inline]
-            fn is_none(storage: &Self::Storage) -> bool {
-                storage.is_none()
-            }
-
-            #[inline]
-            fn get(storage: &Self::Storage) -> Option<Self> {
-                *storage
-            }
-
-            #[inline]
-            fn take(storage: &mut Self::Storage) -> Option<Self> {
-                storage.take()
             }
         }
     };
@@ -294,35 +317,6 @@ impl OptLike<Optimized> for f32 {
     }
 }
 
-impl OptLike<PlainOption> for f32 {
-    type Storage = Option<f32>;
-
-    #[inline]
-    fn none() -> Self::Storage {
-        None
-    }
-
-    #[inline]
-    fn some(val: Self) -> Self::Storage {
-        Some(val)
-    }
-
-    #[inline]
-    fn is_none(storage: &Self::Storage) -> bool {
-        storage.is_none()
-    }
-
-    #[inline]
-    fn get(storage: &Self::Storage) -> Option<Self> {
-        *storage
-    }
-
-    #[inline]
-    fn take(storage: &mut Self::Storage) -> Option<Self> {
-        storage.take()
-    }
-}
-
 /// Optimized storage for `f64` using NaN as the sentinel.
 ///
 /// This wrapper is `repr(transparent)` so it has the same size as `f64`.
@@ -381,35 +375,6 @@ impl OptLike<Optimized> for f64 {
             *storage = OptF64::NONE;
             Some(val)
         }
-    }
-}
-
-impl OptLike<PlainOption> for f64 {
-    type Storage = Option<f64>;
-
-    #[inline]
-    fn none() -> Self::Storage {
-        None
-    }
-
-    #[inline]
-    fn some(val: Self) -> Self::Storage {
-        Some(val)
-    }
-
-    #[inline]
-    fn is_none(storage: &Self::Storage) -> bool {
-        storage.is_none()
-    }
-
-    #[inline]
-    fn get(storage: &Self::Storage) -> Option<Self> {
-        *storage
-    }
-
-    #[inline]
-    fn take(storage: &mut Self::Storage) -> Option<Self> {
-        storage.take()
     }
 }
 
