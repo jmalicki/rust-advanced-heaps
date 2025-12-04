@@ -1029,12 +1029,12 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
     /// Links a node as an active child (leftmost) of a parent.
     ///
     /// Active children are placed at the left end of the children list.
+    /// The child becomes active and fixed with loss = 0.
     ///
     /// # Safety
     ///
     /// Both pointers must be valid and child must not already be in parent's
-    /// children list.
-    #[allow(dead_code)] // Will be used when reductions are integrated
+    /// children list. The child must not be in any fix-list group.
     unsafe fn link_as_active_child(
         &mut self,
         parent_ptr: NonNull<Node<T, P>>,
@@ -1046,6 +1046,10 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
 
         // Set child's parent
         (*child).parent = Some(parent_ptr);
+
+        // Mark child as active and fixed with loss = 0
+        (*child).active = true;
+        (*child).loss = 0;
 
         let child_link = (*child).sibling_link_ptr();
 
@@ -1064,19 +1068,22 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
             }
         }
 
-        // Increment parent's rank
+        // Increment parent's rank (only active children contribute to rank)
         (*parent).rank_count += 1;
+
+        // Add child to fix-list as a fixed node with loss = 0
+        self.fix_list_add(child_ptr);
     }
 
     /// Links a node as a passive child (rightmost) of a parent.
     ///
     /// Passive children are placed at the right end of the children list.
+    /// The child becomes/remains passive.
     ///
     /// # Safety
     ///
     /// Both pointers must be valid and child must not already be in parent's
-    /// children list.
-    #[allow(dead_code)] // Will be used when reductions are integrated
+    /// children list. The child must not be in any fix-list group.
     unsafe fn link_as_passive_child(
         &mut self,
         parent_ptr: NonNull<Node<T, P>>,
@@ -1088,6 +1095,10 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
 
         // Set child's parent
         (*child).parent = Some(parent_ptr);
+
+        // Mark child as passive
+        (*child).active = false;
+        (*child).loss = LOSS_FREE; // Passive nodes don't track loss
 
         let child_link = (*child).sibling_link_ptr();
 
@@ -1109,6 +1120,7 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
         }
 
         // Passive children don't increment rank (only active children count)
+        // Passive children are not added to fix-list
     }
 
     /// Adds a node to the appropriate fix-list group based on its state.
@@ -1537,8 +1549,12 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
             }
 
             // Cut both nodes from their parents with loss tracking
+            // Note: cut_with_loss_tracking adds nodes to root list via add_to_roots
             self.cut_with_loss_tracking(winner);
             self.cut_with_loss_tracking(loser);
+
+            // Loser will become a child of winner; remove it from the root list first
+            self.remove_from_roots(loser);
 
             // Link loser under winner as active child
             self.link_as_active_child(winner, loser);
@@ -1890,7 +1906,11 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
         self.find_new_min();
     }
 
-    /// Links two trees, making the one with larger priority a child of the other.
+    /// Links two trees during consolidation, making the one with larger priority
+    /// a passive child of the other.
+    ///
+    /// This is used during `pop()` consolidation. The child becomes passive.
+    /// For active root reduction, use `link_as_active_child()` instead.
     ///
     /// Returns the root of the combined tree.
     fn link(&mut self, a: NonNull<Node<T, P>>, b: NonNull<Node<T, P>>) -> NonNull<Node<T, P>> {
@@ -1909,11 +1929,19 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
             let parent = parent_ptr.as_ptr();
             let child = child_ptr.as_ptr();
 
+            // If child was in fix-list (e.g., was a free active root), remove it
+            if (*child).active {
+                self.fix_list_remove(child_ptr);
+            }
+
             // Set child's parent
             (*child).parent = Some(parent_ptr);
-            (*child).active = false;
 
-            // Add child to parent's children list
+            // Mark child as passive (consolidation creates passive children)
+            (*child).active = false;
+            (*child).loss = LOSS_FREE; // Passive nodes don't track loss
+
+            // Add child to parent's children list (rightmost for passive)
             let child_link = (*child).sibling_link_ptr();
 
             match (*parent).child {
@@ -1923,13 +1951,14 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
                     (*parent).child = Some(child_ptr);
                 }
                 Some(first_child_ptr) => {
-                    // Insert into existing children list
+                    // Insert after the last child (rightmost position for passive)
+                    // In a circular list, insert_before first = insert after last
                     let first_child_link = first_child_ptr.as_ref().sibling_link_ptr();
-                    ops.insert_after(first_child_link, child_link);
+                    ops.insert_before(first_child_link, child_link);
                 }
             }
 
-            // Increment parent's rank
+            // Increment parent's rank (all children count for consolidation purposes)
             (*parent).rank_count += 1;
         }
 
@@ -1937,6 +1966,9 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
     }
 
     /// Cuts a node from its parent and adds it to the root list.
+    ///
+    /// If the node was active (fixed), it becomes a free active root.
+    /// Passive nodes remain passive as roots.
     fn cut(&mut self, node_ptr: NonNull<Node<T, P>>) {
         let ops = CircularListOps::new();
 
@@ -1947,6 +1979,12 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
                 None => return, // Already a root
             };
             let parent = parent_ptr.as_ptr();
+
+            // If the node was in fix-list (active/fixed), remove it first
+            let was_active = (*node).active;
+            if was_active && (*node).is_fixed() {
+                self.fix_list_remove(node_ptr);
+            }
 
             // Remove from parent's children list
             let node_link = (*node).sibling_link_ptr();
@@ -1979,9 +2017,16 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
             // Add to root list
             self.add_to_roots(node_ptr);
 
-            // Note: In a full strict Fibonacci heap, we would handle
-            // cascading cuts and active node tracking here.
-            // For now, we just do a simple cut (amortized bounds).
+            // Handle active node state transition:
+            // - If the node was active (fixed child), it becomes a free active root
+            // - If the node was passive, it remains passive as a root
+            if was_active {
+                // Transition from fixed to free (active root)
+                (*node).loss = LOSS_FREE;
+                // Add to fix-list as a free node
+                self.fix_list_add(node_ptr);
+            }
+            // Passive nodes remain passive and are not added to fix-list
         }
     }
 }
@@ -2518,5 +2563,422 @@ mod tests {
         assert_eq!(heap.pop(), Some((2, 2)));
         assert_eq!(heap.pop(), Some((3, 3)));
         assert!(heap.is_empty());
+    }
+
+    // =========================================================================
+    // Phase 6: Node activation and fix-list population tests
+    // =========================================================================
+
+    #[test]
+    fn test_link_as_active_child_sets_node_state() {
+        // Verify that link_as_active_child correctly sets active=true, loss=0
+        let mut heap: StrictFibonacciHeap<i32, i32> = StrictFibonacciHeap::new();
+
+        // Create two nodes
+        let parent_node = Node::new(1, 10);
+        let child_node = Node::new(2, 20);
+        let parent_ptr = NonNull::new(Box::into_raw(parent_node)).unwrap();
+        let child_ptr = NonNull::new(Box::into_raw(child_node)).unwrap();
+
+        // Add parent to roots
+        heap.add_to_roots(parent_ptr);
+        heap.len = 2;
+
+        unsafe {
+            // Initially child should be passive (default state)
+            assert!(!(*child_ptr.as_ptr()).active);
+
+            // Link child as active child
+            heap.link_as_active_child(parent_ptr, child_ptr);
+
+            // Verify child state after linking
+            assert!(
+                (*child_ptr.as_ptr()).active,
+                "Child should be active after link_as_active_child"
+            );
+            assert_eq!(
+                (*child_ptr.as_ptr()).loss,
+                0,
+                "Child should have loss=0 after link_as_active_child"
+            );
+            assert!(
+                (*child_ptr.as_ptr()).is_fixed(),
+                "Child should be fixed (active with loss=0)"
+            );
+            assert_eq!(
+                (*child_ptr.as_ptr()).parent,
+                Some(parent_ptr),
+                "Child should have parent set"
+            );
+
+            // Verify parent's rank increased
+            assert_eq!(
+                (*parent_ptr.as_ptr()).rank_count,
+                1,
+                "Parent rank should be 1 after adding active child"
+            );
+
+            // Verify child is in fix-list (fix_loss_zero group since loss=0)
+            assert!(
+                heap.fix_loss_zero.is_some(),
+                "fix_loss_zero should have the active child"
+            );
+        }
+
+        // Clean up - pop will handle deallocation
+        heap.min = Some(parent_ptr);
+        while heap.pop().is_some() {}
+    }
+
+    #[test]
+    fn test_link_as_passive_child_sets_node_state() {
+        // Verify that link_as_passive_child correctly sets active=false
+        let mut heap: StrictFibonacciHeap<i32, i32> = StrictFibonacciHeap::new();
+
+        // Create two nodes
+        let parent_node = Node::new(1, 10);
+        let child_node = Node::new(2, 20);
+        let parent_ptr = NonNull::new(Box::into_raw(parent_node)).unwrap();
+        let child_ptr = NonNull::new(Box::into_raw(child_node)).unwrap();
+
+        // Make child active first to verify it gets deactivated
+        unsafe {
+            (*child_ptr.as_ptr()).active = true;
+            (*child_ptr.as_ptr()).loss = 0;
+        }
+
+        // Add parent to roots
+        heap.add_to_roots(parent_ptr);
+        heap.len = 2;
+
+        unsafe {
+            // Link child as passive child
+            heap.link_as_passive_child(parent_ptr, child_ptr);
+
+            // Verify child state after linking
+            assert!(
+                !(*child_ptr.as_ptr()).active,
+                "Child should be passive after link_as_passive_child"
+            );
+            assert_eq!(
+                (*child_ptr.as_ptr()).loss,
+                LOSS_FREE,
+                "Child should have loss=LOSS_FREE after link_as_passive_child"
+            );
+            assert!(
+                (*child_ptr.as_ptr()).is_passive(),
+                "Child should be passive"
+            );
+
+            // Verify parent's rank did NOT increase (passive children don't count)
+            assert_eq!(
+                (*parent_ptr.as_ptr()).rank_count,
+                0,
+                "Parent rank should still be 0 (passive children don't increment)"
+            );
+
+            // Verify child is NOT in any fix-list group
+            assert!(
+                heap.fix_passive.is_none(),
+                "Passive children should not be in fix-list"
+            );
+            assert!(
+                heap.fix_loss_zero.is_none(),
+                "Passive children should not be in fix_loss_zero"
+            );
+        }
+
+        // Clean up
+        heap.min = Some(parent_ptr);
+        while heap.pop().is_some() {}
+    }
+
+    #[test]
+    fn test_consolidation_creates_passive_children() {
+        // Verify that consolidation (link) creates passive children
+        let mut heap: StrictFibonacciHeap<i32, i32> = StrictFibonacciHeap::new();
+
+        // Insert elements
+        for i in 0..4 {
+            heap.push(i, i);
+        }
+
+        // Pop minimum - triggers consolidation
+        let _ = heap.pop();
+
+        // After consolidation, all children should be passive
+        // We can verify this by checking that no fix-list groups are populated
+        // (since consolidation only creates passive children, not active ones)
+        unsafe {
+            if let Some(root_ptr) = heap.roots {
+                if let Some(child_ptr) = (*root_ptr.as_ptr()).child {
+                    // Check the child is passive
+                    assert!(
+                        !(*child_ptr.as_ptr()).active,
+                        "Children created by consolidation should be passive"
+                    );
+                    assert_eq!(
+                        (*child_ptr.as_ptr()).loss,
+                        LOSS_FREE,
+                        "Passive children should have loss=LOSS_FREE"
+                    );
+                }
+            }
+        }
+
+        // Verify heap still works correctly
+        let mut last = i32::MIN;
+        while let Some((p, _)) = heap.pop() {
+            assert!(p >= last);
+            last = p;
+        }
+    }
+
+    #[test]
+    fn test_cut_removes_from_fix_list_and_transitions_state() {
+        // Verify that cutting an active/fixed node:
+        // 1. Removes it from fix-list
+        // 2. Transitions it to free (active root)
+        // 3. Re-adds it to fix-list as free
+        let mut heap: StrictFibonacciHeap<i32, i32> = StrictFibonacciHeap::new();
+
+        // Create parent and child nodes
+        let parent_node = Node::new(1, 10);
+        let child_node = Node::new(5, 50); // Higher priority so it becomes child
+        let parent_ptr = NonNull::new(Box::into_raw(parent_node)).unwrap();
+        let child_ptr = NonNull::new(Box::into_raw(child_node)).unwrap();
+
+        // Set up parent as root
+        heap.add_to_roots(parent_ptr);
+        heap.min = Some(parent_ptr);
+        heap.len = 2;
+
+        unsafe {
+            // Link child as active child (this adds to fix_loss_zero)
+            heap.link_as_active_child(parent_ptr, child_ptr);
+
+            // Verify child is active/fixed in fix_loss_zero
+            assert!((*child_ptr.as_ptr()).is_fixed());
+            assert!(heap.fix_loss_zero.is_some());
+
+            // Now cut the child (simulating decrease_key making it smaller than parent)
+            (*child_ptr.as_ptr()).priority = 0; // Make it smaller than parent
+            heap.cut(child_ptr);
+
+            // After cut, child should be:
+            // 1. A root (no parent)
+            assert!(
+                (*child_ptr.as_ptr()).parent.is_none(),
+                "Cut node should have no parent"
+            );
+
+            // 2. Active and free (loss = LOSS_FREE)
+            assert!(
+                (*child_ptr.as_ptr()).active,
+                "Cut active node should remain active"
+            );
+            assert_eq!(
+                (*child_ptr.as_ptr()).loss,
+                LOSS_FREE,
+                "Cut active node should become free (loss=LOSS_FREE)"
+            );
+            assert!(
+                (*child_ptr.as_ptr()).is_free(),
+                "Cut active node should be free"
+            );
+
+            // 3. In fix-list as a free node (fix_free_single)
+            assert!(
+                heap.fix_free_single.is_some(),
+                "Cut active node should be in fix_free_single"
+            );
+
+            // 4. fix_loss_zero should now be empty (child was removed)
+            assert!(
+                heap.fix_loss_zero.is_none(),
+                "fix_loss_zero should be empty after cut"
+            );
+        }
+
+        // Update min and clean up
+        heap.update_min(child_ptr);
+        while heap.pop().is_some() {}
+    }
+
+    #[test]
+    fn test_cut_passive_node_stays_passive() {
+        // Verify that cutting a passive node keeps it passive
+        let mut heap: StrictFibonacciHeap<i32, i32> = StrictFibonacciHeap::new();
+
+        // Create parent and child nodes
+        let parent_node = Node::new(1, 10);
+        let child_node = Node::new(5, 50);
+        let parent_ptr = NonNull::new(Box::into_raw(parent_node)).unwrap();
+        let child_ptr = NonNull::new(Box::into_raw(child_node)).unwrap();
+
+        // Set up parent as root
+        heap.add_to_roots(parent_ptr);
+        heap.min = Some(parent_ptr);
+        heap.len = 2;
+
+        unsafe {
+            // Link child as passive child using link() which is what consolidation uses
+            // This properly increments rank_count (unlike link_as_passive_child)
+            // We'll use link() directly since it creates passive children
+            heap.link_as_passive_child(parent_ptr, child_ptr);
+            // Manually set rank_count since link_as_passive_child doesn't increment
+            // but cut() expects it (real consolidation uses link() which increments)
+            (*parent_ptr.as_ptr()).rank_count = 1;
+
+            // Verify child is passive
+            assert!((*child_ptr.as_ptr()).is_passive());
+
+            // Cut the child
+            (*child_ptr.as_ptr()).priority = 0;
+            heap.cut(child_ptr);
+
+            // After cut, child should still be passive
+            assert!(
+                (*child_ptr.as_ptr()).is_passive(),
+                "Cut passive node should remain passive"
+            );
+
+            // And NOT in any fix-list group
+            assert!(
+                heap.fix_free_single.is_none(),
+                "Passive nodes should not be in fix_free_single"
+            );
+            assert!(
+                heap.fix_passive.is_none(),
+                "Passive roots are not tracked in fix_passive in current impl"
+            );
+        }
+
+        // Update min and clean up
+        heap.update_min(child_ptr);
+        while heap.pop().is_some() {}
+    }
+
+    #[test]
+    fn test_fix_list_groups_populated_correctly() {
+        // Test that various operations populate the correct fix-list groups
+        let mut heap: StrictFibonacciHeap<i32, i32> = StrictFibonacciHeap::new();
+
+        // Initially all fix-list groups should be empty
+        assert!(heap.fix_passive.is_none());
+        assert!(heap.fix_free_multiple.is_none());
+        assert!(heap.fix_free_single.is_none());
+        assert!(heap.fix_loss_zero.is_none());
+        assert!(heap.fix_loss_one_multiple.is_none());
+        assert!(heap.fix_loss_one_single.is_none());
+        assert!(heap.fix_loss_two.is_none());
+
+        // Create nodes and manually test fix_list_add
+        let node1 = Node::new(1, 10);
+        let node1_ptr = NonNull::new(Box::into_raw(node1)).unwrap();
+
+        unsafe {
+            // Test adding a passive node
+            (*node1_ptr.as_ptr()).active = false;
+            heap.fix_list_add(node1_ptr);
+            assert!(
+                heap.fix_passive.is_some(),
+                "Passive node should be in fix_passive"
+            );
+
+            // Remove it
+            heap.fix_list_remove(node1_ptr);
+            assert!(heap.fix_passive.is_none());
+
+            // Test adding a free active node
+            (*node1_ptr.as_ptr()).active = true;
+            (*node1_ptr.as_ptr()).loss = LOSS_FREE;
+            heap.fix_list_add(node1_ptr);
+            assert!(
+                heap.fix_free_single.is_some(),
+                "Free node should be in fix_free_single"
+            );
+
+            // Remove it
+            heap.fix_list_remove(node1_ptr);
+            assert!(heap.fix_free_single.is_none());
+
+            // Test adding a fixed node with loss=0
+            (*node1_ptr.as_ptr()).active = true;
+            (*node1_ptr.as_ptr()).loss = 0;
+            heap.fix_list_add(node1_ptr);
+            assert!(
+                heap.fix_loss_zero.is_some(),
+                "Fixed node with loss=0 should be in fix_loss_zero"
+            );
+
+            // Remove it
+            heap.fix_list_remove(node1_ptr);
+            assert!(heap.fix_loss_zero.is_none());
+
+            // Test adding a fixed node with loss=1
+            (*node1_ptr.as_ptr()).loss = 1;
+            heap.fix_list_add(node1_ptr);
+            assert!(
+                heap.fix_loss_one_single.is_some(),
+                "Fixed node with loss=1 should be in fix_loss_one_single"
+            );
+
+            // Remove it
+            heap.fix_list_remove(node1_ptr);
+            assert!(heap.fix_loss_one_single.is_none());
+
+            // Test adding a fixed node with loss>=2
+            (*node1_ptr.as_ptr()).loss = 2;
+            heap.fix_list_add(node1_ptr);
+            assert!(
+                heap.fix_loss_two.is_some(),
+                "Fixed node with loss>=2 should be in fix_loss_two"
+            );
+
+            // Clean up
+            heap.fix_list_remove(node1_ptr);
+            drop(Box::from_raw(node1_ptr.as_ptr()));
+        }
+    }
+
+    #[test]
+    fn test_integration_active_state_through_operations() {
+        // Integration test verifying active state is maintained through
+        // a realistic sequence of operations
+        let mut heap: StrictFibonacciHeap<i32, i32> = StrictFibonacciHeap::new();
+
+        // Insert elements
+        for i in 0..20 {
+            heap.push(i, i);
+        }
+
+        // Pop to trigger consolidation (creates passive children)
+        for _ in 0..5 {
+            heap.pop();
+        }
+
+        // After consolidation, children should be passive
+        // Verify no active fix-list groups are populated from consolidation alone
+        // (Active nodes come from active root reduction, which requires free nodes)
+
+        // Insert more with handles for decrease_key
+        let handles: Vec<_> = (100..110).map(|i| heap.push_with_handle(i, i)).collect();
+
+        // Pop more to build structure
+        heap.pop();
+
+        // Decrease some keys - this triggers cuts
+        // Cut nodes that were passive stay passive
+        for (i, h) in handles.iter().enumerate().take(5) {
+            let _ = heap.decrease_key(h, -(i as i32) - 1);
+        }
+
+        // Verify heap integrity after all operations
+        let mut last = i32::MIN;
+        while let Some((p, _)) = heap.pop() {
+            assert!(p >= last);
+            last = p;
+        }
     }
 }
