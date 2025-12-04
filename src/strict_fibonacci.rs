@@ -612,8 +612,12 @@ impl<T, P: Ord> Heap<T, P> for StrictFibonacciHeap<T, P> {
     fn pop(&mut self) -> Option<(P, T)> {
         let min_ptr = self.min?;
 
-        // Count children to determine reduction budget
-        // The min node has O(log n) children due to Fibonacci heap structure
+        // Count children to determine reduction budget.
+        // The min node has O(log n) children due to Fibonacci heap structure.
+        //
+        // Safety: min_ptr is valid (checked via `self.min?` above).
+        // CircularListOps::for_each safely traverses the circular sibling list,
+        // visiting each child exactly once before returning to the start.
         let child_count = unsafe {
             let min_node = min_ptr.as_ref();
             match min_node.child {
@@ -1279,23 +1283,59 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
     fn perform_reductions(&mut self, count: usize) -> usize {
         let mut performed = 0;
 
+        // Track which reduction types were performed (debug builds only)
+        #[cfg(debug_assertions)]
+        let mut one_node_loss_count = 0usize;
+        #[cfg(debug_assertions)]
+        let mut two_node_loss_count = 0usize;
+        #[cfg(debug_assertions)]
+        let mut active_root_count = 0usize;
+        #[cfg(debug_assertions)]
+        let mut root_degree_count = 0usize;
+
         for _ in 0..count {
             // Try reductions in priority order:
             // 1. One-node loss reduction (most urgent - loss >= 2)
             // 2. Two-node loss reduction (loss = 1 pairs)
             // 3. Active root reduction (same-rank active roots)
             // 4. Root degree reduction (passive root linking)
-            let reduced = self.one_node_loss_reduction()
-                || self.two_node_loss_reduction()
-                || self.active_root_reduction()
-                || self.root_degree_reduction();
-
-            if reduced {
+            if self.one_node_loss_reduction() {
                 performed += 1;
+                #[cfg(debug_assertions)]
+                {
+                    one_node_loss_count += 1;
+                }
+            } else if self.two_node_loss_reduction() {
+                performed += 1;
+                #[cfg(debug_assertions)]
+                {
+                    two_node_loss_count += 1;
+                }
+            } else if self.active_root_reduction() {
+                performed += 1;
+                #[cfg(debug_assertions)]
+                {
+                    active_root_count += 1;
+                }
+            } else if self.root_degree_reduction() {
+                performed += 1;
+                #[cfg(debug_assertions)]
+                {
+                    root_degree_count += 1;
+                }
             } else {
                 // No more reductions possible
                 break;
             }
+        }
+
+        // Log reduction statistics in debug builds
+        #[cfg(debug_assertions)]
+        if performed > 0 {
+            eprintln!(
+                "[StrictFibonacciHeap] reductions: {} total (one_node_loss={}, two_node_loss={}, active_root={}, root_degree={}), budget={}",
+                performed, one_node_loss_count, two_node_loss_count, active_root_count, root_degree_count, count
+            );
         }
 
         performed
@@ -2430,5 +2470,35 @@ mod tests {
             assert!(p >= last);
             last = p;
         }
+    }
+
+    #[test]
+    fn test_pop_minimum_with_no_children() {
+        // Test that pop works correctly when the minimum node has no children.
+        // This exercises the `.max(1)` logic in pop() that ensures at least
+        // one reduction is performed even when child_count is 0.
+        let mut heap: StrictFibonacciHeap<i32, i32> = StrictFibonacciHeap::new();
+
+        // Single element - min has no children
+        heap.push(5, 5);
+        assert_eq!(heap.pop(), Some((5, 5)));
+        assert!(heap.is_empty());
+
+        // Two elements - after first pop, the remaining element becomes min with no children
+        heap.push(10, 10);
+        heap.push(20, 20);
+        assert_eq!(heap.pop(), Some((10, 10))); // Pop min (10)
+        assert_eq!(heap.pop(), Some((20, 20))); // Pop remaining (20) which has no children
+        assert!(heap.is_empty());
+
+        // Three elements - creates a small tree structure
+        heap.push(1, 1);
+        heap.push(2, 2);
+        heap.push(3, 3);
+        // Pop min (1). After consolidation, remaining nodes form a tree
+        assert_eq!(heap.pop(), Some((1, 1)));
+        assert_eq!(heap.pop(), Some((2, 2)));
+        assert_eq!(heap.pop(), Some((3, 3)));
+        assert!(heap.is_empty());
     }
 }
