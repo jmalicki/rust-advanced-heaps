@@ -123,8 +123,11 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
         self.min.as_ref().map(|min_ref| unsafe {
             let ptr = min_ref.as_ptr();
             (
-                (*ptr).priority.as_ref().unwrap_unchecked(),
-                (*ptr).item.as_ref().unwrap_unchecked(),
+                (*ptr)
+                    .priority
+                    .as_ref()
+                    .expect("min node must have priority"),
+                (*ptr).item.as_ref().expect("min node must have item"),
             )
         })
     }
