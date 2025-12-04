@@ -31,11 +31,16 @@
 //! - Lines 'a u v w' define edge from node u to node v with weight w
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use rust_advanced_heaps::binomial::BinomialHeap;
 use rust_advanced_heaps::fibonacci::FibonacciHeap;
 use rust_advanced_heaps::pairing::PairingHeap;
 use rust_advanced_heaps::pathfinding::{shortest_path, shortest_path_lazy, SearchNode};
 use rust_advanced_heaps::rank_pairing::RankPairingHeap;
 use rust_advanced_heaps::simple_binary::SimpleBinaryHeap;
+use rust_advanced_heaps::skew_binomial::SkewBinomialHeap;
+use rust_advanced_heaps::skiplist::SkipListHeap;
+use rust_advanced_heaps::strict_fibonacci::StrictFibonacciHeap;
+use rust_advanced_heaps::twothree::TwoThreeHeap;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -75,7 +80,7 @@ impl Lcg {
 // ============================================================================
 
 /// Adjacency list graph representation
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct DimacsGraph {
     /// Number of nodes
     pub num_nodes: usize,
@@ -395,7 +400,7 @@ pub fn generate_queries_for_rank(
 // ============================================================================
 
 /// Node for pathfinding on a DIMACS graph
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct DimacsNode {
     pub id: u32,
     pub goal: u32,
@@ -500,12 +505,22 @@ macro_rules! run_queries_lazy {
 run_queries_optimized!(run_queries_fibonacci_opt, FibonacciHeap<usize, _>);
 run_queries_optimized!(run_queries_pairing_opt, PairingHeap<usize, _>);
 run_queries_optimized!(run_queries_rank_pairing_opt, RankPairingHeap<usize, _>);
+run_queries_optimized!(run_queries_binomial_opt, BinomialHeap<usize, _>);
+run_queries_optimized!(run_queries_strict_fibonacci_opt, StrictFibonacciHeap<usize, _>);
+run_queries_optimized!(run_queries_twothree_opt, TwoThreeHeap<usize, _>);
+run_queries_optimized!(run_queries_skew_binomial_opt, SkewBinomialHeap<usize, _>);
+run_queries_optimized!(run_queries_skiplist_opt, SkipListHeap<usize, _>);
 
 // Lazy runners (use re-insertion)
 run_queries_lazy!(run_queries_fibonacci_lazy, FibonacciHeap<usize, _>);
 run_queries_lazy!(run_queries_pairing_lazy, PairingHeap<usize, _>);
 run_queries_lazy!(run_queries_rank_pairing_lazy, RankPairingHeap<usize, _>);
 run_queries_lazy!(run_queries_simple_binary_lazy, SimpleBinaryHeap<usize, _>);
+run_queries_lazy!(run_queries_binomial_lazy, BinomialHeap<usize, _>);
+run_queries_lazy!(run_queries_strict_fibonacci_lazy, StrictFibonacciHeap<usize, _>);
+run_queries_lazy!(run_queries_twothree_lazy, TwoThreeHeap<usize, _>);
+run_queries_lazy!(run_queries_skew_binomial_lazy, SkewBinomialHeap<usize, _>);
+run_queries_lazy!(run_queries_skiplist_lazy, SkipListHeap<usize, _>);
 
 // ============================================================================
 // Benchmarks
@@ -933,6 +948,118 @@ fn benchmark_correctness_check(c: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmark ALL heap implementations by Dijkstra rank.
+///
+/// This is the primary benchmark for identifying aberrant big-O patterns.
+/// By grouping queries by rank (number of nodes settled), we can observe
+/// how each heap's performance scales with problem size.
+fn benchmark_all_heaps_by_rank(c: &mut Criterion) {
+    let mut group = c.benchmark_group("all_heaps_by_rank");
+    group.sample_size(10);
+
+    // Use a 20K node graph - large enough for meaningful ranks
+    let graph = Arc::new(DimacsGraph::synthetic_sparse(20_000, 6, 12345));
+
+    // Test ranks: 2^10 (1K), 2^12 (4K), 2^14 (16K)
+    let rank_levels = [10, 12, 14];
+
+    for &log_rank in &rank_levels {
+        let queries = generate_queries_for_rank(&graph, log_rank, 20, 77777 + log_rank as u64);
+
+        if queries.len() < 5 {
+            continue;
+        }
+
+        let rank_label = format!("2^{}", log_rank);
+
+        // All optimized (decrease_key) implementations
+        group.bench_with_input(
+            BenchmarkId::new("fibonacci_opt", &rank_label),
+            &queries,
+            |b, qs| b.iter(|| black_box(run_queries_fibonacci_opt(&graph, qs))),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("pairing_opt", &rank_label),
+            &queries,
+            |b, qs| b.iter(|| black_box(run_queries_pairing_opt(&graph, qs))),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("rank_pairing_opt", &rank_label),
+            &queries,
+            |b, qs| b.iter(|| black_box(run_queries_rank_pairing_opt(&graph, qs))),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("binomial_opt", &rank_label),
+            &queries,
+            |b, qs| b.iter(|| black_box(run_queries_binomial_opt(&graph, qs))),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("strict_fibonacci_opt", &rank_label),
+            &queries,
+            |b, qs| b.iter(|| black_box(run_queries_strict_fibonacci_opt(&graph, qs))),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("twothree_opt", &rank_label),
+            &queries,
+            |b, qs| b.iter(|| black_box(run_queries_twothree_opt(&graph, qs))),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("skew_binomial_opt", &rank_label),
+            &queries,
+            |b, qs| b.iter(|| black_box(run_queries_skew_binomial_opt(&graph, qs))),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("skiplist_opt", &rank_label),
+            &queries,
+            |b, qs| b.iter(|| black_box(run_queries_skiplist_opt(&graph, qs))),
+        );
+
+        // All lazy (re-insertion) implementations
+        group.bench_with_input(
+            BenchmarkId::new("simple_binary_lazy", &rank_label),
+            &queries,
+            |b, qs| b.iter(|| black_box(run_queries_simple_binary_lazy(&graph, qs))),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("fibonacci_lazy", &rank_label),
+            &queries,
+            |b, qs| b.iter(|| black_box(run_queries_fibonacci_lazy(&graph, qs))),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("pairing_lazy", &rank_label),
+            &queries,
+            |b, qs| b.iter(|| black_box(run_queries_pairing_lazy(&graph, qs))),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("binomial_lazy", &rank_label),
+            &queries,
+            |b, qs| b.iter(|| black_box(run_queries_binomial_lazy(&graph, qs))),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("twothree_lazy", &rank_label),
+            &queries,
+            |b, qs| b.iter(|| black_box(run_queries_twothree_lazy(&graph, qs))),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("strict_fibonacci_lazy", &rank_label),
+            &queries,
+            |b, qs| b.iter(|| black_box(run_queries_strict_fibonacci_lazy(&graph, qs))),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("skew_binomial_lazy", &rank_label),
+            &queries,
+            |b, qs| b.iter(|| black_box(run_queries_skew_binomial_lazy(&graph, qs))),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("skiplist_lazy", &rank_label),
+            &queries,
+            |b, qs| b.iter(|| black_box(run_queries_skiplist_lazy(&graph, qs))),
+        );
+    }
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     benchmark_random_queries,
@@ -941,6 +1068,7 @@ criterion_group!(
     benchmark_real_dimacs,
     benchmark_real_dimacs_by_rank,
     benchmark_correctness_check,
+    benchmark_all_heaps_by_rank,
 );
 
 criterion_main!(benches);
