@@ -28,6 +28,22 @@
 //!
 //! **Invariant**: After merge, at most one tree of each degree. This ensures
 //! O(log n) trees total, bounding operation costs.
+//!
+//! # Why Binomial Heaps?
+//!
+//! Binomial heaps represent priority queues as a forest of binomial trees, where
+//! the number of trees corresponds to the binary representation of n. This elegant
+//! design makes merging two heaps analogous to binary addition: when two trees of
+//! the same order meet, they combine into a tree of the next higher order, just
+//! like carrying in addition. This achieves O(log n) merge time - a significant
+//! improvement over binary heaps which require O(n) to merge.
+//!
+//! # References
+//!
+//! - Vuillemin, J. (1978). "A data structure for manipulating priority queues."
+//!   *Communications of the ACM*, 21(4), 309-315.
+//!   [ACM DL](https://dl.acm.org/doi/10.1145/359460.359478)
+//! - [Wikipedia: Binomial heap](https://en.wikipedia.org/wiki/Binomial_heap)
 
 use crate::traits::{Handle, Heap, HeapError};
 use std::cell::RefCell;
@@ -160,8 +176,8 @@ impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
     /// 2. Update minimum pointer if necessary
     /// 3. Merge the single-node tree into the heap:
     ///    - Start at degree 0
-    ///    - If slot[degree] is empty, place tree there
-    ///    - If slot[degree] has a tree, link them (produces degree+1 tree)
+    ///    - If `slot[degree]` is empty, place tree there
+    ///    - If `slot[degree]` has a tree, link them (produces degree+1 tree)
     ///    - Continue with carry propagation (like binary addition)
     ///
     /// **Why O(log n)?**

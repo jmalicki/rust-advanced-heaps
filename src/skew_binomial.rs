@@ -10,6 +10,24 @@
 //!
 //! This implementation uses Rc/Weak references instead of raw pointers,
 //! providing memory safety for tree structure management.
+//!
+//! # Why Skew Binomial Heaps?
+//!
+//! Skew binomial heaps extend binomial heaps to achieve O(1) worst-case insertion
+//! (vs O(log n) for binomial heaps). The key innovation is the **skew link**: a
+//! special linking operation that can combine three trees at once.
+//!
+//! The "skew" in the name refers to the skew binary number system used to represent
+//! tree sizes, which allows constant-time increment operations. Originally designed
+//! for purely functional programming languages, this structure demonstrates that
+//! optimal priority queue bounds are achievable without mutation.
+//!
+//! # References
+//!
+//! - Brodal, G. S., & Okasaki, C. (1996). "Optimal purely functional priority queues."
+//!   *Journal of Functional Programming*, 6(6), 839-857.
+//!   [Cambridge](https://doi.org/10.1017/S095679680000201X)
+//! - [Wikipedia: Skew binomial heap](https://en.wikipedia.org/wiki/Skew_binomial_heap)
 
 use crate::traits::{Handle, Heap, HeapError};
 use std::cell::RefCell;

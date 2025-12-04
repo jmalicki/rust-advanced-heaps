@@ -12,6 +12,28 @@
 //! - Strong references (Rc) flow from parent to children
 //! - Weak references flow from children to parent (backlinks)
 //! - Handles use Weak references
+//!
+//! # Why Strict Fibonacci Heaps?
+//!
+//! Strict Fibonacci heaps achieve the same **worst-case** bounds as Brodal queues
+//! but with a simpler structure that more closely resembles the original Fibonacci
+//! heaps. Key innovations include:
+//!
+//! - **Simplified melding**: When merging heaps of different sizes, the smaller
+//!   heap's structure is discarded
+//! - **Pigeonhole-based balancing**: Uses the pigeonhole principle instead of
+//!   redundant counters
+//! - **Active/passive nodes**: Nodes are classified to track structural violations
+//!
+//! This provides O(1) worst-case insert, decrease-key, and merge, with O(log n)
+//! worst-case delete-min - the theoretical optimum for comparison-based heaps.
+//!
+//! # References
+//!
+//! - Brodal, G. S., Lagogiannis, G., & Tarjan, R. E. (2012). "Strict Fibonacci heaps."
+//!   *Proceedings of the 44th Annual ACM Symposium on Theory of Computing (STOC)*, 1177-1184.
+//!   [ACM DL](https://dl.acm.org/doi/10.1145/2213977.2214082)
+//! - [Wikipedia: Fibonacci heap (Strict Fibonacci heap section)](https://en.wikipedia.org/wiki/Fibonacci_heap#Strict_Fibonacci_heap)
 
 use crate::traits::{Handle, Heap, HeapError};
 use std::cell::RefCell;

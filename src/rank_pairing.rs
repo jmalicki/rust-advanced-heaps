@@ -32,6 +32,24 @@
 //!
 //! These constraints bound the tree height while allowing efficient updates.
 //! Unlike Fibonacci heaps, ranks are explicit and updated locally.
+//!
+//! # Why Rank-Pairing Heaps?
+//!
+//! Rank-pairing heaps combine the asymptotic efficiency of Fibonacci heaps with
+//! much of the simplicity of pairing heaps. The key insight is using explicit
+//! rank values on nodes instead of the marked-node mechanism of Fibonacci heaps.
+//!
+//! Unlike other heap implementations matching Fibonacci heap bounds, rank-pairing
+//! heaps need only **one cut per decrease-key** with no other structural changes.
+//! This makes them significantly simpler to implement while maintaining optimal
+//! bounds for insert, decrease-key (O(1) amortized), and delete-min (O(log n) amortized).
+//!
+//! # References
+//!
+//! - Haeupler, B., Sen, S., & Tarjan, R. E. (2011). "Rank-pairing heaps."
+//!   *SIAM Journal on Computing*, 40(6), 1463-1485.
+//!   [SIAM](https://epubs.siam.org/doi/10.1137/100785351)
+//! - [Wikipedia: Rank-pairing heap](https://en.wikipedia.org/wiki/Rank-pairing_heap)
 
 use crate::traits::{Handle, Heap, HeapError};
 use std::cell::RefCell;

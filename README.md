@@ -11,22 +11,27 @@ maps paired with binary heaps, which only achieve O(log n) `decrease_key`
 operations. This crate implements advanced heap structures from computer
 science literature that provide better amortized bounds:
 
-- **Fibonacci Heap**: O(1) amortized `decrease_key`
-- **Pairing Heap**: o(log n) amortized `decrease_key`
-- **Rank-Pairing Heap**: O(1) amortized `decrease_key`
-- **Binomial Heap**: O(log n) `decrease_key` (but simpler implementation)
+- **Binomial Heap** (1978): O(log n) `decrease_key` - foundational, simple
+- **Pairing Heap** (1986): o(log n) amortized `decrease_key` - simple, fast
+- **Fibonacci Heap** (1987): O(1) amortized `decrease_key` - optimal amortized
+- **Skew Binomial Heap** (1996): O(1) insert, O(log n) `decrease_key`
+- **2-3 Heap** (1999): O(1) amortized `decrease_key` - simpler than Fibonacci
+- **Rank-Pairing Heap** (2011): O(1) amortized `decrease_key` - simple + optimal
+- **Strict Fibonacci Heap** (2012): O(1) worst-case `decrease_key`
 
 ## Features
 
 ### Implemented Heaps
 
-| Heap Type | Insert | Delete-min | Decrease-key | Merge | Notes |
-| --------- | ------ | ---------- | ------------ | ----- | ----- |
-| **Fibonacci** | O(1) am. | O(log n) am. | **O(1) am.** | O(1) | Complex but optimal |
-| **Pairing** | O(1) am. | O(log n) am. | **o(log n) am.** | O(1) | Simpler than Fibonacci |
-| **Rank-Pairing** | O(1) am. | O(log n) am. | **O(1) am.** | O(1) | Simpler than Fibonacci, optimal bounds |
-| **Binomial** | O(log n) | O(log n) | O(log n) | O(log n) | Simple, well-understood |
-| **Brodal** | O(1) worst | O(log n) worst | **O(1) worst** | O(1) worst | Optimal worst-case, high constants |
+| Heap Type | Year | Insert | Delete-min | Decrease-key | Merge |
+| --------- | ---- | ------ | ---------- | ------------ | ----- |
+| **Binomial** | 1978 | O(log n) | O(log n) | O(log n) | O(log n) |
+| **Pairing** | 1986 | O(1) am. | O(log n) am. | **o(log n) am.** | O(1) |
+| **Fibonacci** | 1987 | O(1) am. | O(log n) am. | **O(1) am.** | O(1) |
+| **Skew Binomial** | 1996 | O(1) | O(log n) | O(log n) | O(log n) |
+| **2-3 Heap** | 1999 | O(1) am. | O(log n) am. | **O(1) am.** | O(1) am. |
+| **Rank-Pairing** | 2011 | O(1) am. | O(log n) am. | **O(1) am.** | O(1) |
+| **Strict Fibonacci** | 2012 | O(1) worst | O(log n) worst | **O(1) worst** | O(1) worst |
 
 All times are amortized (am.) where applicable. See the [Wikipedia
 comparison table](https://en.wikipedia.org/wiki/Fibonacci_heap#Summary_of_running_times)
@@ -95,12 +100,13 @@ pub trait Heap<T, P: Ord> {
 
 ## Implementation Status
 
-- ✅ Fibonacci Heap
-- ✅ Pairing Heap
-- ✅ Rank-Pairing Heap
-- ✅ Binomial Heap
-- ✅ Brodal Heap
-- ⏳ More heap types (Skew heap, Leftist heap, Strict Fibonacci, etc.)
+- ✅ Binomial Heap (1978)
+- ✅ Pairing Heap (1986)
+- ✅ Fibonacci Heap (1987)
+- ✅ Skew Binomial Heap (1996)
+- ✅ 2-3 Heap (1999)
+- ✅ Rank-Pairing Heap (2011)
+- ✅ Strict Fibonacci Heap (2012)
 
 ## Performance Considerations
 
@@ -120,39 +126,10 @@ Choose based on your workload:
 - Mostly inserts/deletes: Binomial heap may be sufficient
 - Small heaps: Binary heap is often faster due to lower constant factors
 
-## Development Setup
-
-This project uses pre-commit hooks for code quality checks. After cloning or
-initializing a new worktree, install the hooks:
-
-```bash
-# Option 1: Use the setup script
-./setup.sh
-
-# Option 2: Manual setup
-# Install pre-commit (if not already installed)
-pip install pre-commit
-
-# Install git hooks
-pre-commit install
-```
-
-The hooks will automatically run `cargo fmt`, `cargo clippy`, and markdownlint
-on every commit.
-
-**Note for worktrees**: When using git worktrees (including Cursor's "new
-worktree init"), you must run `pre-commit install` in each worktree after it's
-created. Pre-commit hooks are installed per repository, but each worktree needs
-to be set up individually.
-
 ## Contributing
 
-Contributions welcome! Areas of focus:
-
-1. More heap implementations (Rank-pairing, Brodal queue, etc.)
-2. Performance benchmarks comparing implementations
-3. Comprehensive test coverage
-4. Documentation improvements
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and contribution
+guidelines.
 
 ## License
 
@@ -160,9 +137,13 @@ MIT OR Apache-2.0
 
 ## References
 
+For complete academic citations and links to original papers, see
+[docs/REFERENCES.md](docs/REFERENCES.md).
+
+Quick links:
+
 - [Fibonacci Heap - Wikipedia](https://en.wikipedia.org/wiki/Fibonacci_heap)
 - [Pairing Heap - Wikipedia](https://en.wikipedia.org/wiki/Pairing_heap)
 - [Binomial Heap - Wikipedia](https://en.wikipedia.org/wiki/Binomial_heap)
-- Fredman, M. L., & Tarjan, R. E. (1987). Fibonacci heaps and their uses in
-  improved network optimization algorithms. Journal of the ACM, 34(3),
-  596-615.
+- [Rank-Pairing Heap - Wikipedia](https://en.wikipedia.org/wiki/Rank-pairing_heap)
+- [Skew Binomial Heap - Wikipedia](https://en.wikipedia.org/wiki/Skew_binomial_heap)
