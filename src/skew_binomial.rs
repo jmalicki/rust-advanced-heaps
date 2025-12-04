@@ -101,10 +101,6 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
     }
 
     fn push(&mut self, priority: P, item: T) -> Self::Handle {
-        self.insert(priority, item)
-    }
-
-    fn insert(&mut self, priority: P, item: T) -> Self::Handle {
         let node = Rc::new(RefCell::new(Node {
             item: Some(item),
             priority: Some(priority),
@@ -131,10 +127,6 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
     }
 
     fn peek(&self) -> Option<(&P, &T)> {
-        self.find_min()
-    }
-
-    fn find_min(&self) -> Option<(&P, &T)> {
         self.min.as_ref().map(|min_ref| unsafe {
             let ptr = min_ref.as_ptr();
             (
@@ -145,10 +137,6 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
     }
 
     fn pop(&mut self) -> Option<(P, T)> {
-        self.delete_min()
-    }
-
-    fn delete_min(&mut self) -> Option<(P, T)> {
         let min_ref = self.min.take()?;
 
         // Clear from trees

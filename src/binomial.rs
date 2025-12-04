@@ -129,9 +129,9 @@ struct Node<T, P> {
 /// use rust_advanced_heaps::Heap;
 ///
 /// let mut heap = BinomialHeap::new();
-/// let handle = heap.insert(5, "item");
+/// let handle = heap.push(5, "item");
 /// heap.decrease_key(&handle, 1);
-/// assert_eq!(heap.find_min(), Some((&1, &"item")));
+/// assert_eq!(heap.peek(), Some((&1, &"item")));
 /// ```
 pub struct BinomialHeap<T, P: Ord> {
     /// Array of binomial trees indexed by degree. Each slot holds at most one tree.
@@ -163,10 +163,6 @@ impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
         self.len
     }
 
-    fn push(&mut self, priority: P, item: T) -> Self::Handle {
-        self.insert(priority, item)
-    }
-
     /// Inserts a new element into the heap
     ///
     /// **Time Complexity**: O(log n) worst-case
@@ -189,7 +185,7 @@ impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
     /// **Invariant**: After insert, at most one tree of each degree (maintained by
     /// the carry propagation process, just like binary addition maintains at most
     /// one bit per position).
-    fn insert(&mut self, priority: P, item: T) -> Self::Handle {
+    fn push(&mut self, priority: P, item: T) -> Self::Handle {
         // Create new single-node tree (B₀ tree, degree 0)
         let node = Rc::new(RefCell::new(Node {
             item,
@@ -237,10 +233,6 @@ impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
     }
 
     fn peek(&self) -> Option<(&P, &T)> {
-        self.find_min()
-    }
-
-    fn find_min(&self) -> Option<(&P, &T)> {
         // We need to return references that live as long as self
         // Since RefCell borrows are temporary, we search the trees array
         // and use pointer magic to get stable references
@@ -255,10 +247,6 @@ impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
         // 3. RefCell contents won't move while we hold &self
         let node_ptr = min_rc.as_ptr();
         unsafe { Some((&(*node_ptr).priority, &(*node_ptr).item)) }
-    }
-
-    fn pop(&mut self) -> Option<(P, T)> {
-        self.delete_min()
     }
 
     /// Removes and returns the minimum element
@@ -284,7 +272,7 @@ impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
     /// **Binomial Tree Property**: When the root of a Bₖ tree is removed, its
     /// children are Bₖ₋₁, Bₖ₋₂, ..., B₀ trees. This maintains the binomial
     /// tree structure after deletion.
-    fn delete_min(&mut self) -> Option<(P, T)> {
+    fn pop(&mut self) -> Option<(P, T)> {
         let min_weak = self.min.take()?;
         let min_rc = min_weak.upgrade()?;
 

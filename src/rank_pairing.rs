@@ -139,9 +139,9 @@ struct Node<T, P> {
 /// use rust_advanced_heaps::Heap;
 ///
 /// let mut heap = RankPairingHeap::new();
-/// let handle = heap.insert(5, "item");
+/// let handle = heap.push(5, "item");
 /// heap.decrease_key(&handle, 1);
-/// assert_eq!(heap.find_min(), Some((&1, &"item")));
+/// assert_eq!(heap.peek(), Some((&1, &"item")));
 /// ```
 pub struct RankPairingHeap<T, P: Ord> {
     /// Root of the heap tree. Uses strong reference as the heap owns the root.
@@ -168,10 +168,6 @@ impl<T, P: Ord> Heap<T, P> for RankPairingHeap<T, P> {
         self.len
     }
 
-    fn push(&mut self, priority: P, item: T) -> Self::Handle {
-        self.insert(priority, item)
-    }
-
     /// Inserts a new element into the heap
     ///
     /// **Time Complexity**: O(1) amortized
@@ -190,7 +186,7 @@ impl<T, P: Ord> Heap<T, P> for RankPairingHeap<T, P> {
     /// **Invariant Maintenance**:
     /// - Heap property: smaller priority becomes parent
     /// - Rank constraints: ranks updated to satisfy rank(v) ≤ rank(w₁) + 1 and rank(v) ≤ rank(w₂) + 1
-    fn insert(&mut self, priority: P, item: T) -> Self::Handle {
+    fn push(&mut self, priority: P, item: T) -> Self::Handle {
         // Create new node with rank 0 (leaf node, no children)
         let node = Rc::new(RefCell::new(Node {
             item,
@@ -230,10 +226,6 @@ impl<T, P: Ord> Heap<T, P> for RankPairingHeap<T, P> {
     }
 
     fn peek(&self) -> Option<(&P, &T)> {
-        self.find_min()
-    }
-
-    fn find_min(&self) -> Option<(&P, &T)> {
         // Safety: The references we return point to data inside an Rc that the heap owns.
         // As long as the caller has a borrow of &self, the Rc stays alive and the data is valid.
         // This is effectively a lifetime extension that is safe because:
@@ -244,10 +236,6 @@ impl<T, P: Ord> Heap<T, P> for RankPairingHeap<T, P> {
             let node = root.as_ptr();
             unsafe { (&(*node).priority, &(*node).item) }
         })
-    }
-
-    fn pop(&mut self) -> Option<(P, T)> {
-        self.delete_min()
     }
 
     /// Removes and returns the minimum element
@@ -269,7 +257,7 @@ impl<T, P: Ord> Heap<T, P> for RankPairingHeap<T, P> {
     /// - At most O(log n) children (bounded by rank constraints)
     /// - Merging maintains rank constraints
     /// - Amortized analysis shows the pairing strategy achieves O(log n) total cost
-    fn delete_min(&mut self) -> Option<(P, T)> {
+    fn pop(&mut self) -> Option<(P, T)> {
         let root = self.root.take()?;
 
         // Collect all children of the root (clearing their parent links)

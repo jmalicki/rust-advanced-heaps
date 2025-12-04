@@ -148,10 +148,6 @@ impl<T, P: Ord> Heap<T, P> for StrictFibonacciHeap<T, P> {
         self.len
     }
 
-    fn push(&mut self, priority: P, item: T) -> Self::Handle {
-        self.insert(priority, item)
-    }
-
     /// Inserts a new element into the heap
     ///
     /// **Time Complexity**: O(1) worst-case
@@ -161,7 +157,7 @@ impl<T, P: Ord> Heap<T, P> for StrictFibonacciHeap<T, P> {
     /// 2. Add to active root list
     /// 3. Update minimum pointer if necessary
     /// 4. Perform conditional consolidation (worst-case O(1))
-    fn insert(&mut self, priority: P, item: T) -> Self::Handle {
+    fn push(&mut self, priority: P, item: T) -> Self::Handle {
         let node = Node::new(priority, item);
         let handle = StrictFibonacciHandle {
             node: Rc::downgrade(&node),
@@ -195,10 +191,6 @@ impl<T, P: Ord> Heap<T, P> for StrictFibonacciHeap<T, P> {
     }
 
     fn peek(&self) -> Option<(&P, &T)> {
-        self.find_min()
-    }
-
-    fn find_min(&self) -> Option<(&P, &T)> {
         self.min.as_ref().and_then(|min_weak| {
             min_weak.upgrade().map(|min_rc| {
                 let node = min_rc.as_ptr();
@@ -208,10 +200,6 @@ impl<T, P: Ord> Heap<T, P> for StrictFibonacciHeap<T, P> {
                 unsafe { (&(*node).priority, &(*node).item) }
             })
         })
-    }
-
-    fn pop(&mut self) -> Option<(P, T)> {
-        self.delete_min()
     }
 
     /// Removes and returns the minimum element
@@ -224,7 +212,7 @@ impl<T, P: Ord> Heap<T, P> for StrictFibonacciHeap<T, P> {
     /// 3. Add children to active root list
     /// 4. Find new minimum by scanning roots (O(log n))
     /// 5. Consolidate all roots (O(log n))
-    fn delete_min(&mut self) -> Option<(P, T)> {
+    fn pop(&mut self) -> Option<(P, T)> {
         let min_weak = self.min.take()?;
 
         // Find the minimum in roots using the weak reference
