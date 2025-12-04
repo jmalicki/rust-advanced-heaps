@@ -5,15 +5,15 @@ structures implemented in this crate, ordered by publication date.
 
 ## Summary
 
-| Heap | Year | decrease-key | Notes |
-|------|------|--------------|-------|
-| Binomial | 1978 | O(log n) | Foundational, simple |
-| Pairing | 1986 | o(log n) am. | Simple, fast in practice |
-| Fibonacci | 1987 | O(1) am. | Optimal amortized bounds |
-| Skew Binomial | 1996 | O(log n) | O(1) insert |
-| 2-3 Heap | 1999 | O(1) am. | Simpler than Fibonacci |
-| Rank-Pairing | 2011 | O(1) am. | Simple + optimal bounds |
-| Strict Fibonacci | 2012 | O(1) worst | Optimal worst-case |
+| Heap             | Year | decrease-key | Notes                   |
+| ---------------- | ---- | ------------ | ----------------------- |
+| Binomial         | 1978 | O(log n)     | Foundational, simple    |
+| Pairing          | 1986 | o(log n) am. | Simple, fast in practice|
+| Fibonacci        | 1987 | O(1) am.     | Optimal amortized bounds|
+| Skew Binomial    | 1996 | O(log n)     | O(1) insert             |
+| 2-3 Heap         | 1999 | O(1) am.     | Simpler than Fibonacci  |
+| Rank-Pairing     | 2011 | O(1) am.     | Simple + optimal bounds |
+| Strict Fibonacci | 2012 | O(1) worst   | Optimal worst-case      |
 
 ---
 
@@ -38,13 +38,13 @@ order, just like carrying in addition.
 Vuillemin's design emphasizes efficient merging, achieving O(log n) merge
 time - a significant improvement over binary heaps which require O(n) to merge.
 
-| Operation | Worst-case Time |
-|-----------|-----------------|
-| insert | O(log n) |
-| find-min | O(1)* |
-| delete-min | O(log n) |
-| decrease-key | O(log n) |
-| merge | O(log n) |
+| Operation    | Worst-case Time |
+| ------------ | --------------- |
+| insert       | O(log n)        |
+| find-min     | O(1)*           |
+| delete-min   | O(log n)        |
+| decrease-key | O(log n)        |
+| merge        | O(log n)        |
 
 *O(1) if minimum pointer is maintained
 
@@ -73,13 +73,13 @@ Interestingly, the paper notes that "complete analysis remains an open
 problem" - the exact complexity of decrease-key was unresolved for decades. The
 current best bound is o(log n) amortized, proven by Iacono and Özkan in 2014.
 
-| Operation | Amortized Time |
-|-----------|----------------|
-| insert | O(1) |
-| find-min | O(1) |
-| delete-min | O(log n) |
-| decrease-key | o(log n) |
-| merge | O(1) |
+| Operation    | Amortized Time |
+| ------------ | -------------- |
+| insert       | O(1)           |
+| find-min     | O(1)           |
+| delete-min   | O(log n)       |
+| decrease-key | o(log n)       |
+| merge        | O(1)           |
 
 ---
 
@@ -105,13 +105,13 @@ similar improvements for minimum spanning tree algorithms. The name "Fibonacci"
 comes from the Fibonacci numbers appearing in the analysis of the maximum
 degree of nodes.
 
-| Operation | Amortized Time |
-|-----------|----------------|
-| insert | O(1) |
-| find-min | O(1) |
-| delete-min | O(log n) |
-| decrease-key | O(1) |
-| merge | O(1) |
+| Operation    | Amortized Time |
+| ------------ | -------------- |
+| insert       | O(1)           |
+| find-min     | O(1)           |
+| delete-min   | O(log n)       |
+| decrease-key | O(1)           |
+| merge        | O(1)           |
 
 ---
 
@@ -140,13 +140,13 @@ without mutation. This was significant for functional programming languages.
 The "skew" in the name refers to the skew binary number system used to
 represent tree sizes, which allows constant-time increment operations.
 
-| Operation | Worst-case Time |
-|-----------|-----------------|
-| insert | O(1) |
-| find-min | O(1) |
-| delete-min | O(log n) |
-| decrease-key | O(log n) |
-| merge | O(log n) |
+| Operation    | Worst-case Time |
+| ------------ | --------------- |
+| insert       | O(1)            |
+| find-min     | O(1)            |
+| delete-min   | O(log n)        |
+| decrease-key | O(log n)        |
+| merge        | O(log n)        |
 
 ---
 
@@ -174,13 +174,13 @@ Takaoka emphasizes practical simplicity: "The merit of the 2-3 heap is that it
 is conceptually simpler and easier to implement" compared to other
 Fibonacci-like structures.
 
-| Operation | Amortized Time |
-|-----------|----------------|
-| insert | O(1) |
-| find-min | O(1) |
-| delete-min | O(log n) |
-| decrease-key | O(1) |
-| merge | O(1) |
+| Operation    | Amortized Time |
+| ------------ | -------------- |
+| insert       | O(1)           |
+| find-min     | O(1)           |
+| delete-min   | O(log n)       |
+| decrease-key | O(1)           |
+| merge        | O(1)           |
 
 ---
 
@@ -212,13 +212,13 @@ The paper presents two variants:
 Initial experiments show rank-pairing heaps perform almost as well as pairing
 heaps on typical inputs and better on worst-case sequences.
 
-| Operation | Amortized Time |
-|-----------|----------------|
-| insert | O(1) |
-| find-min | O(1) |
-| delete-min | O(log n) |
-| decrease-key | O(1) |
-| merge | O(1) |
+| Operation    | Amortized Time |
+| ------------ | -------------- |
+| insert       | O(1)           |
+| find-min     | O(1)           |
+| delete-min   | O(log n)       |
+| decrease-key | O(1)           |
+| merge        | O(1)           |
 
 ---
 
@@ -250,13 +250,13 @@ The paper proves these simplifications still maintain worst-case bounds, making
 the structure more accessible than Brodal's original design while remaining
 primarily of theoretical interest.
 
-| Operation | Worst-case Time |
-|-----------|-----------------|
-| insert | O(1) |
-| find-min | O(1) |
-| delete-min | O(log n) |
-| decrease-key | O(1) |
-| merge | O(1) |
+| Operation    | Worst-case Time |
+| ------------ | --------------- |
+| insert       | O(1)            |
+| find-min     | O(1)            |
+| delete-min   | O(log n)        |
+| decrease-key | O(1)            |
+| merge        | O(1)            |
 
 ---
 
@@ -334,10 +334,10 @@ what is achievable rather than what is practical.
 For applications requiring worst-case O(1) decrease-key, consider using the
 Strict Fibonacci Heap implementation instead.
 
-| Operation | Worst-case Time |
-|-----------|-----------------|
-| insert | O(1) |
-| find-min | O(1) |
-| delete-min | O(log n) |
-| decrease-key | O(1) |
-| merge | O(1) |
+| Operation    | Worst-case Time |
+| ------------ | --------------- |
+| insert       | O(1)            |
+| find-min     | O(1)            |
+| delete-min   | O(log n)        |
+| decrease-key | O(1)            |
+| merge        | O(1)            |
