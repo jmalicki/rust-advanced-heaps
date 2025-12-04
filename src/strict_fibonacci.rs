@@ -23,6 +23,7 @@
 //! - Raw pointers (`NonNull<Node>`) for node management
 //! - Intrusive circular doubly-linked lists for sibling relationships
 //! - Rank records for O(1) access to nodes by rank (Phase 2)
+//! - Fix-list for tracking active nodes requiring reductions (Phase 3)
 //!
 //! # References
 //!
@@ -33,6 +34,23 @@
 use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError};
 use intrusive_circular_list::{container_of_mut, CircularLink, CircularListOps};
 use std::ptr::NonNull;
+
+// ============================================================================
+// Loss Tracking
+// ============================================================================
+
+/// Compile-time assertion that usize is at most 252 bits.
+/// Loss is bounded by O(log n), so on a system with at most 2^252 addressable elements,
+/// loss can never reach 255 (our sentinel for "free").
+/// In practice, 64-bit systems (size_of::<usize>() == 8) are the norm.
+const _: () = assert!(
+    std::mem::size_of::<usize>() <= 31, // 31 bytes = 248 bits < 252
+    "loss tracking assumes at most 252-bit address space"
+);
+
+/// Sentinel value indicating a node is "free" (active but not fixed).
+/// Since loss is bounded by ~log₂(n) ≤ 252 bits, 255 is unreachable.
+const LOSS_FREE: u8 = u8::MAX;
 
 // ============================================================================
 // Rank Record System
@@ -50,11 +68,8 @@ use std::ptr::NonNull;
 /// - When `reference_count` drops to 0, the record is retired (deallocated)
 /// - The rank list is ordered by increasing rank values
 /// - Gaps in rank values are allowed (not all ranks need to exist)
-///
-/// # Future Extensions (Phase 3+)
-///
-/// - `free`: pointer to first free node of this rank (for free reductions)
-/// - `loss_one`: pointer to first loss-one node of this rank (for loss reductions)
+/// - `free` points to the first free node of this rank (if any)
+/// - `loss_one` points to the first fixed node with loss=1 of this rank (if any)
 struct RankRecord {
     /// Next rank record in the doubly-linked list (higher rank).
     next: Option<NonNull<RankRecord>>,
@@ -65,9 +80,6 @@ struct RankRecord {
     /// Number of nodes referencing this rank record.
     /// When this reaches 0, the record is retired.
     reference_count: usize,
-    // Future Phase 3+ fields (commented out for now):
-    // free: Option<NonNull<Node<T, P>>>,
-    // loss_one: Option<NonNull<Node<T, P>>>,
 }
 
 impl RankRecord {
@@ -205,7 +217,7 @@ impl<T, P> Handle for StrictFibonacciHandle<T, P> {}
 
 /// A node in the Strict Fibonacci heap.
 ///
-/// Uses intrusive circular linked lists for sibling relationships.
+/// Uses intrusive circular linked lists for sibling relationships and fix-list.
 struct Node<T, P> {
     /// The item stored in this node.
     item: T,
@@ -213,6 +225,8 @@ struct Node<T, P> {
     priority: P,
     /// Intrusive link for the sibling circular list.
     sibling_link: CircularLink,
+    /// Intrusive link for the fix-list (circular list of active nodes).
+    fix_link: CircularLink,
     /// Pointer to the parent node (None if this is a root).
     parent: Option<NonNull<Node<T, P>>>,
     /// Pointer to one child (entry point into children's circular list).
@@ -228,29 +242,117 @@ struct Node<T, P> {
     /// Whether this node is "active" in the strict Fibonacci sense.
     /// Active nodes are tracked specially to maintain worst-case bounds.
     active: bool,
+    /// Loss value for active nodes.
+    ///
+    /// - `LOSS_FREE` (255): Node is free (active but not fixed)
+    /// - `0, 1, 2, ...`: Node is fixed with this loss value
+    ///
+    /// For passive nodes, this field is ignored.
+    loss: u8,
 }
 
 impl<T, P> Node<T, P> {
     /// Creates a new node with the given priority and item.
     ///
-    /// The node starts with no rank record (passive). Use `set_rank_record`
-    /// to assign a rank record when the node becomes active.
+    /// The node starts as passive (not active, not in fix-list).
+    /// Use `set_rank_record` to assign a rank record when the node becomes active.
     fn new(priority: P, item: T) -> Box<Node<T, P>> {
         Box::new(Node {
             item,
             priority,
             sibling_link: CircularLink::new(),
+            fix_link: CircularLink::new(),
             parent: None,
             child: None,
             rank_count: 0,
             rank_record: None,
             active: false,
+            loss: LOSS_FREE, // Passive nodes ignore this, but initialize to free
         })
+    }
+
+    /// Returns true if this node is active (part of an active heap).
+    #[inline]
+    #[allow(dead_code)] // Will be used in later phases
+    fn is_active(&self) -> bool {
+        self.active
+    }
+
+    /// Returns true if this node is passive (part of a retired/melded heap).
+    #[inline]
+    #[allow(dead_code)] // Will be used in later phases
+    fn is_passive(&self) -> bool {
+        !self.active
+    }
+
+    /// Returns true if this node is free (active but not fixed).
+    #[inline]
+    #[allow(dead_code)] // Will be used in later phases
+    fn is_free(&self) -> bool {
+        self.active && self.loss == LOSS_FREE
+    }
+
+    /// Returns true if this node is fixed (active with loss tracking).
+    #[inline]
+    #[allow(dead_code)] // Will be used in later phases
+    fn is_fixed(&self) -> bool {
+        self.active && self.loss != LOSS_FREE
+    }
+
+    /// Increments the loss counter for a fixed node.
+    ///
+    /// # Panics (debug only)
+    ///
+    /// Panics if the node is not fixed, or if loss would overflow into the sentinel.
+    #[allow(dead_code)] // Will be used in later phases
+    fn increment_loss(&mut self) {
+        debug_assert!(self.is_fixed(), "can only increment loss on fixed nodes");
+        self.loss += 1;
+        debug_assert!(
+            self.loss != LOSS_FREE,
+            "loss overflow into sentinel - should be impossible on ≤128-bit systems"
+        );
+    }
+
+    /// Gets the loss value. Only valid for fixed nodes.
+    #[inline]
+    #[allow(dead_code)] // Will be used in later phases
+    fn get_loss(&self) -> u8 {
+        debug_assert!(self.is_fixed(), "loss is only valid for fixed nodes");
+        self.loss
     }
 
     /// Gets a pointer to the sibling link.
     fn sibling_link_ptr(&self) -> NonNull<CircularLink> {
         NonNull::from(&self.sibling_link)
+    }
+
+    /// Gets a pointer to the fix-list link.
+    #[allow(dead_code)] // Will be used in later phases
+    fn fix_link_ptr(&self) -> NonNull<CircularLink> {
+        NonNull::from(&self.fix_link)
+    }
+
+    /// Converts a free node to fixed (with loss = 0).
+    ///
+    /// # Safety
+    ///
+    /// Caller must update fix-list membership appropriately.
+    #[allow(dead_code)] // Will be used in later phases
+    fn free_to_fixed(&mut self) {
+        debug_assert!(self.is_free(), "node must be free to convert to fixed");
+        self.loss = 0;
+    }
+
+    /// Converts a fixed node to free.
+    ///
+    /// # Safety
+    ///
+    /// Caller must update fix-list membership appropriately.
+    #[allow(dead_code)] // Will be used in later phases
+    fn fixed_to_free(&mut self) {
+        debug_assert!(self.is_fixed(), "node must be fixed to convert to free");
+        self.loss = LOSS_FREE;
     }
 
     /// Returns the rank of this node.
@@ -347,6 +449,30 @@ pub struct StrictFibonacciHeap<T, P: Ord> {
     /// Head of the rank list (rank 0 if it exists).
     /// The rank list is a doubly-linked list ordered by increasing rank.
     rank_list: Option<NonNull<RankRecord>>,
+
+    // =========================================================================
+    // Fix-list pointers (Phase 3)
+    // =========================================================================
+    // The fix-list is a circular doubly-linked list of all nodes in the heap,
+    // organized into groups for efficient access during reductions.
+    // Group order: passive -> free_multiple -> free_single -> loss_zero
+    //              -> loss_one_multiple -> loss_one_single -> loss_two
+    //
+    // Each pointer points to the first node in that group (if any).
+    /// First passive node in fix-list (nodes from retired/melded heaps).
+    fix_passive: Option<NonNull<Node<T, P>>>,
+    /// First free node with 2+ nodes of same rank (enables free reduction).
+    fix_free_multiple: Option<NonNull<Node<T, P>>>,
+    /// First free node with unique rank in this group.
+    fix_free_single: Option<NonNull<Node<T, P>>>,
+    /// First fixed node with loss = 0.
+    fix_loss_zero: Option<NonNull<Node<T, P>>>,
+    /// First fixed node with loss = 1, with 2+ nodes of same rank.
+    fix_loss_one_multiple: Option<NonNull<Node<T, P>>>,
+    /// First fixed node with loss = 1, with unique rank.
+    fix_loss_one_single: Option<NonNull<Node<T, P>>>,
+    /// First fixed node with loss >= 2 (triggers immediate reduction).
+    fix_loss_two: Option<NonNull<Node<T, P>>>,
 }
 
 impl<T, P: Ord> Default for StrictFibonacciHeap<T, P> {
@@ -425,6 +551,14 @@ impl<T, P: Ord> Heap<T, P> for StrictFibonacciHeap<T, P> {
             min: None,
             len: 0,
             rank_list: None,
+            // Fix-list pointers (all None for empty heap)
+            fix_passive: None,
+            fix_free_multiple: None,
+            fix_free_single: None,
+            fix_loss_zero: None,
+            fix_loss_one_multiple: None,
+            fix_loss_one_single: None,
+            fix_loss_two: None,
         }
     }
 
@@ -589,6 +723,44 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for StrictFibonacciHeap<T, P> {
 }
 
 impl<T, P: Ord> StrictFibonacciHeap<T, P> {
+    // =========================================================================
+    // Fix-list operations (Phase 3)
+    // =========================================================================
+
+    /// Clears all fix-list group pointers.
+    ///
+    /// Called when retiring a heap (during meld) or when the heap becomes empty.
+    #[allow(dead_code)] // Will be used in later phases
+    fn fix_list_retire(&mut self) {
+        self.fix_passive = None;
+        self.fix_free_multiple = None;
+        self.fix_free_single = None;
+        self.fix_loss_zero = None;
+        self.fix_loss_one_multiple = None;
+        self.fix_loss_one_single = None;
+        self.fix_loss_two = None;
+    }
+
+    /// Returns the first node in the fix-list (head), if any.
+    ///
+    /// The fix-list is ordered: passive -> free_multiple -> free_single ->
+    /// loss_zero -> loss_one_multiple -> loss_one_single -> loss_two.
+    /// Returns the first non-None pointer in that order.
+    #[allow(dead_code)] // Will be used in later phases
+    fn fix_list_head(&self) -> Option<NonNull<Node<T, P>>> {
+        self.fix_passive
+            .or(self.fix_free_multiple)
+            .or(self.fix_free_single)
+            .or(self.fix_loss_zero)
+            .or(self.fix_loss_one_multiple)
+            .or(self.fix_loss_one_single)
+            .or(self.fix_loss_two)
+    }
+
+    // =========================================================================
+    // Debug assertions
+    // =========================================================================
+
     /// Debug assertion: checks O(1) structural invariants.
     ///
     /// Invariants checked:
