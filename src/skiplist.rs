@@ -236,8 +236,16 @@ impl<T: Default, P: Ord + Copy> DecreaseKeyHeap<T, P> for SkipListHeap<T, P> {
         // Scan from start_idx to find the exact entry matching our Rc pointer.
         // This handles the rare case of duplicate (priority, id) pairs after merge.
         // Time complexity: O(log n + m) where m is typically 1.
+        //
+        // NOTE: We use index_range() instead of iter().skip() because iter().skip()
+        // is O(n) (it walks from the front), while index_range() uses O(log n) skip
+        // list indexing to jump directly to the starting position.
         let mut found_idx = None;
-        for (offset, entry) in self.list.iter().skip(start_idx).enumerate() {
+        for (offset, entry) in self
+            .list
+            .index_range(start_idx..self.list.len())
+            .enumerate()
+        {
             // Stop if we've moved past entries with matching (priority, id)
             if entry.priority.get() != old_priority || entry.id != handle.id {
                 break;

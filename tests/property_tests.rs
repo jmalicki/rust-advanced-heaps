@@ -32,6 +32,7 @@ use rust_advanced_heaps::pairing::PairingHeap;
 use rust_advanced_heaps::rank_pairing::RankPairingHeap;
 use rust_advanced_heaps::simple_binary::SimpleBinaryHeap;
 use rust_advanced_heaps::skew_binomial::SkewBinomialHeap;
+use rust_advanced_heaps::skiplist::SkipListHeap;
 use rust_advanced_heaps::strict_fibonacci::StrictFibonacciHeap;
 use rust_advanced_heaps::twothree::TwoThreeHeap;
 use rust_advanced_heaps::{DecreaseKeyHeap, Heap};
@@ -649,3 +650,7 @@ decrease_key_heap_tests!(twothree_decrease_tests, TwoThreeHeap<i32, i32>, 1..50,
 // Skew Binomial Heap
 base_heap_tests!(skew_binomial_tests, SkewBinomialHeap<i32, i32>, 0..100, 1..100);
 decrease_key_heap_tests!(skew_binomial_decrease_tests, SkewBinomialHeap<i32, i32>, 1..50, 0..20);
+
+// SkipList Heap
+base_heap_tests!(skiplist_tests, SkipListHeap<i32, i32>, 0..100, 1..100);
+decrease_key_heap_tests!(skiplist_decrease_tests, SkipListHeap<i32, i32>, 1..50, 0..20);

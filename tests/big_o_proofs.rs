@@ -19,6 +19,7 @@ use rust_advanced_heaps::fibonacci::FibonacciHeap;
 use rust_advanced_heaps::pairing::PairingHeap;
 use rust_advanced_heaps::rank_pairing::RankPairingHeap;
 use rust_advanced_heaps::skew_binomial::SkewBinomialHeap;
+use rust_advanced_heaps::skiplist::SkipListHeap;
 use rust_advanced_heaps::strict_fibonacci::StrictFibonacciHeap;
 use rust_advanced_heaps::twothree::TwoThreeHeap;
 use rust_advanced_heaps::{DecreaseKeyHeap, Heap};
@@ -408,5 +409,32 @@ fn test_twothree_decrease_key() {
     test_decrease_key_batch_complexity::<TwoThreeHeap<i32, i32>>(
         "TwoThreeHeap",
         BigOAlgorithmComplexity::ON,
+    );
+}
+
+// ============================================================================
+// SkipList Heap Tests
+// ============================================================================
+
+#[test]
+fn test_skiplist_insert() {
+    // O(log n) per element, so batch should be O(n log n)
+    test_insert_batch_complexity::<SkipListHeap<i32, i32>>(
+        "SkipListHeap",
+        BigOAlgorithmComplexity::ONLogN,
+    );
+}
+
+#[test]
+fn test_skiplist_pop() {
+    test_pop_batch_complexity::<SkipListHeap<i32, i32>>("SkipListHeap");
+}
+
+#[test]
+fn test_skiplist_decrease_key() {
+    // O(log n) per decrease_key (remove + reinsert in sorted list) -> O(n log n) batch
+    test_decrease_key_batch_complexity::<SkipListHeap<i32, i32>>(
+        "SkipListHeap",
+        BigOAlgorithmComplexity::ONLogN,
     );
 }
