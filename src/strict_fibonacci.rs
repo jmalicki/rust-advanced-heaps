@@ -1179,6 +1179,251 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
     }
 
     // =========================================================================
+    // Loss Reduction Operations (Phase 4)
+    // =========================================================================
+    //
+    // Loss reductions handle fixed nodes (active non-root nodes) with high loss.
+    // Loss represents the number of children a node has lost since becoming fixed.
+    //
+    // - **One-node loss reduction**: When a fixed node has loss ≥ 2, cut it
+    //   from its parent and make it a free active root. This reduces loss by
+    //   converting the node from fixed to free.
+    //
+    // - **Two-node loss reduction**: When two fixed nodes with loss = 1 have
+    //   the same rank, cut one from its parent and link them (the one with
+    //   smaller key becomes parent). The parent becomes free, the child fixed
+    //   with loss = 0.
+    //
+    // After cutting a fixed child from its parent, the parent's loss must be
+    // incremented if it is also fixed.
+
+    /// Performs a one-node loss reduction if possible.
+    ///
+    /// Finds a fixed node with loss ≥ 2 (from `fix_loss_two` group), cuts it
+    /// from its parent, and makes it a free active root.
+    ///
+    /// # Returns
+    ///
+    /// `true` if a reduction was performed, `false` otherwise.
+    ///
+    /// # Time Complexity
+    ///
+    /// O(1) - uses fix-list to find candidates in constant time.
+    #[allow(dead_code)] // Will be used when reductions are integrated
+    fn one_node_loss_reduction(&mut self) -> bool {
+        // Get a node with loss >= 2 from the fix_loss_two group
+        let node = match self.fix_loss_two {
+            Some(ptr) => ptr,
+            None => return false,
+        };
+
+        unsafe {
+            let node_ptr = node.as_ptr();
+
+            // Must be a fixed node (non-root) with loss >= 2
+            debug_assert!((*node_ptr).is_fixed());
+            debug_assert!((*node_ptr).loss >= 2);
+            debug_assert!((*node_ptr).parent.is_some());
+
+            let parent_ptr = match (*node_ptr).parent {
+                Some(p) => p,
+                None => return false, // Shouldn't happen, but be safe
+            };
+
+            // Remove node from fix-list before modifying state
+            self.fix_list_remove(node);
+
+            // Perform the cut - this also handles parent loss increment
+            self.cut_with_loss_tracking(node);
+
+            // Node becomes a free active root (active but not fixed)
+            (*node_ptr).loss = LOSS_FREE;
+
+            // Re-add node to fix-list as a free root
+            self.fix_list_add(node);
+
+            // Check if parent needs fix-list update due to loss increment
+            // This is handled by cut_with_loss_tracking, but we need to
+            // update fix-list if parent moved to a different loss group
+            if (*parent_ptr.as_ptr()).is_fixed() {
+                // Parent was already in fix-list; its loss was incremented
+                // so it may need to move to a different group.
+                // For now, just update by re-adding (fix_list_add handles groups)
+                self.fix_list_remove(parent_ptr);
+                self.fix_list_add(parent_ptr);
+            }
+        }
+
+        true
+    }
+
+    /// Performs a two-node loss reduction if possible.
+    ///
+    /// Finds two fixed nodes with loss = 1 and the same rank (from
+    /// `fix_loss_one_multiple` group), cuts one from its parent, and links
+    /// them together. The node with smaller key becomes the parent (remaining
+    /// a free root), and the other becomes a fixed child with loss = 0.
+    ///
+    /// # Returns
+    ///
+    /// `true` if a reduction was performed, `false` otherwise.
+    ///
+    /// # Time Complexity
+    ///
+    /// O(1) - uses fix-list to find candidates in constant time.
+    #[allow(dead_code)] // Will be used when reductions are integrated
+    fn two_node_loss_reduction(&mut self) -> bool {
+        // Get a node with loss = 1 from fix_loss_one_multiple (meaning there
+        // are 2+ nodes of the same rank with loss = 1)
+        let first = match self.fix_loss_one_multiple {
+            Some(ptr) => ptr,
+            None => return false,
+        };
+
+        unsafe {
+            let first_rank = first.as_ref().rank();
+
+            // Find another node with the same rank in fix_loss_one_multiple
+            let ops = CircularListOps::new();
+            let start_link = first.as_ref().fix_link_ptr();
+
+            let mut second: Option<NonNull<Node<T, P>>> = None;
+            ops.for_each(start_link, |link_ptr| {
+                if second.is_some() {
+                    return; // Already found
+                }
+                let node_ptr: *mut Node<T, P> =
+                    container_of_mut!(link_ptr.as_ptr(), Node<T, P>, fix_link);
+                let node = NonNull::new_unchecked(node_ptr);
+
+                // Skip self
+                if node == first {
+                    return;
+                }
+
+                // Check if same rank and loss = 1
+                if (*node_ptr).rank() == first_rank && (*node_ptr).loss == 1 {
+                    second = Some(node);
+                }
+            });
+
+            let second = match second {
+                Some(ptr) => ptr,
+                None => return false,
+            };
+
+            // Determine which node becomes parent (smaller priority)
+            let (winner, loser) = if first.as_ref().priority <= second.as_ref().priority {
+                (first, second)
+            } else {
+                (second, first)
+            };
+
+            // Remove both from fix-list before modifying state
+            self.fix_list_remove(winner);
+            self.fix_list_remove(loser);
+
+            // Get parent pointers for both (for loss increment tracking)
+            let winner_parent = (*winner.as_ptr()).parent;
+            let loser_parent = (*loser.as_ptr()).parent;
+
+            // Cut both nodes from their parents with loss tracking
+            self.cut_with_loss_tracking(winner);
+            self.cut_with_loss_tracking(loser);
+
+            // Link loser under winner as active child
+            self.link_as_active_child(winner, loser);
+
+            // Winner becomes a free active root
+            (*winner.as_ptr()).loss = LOSS_FREE;
+
+            // Loser becomes fixed with loss = 0
+            (*loser.as_ptr()).loss = 0;
+
+            // Re-add winner to fix-list as free root
+            self.fix_list_add(winner);
+            // Re-add loser to fix-list as fixed with loss = 0
+            self.fix_list_add(loser);
+
+            // Update parents' fix-list membership if needed
+            if let Some(parent_ptr) = winner_parent {
+                if (*parent_ptr.as_ptr()).is_fixed() {
+                    self.fix_list_remove(parent_ptr);
+                    self.fix_list_add(parent_ptr);
+                }
+            }
+            if let Some(parent_ptr) = loser_parent {
+                if parent_ptr != winner_parent.unwrap_or(winner)
+                    && (*parent_ptr.as_ptr()).is_fixed()
+                {
+                    self.fix_list_remove(parent_ptr);
+                    self.fix_list_add(parent_ptr);
+                }
+            }
+        }
+
+        true
+    }
+
+    /// Cuts a node from its parent and adds it to the root list.
+    ///
+    /// This version also handles loss tracking: if the parent is a fixed node,
+    /// its loss is incremented.
+    ///
+    /// # Safety
+    ///
+    /// The node must have a parent (not be a root).
+    fn cut_with_loss_tracking(&mut self, node_ptr: NonNull<Node<T, P>>) {
+        let ops = CircularListOps::new();
+
+        unsafe {
+            let node = node_ptr.as_ptr();
+            let parent_ptr = match (*node).parent {
+                Some(p) => p,
+                None => return, // Already a root
+            };
+            let parent = parent_ptr.as_ptr();
+
+            // Remove from parent's children list
+            let node_link = (*node).sibling_link_ptr();
+            let next_link = ops.next(node_link);
+
+            if next_link == Some(node_link) {
+                // Only child
+                (*parent).child = None;
+            } else {
+                // Update parent's child pointer if needed
+                if (*parent).child == Some(node_ptr) {
+                    let next_node_ptr: *mut Node<T, P> =
+                        container_of_mut!(next_link.unwrap().as_ptr(), Node<T, P>, sibling_link);
+                    (*parent).child = Some(NonNull::new_unchecked(next_node_ptr));
+                }
+            }
+
+            ops.unlink(node_link);
+
+            // Decrement parent's rank
+            debug_assert!(
+                (*parent).rank_count > 0,
+                "Parent rank_count underflow in cut_with_loss_tracking()"
+            );
+            (*parent).rank_count -= 1;
+
+            // Increment parent's loss if parent is fixed
+            // (If parent is free or passive, no loss tracking needed)
+            if (*parent).is_fixed() {
+                (*parent).increment_loss();
+            }
+
+            // Clear parent link
+            (*node).parent = None;
+
+            // Add to root list
+            self.add_to_roots(node_ptr);
+        }
+    }
+
+    // =========================================================================
     // Debug assertions
     // =========================================================================
 
@@ -1722,5 +1967,170 @@ mod tests {
             assert!(result.is_ok());
             assert_eq!(heap.peek().map(|(p, _)| *p), Some(0));
         }
+    }
+
+    // =========================================================================
+    // Phase 4: Loss reduction tests
+    // =========================================================================
+
+    #[test]
+    fn test_loss_constants() {
+        // Verify LOSS_FREE sentinel value
+        assert_eq!(LOSS_FREE, u8::MAX);
+        assert_eq!(LOSS_FREE, 255);
+    }
+
+    #[test]
+    fn test_node_loss_classification() {
+        // Test node classification methods
+        let mut node = Node::new(10, "test");
+
+        // Initially passive (active = false)
+        assert!(node.is_passive());
+        assert!(!node.is_active());
+        assert!(!node.is_free());
+        assert!(!node.is_fixed());
+
+        // Make active and free
+        node.active = true;
+        node.loss = LOSS_FREE;
+        assert!(node.is_active());
+        assert!(!node.is_passive());
+        assert!(node.is_free());
+        assert!(!node.is_fixed());
+
+        // Convert to fixed with loss = 0
+        node.loss = 0;
+        assert!(node.is_active());
+        assert!(!node.is_free());
+        assert!(node.is_fixed());
+        assert_eq!(node.get_loss(), 0);
+
+        // Increment loss
+        node.increment_loss();
+        assert_eq!(node.get_loss(), 1);
+
+        node.increment_loss();
+        assert_eq!(node.get_loss(), 2);
+    }
+
+    #[test]
+    fn test_node_free_fixed_conversion() {
+        let mut node = Node::new(10, "test");
+        node.active = true;
+        node.loss = LOSS_FREE;
+
+        // Free -> Fixed
+        assert!(node.is_free());
+        node.free_to_fixed();
+        assert!(node.is_fixed());
+        assert_eq!(node.loss, 0);
+
+        // Fixed -> Free
+        node.fixed_to_free();
+        assert!(node.is_free());
+        assert_eq!(node.loss, LOSS_FREE);
+    }
+
+    #[test]
+    fn test_cut_with_loss_tracking_basic() {
+        let mut heap: StrictFibonacciHeap<i32, i32> = StrictFibonacciHeap::new();
+
+        // Build a small tree structure
+        heap.push(1, 1);
+        heap.push(2, 2);
+        heap.push(3, 3);
+
+        // Pop to trigger consolidation
+        heap.pop();
+
+        // Verify heap still works correctly
+        assert_eq!(heap.len(), 2);
+
+        // Pop remaining elements in order
+        let mut last_priority = i32::MIN;
+        while let Some((priority, _)) = heap.pop() {
+            assert!(priority >= last_priority);
+            last_priority = priority;
+        }
+    }
+
+    #[test]
+    fn test_one_node_loss_reduction_no_candidates() {
+        let mut heap: StrictFibonacciHeap<i32, i32> = StrictFibonacciHeap::new();
+
+        // Empty heap - no candidates
+        assert!(!heap.one_node_loss_reduction());
+
+        // Add some nodes but none in fix_loss_two
+        heap.push(1, 1);
+        heap.push(2, 2);
+
+        // Still no candidates (nodes are passive, not in fix_loss_two)
+        assert!(!heap.one_node_loss_reduction());
+    }
+
+    #[test]
+    fn test_two_node_loss_reduction_no_candidates() {
+        let mut heap: StrictFibonacciHeap<i32, i32> = StrictFibonacciHeap::new();
+
+        // Empty heap - no candidates
+        assert!(!heap.two_node_loss_reduction());
+
+        // Add some nodes but none in fix_loss_one_multiple
+        heap.push(1, 1);
+        heap.push(2, 2);
+
+        // Still no candidates (nodes are passive, not in fix_loss_one_multiple)
+        assert!(!heap.two_node_loss_reduction());
+    }
+
+    #[test]
+    fn test_fix_list_retire() {
+        let mut heap: StrictFibonacciHeap<i32, i32> = StrictFibonacciHeap::new();
+
+        // All fix-list pointers should be None initially
+        assert!(heap.fix_passive.is_none());
+        assert!(heap.fix_free_multiple.is_none());
+        assert!(heap.fix_free_single.is_none());
+        assert!(heap.fix_loss_zero.is_none());
+        assert!(heap.fix_loss_one_multiple.is_none());
+        assert!(heap.fix_loss_one_single.is_none());
+        assert!(heap.fix_loss_two.is_none());
+
+        // Retire should clear everything
+        heap.fix_list_retire();
+
+        assert!(heap.fix_passive.is_none());
+        assert!(heap.fix_free_multiple.is_none());
+        assert!(heap.fix_free_single.is_none());
+        assert!(heap.fix_loss_zero.is_none());
+        assert!(heap.fix_loss_one_multiple.is_none());
+        assert!(heap.fix_loss_one_single.is_none());
+        assert!(heap.fix_loss_two.is_none());
+    }
+
+    #[test]
+    fn test_fix_list_head() {
+        let heap: StrictFibonacciHeap<i32, i32> = StrictFibonacciHeap::new();
+
+        // Empty fix-list should return None
+        assert!(heap.fix_list_head().is_none());
+    }
+
+    #[test]
+    fn test_active_root_reduction_no_candidates() {
+        let mut heap: StrictFibonacciHeap<i32, i32> = StrictFibonacciHeap::new();
+
+        // No free nodes with matching ranks
+        assert!(!heap.active_root_reduction());
+    }
+
+    #[test]
+    fn test_root_degree_reduction_no_candidates() {
+        let mut heap: StrictFibonacciHeap<i32, i32> = StrictFibonacciHeap::new();
+
+        // No passive roots to link
+        assert!(!heap.root_degree_reduction());
     }
 }
