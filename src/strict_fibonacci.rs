@@ -97,6 +97,12 @@ struct RankRecord {
     /// Number of nodes referencing this rank record.
     /// When this reaches 0, the record is retired.
     reference_count: usize,
+    /// Count of free nodes (active roots) with this rank.
+    /// Used to determine if nodes go to fix_free_multiple or fix_free_single.
+    free_count: usize,
+    /// Count of fixed nodes with loss=1 at this rank.
+    /// Used to determine if nodes go to fix_loss_one_multiple or fix_loss_one_single.
+    loss_one_count: usize,
 }
 
 impl RankRecord {
@@ -107,6 +113,8 @@ impl RankRecord {
             prev: None,
             rank,
             reference_count: 0,
+            free_count: 0,
+            loss_one_count: 0,
         })
     }
 
@@ -808,6 +816,86 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for StrictFibonacciHeap<T, P> {
 
 impl<T, P: Ord> StrictFibonacciHeap<T, P> {
     // =========================================================================
+    // Rank Record Management (Phase 7)
+    // =========================================================================
+
+    /// Gets or creates a rank record for the given rank value.
+    ///
+    /// This navigates from the existing rank_list or creates a new one.
+    /// The rank record's reference_count is NOT incremented - caller must do that.
+    ///
+    /// # Safety
+    ///
+    /// Must be called with a valid heap state.
+    unsafe fn get_or_create_rank_record(&mut self, rank: usize) -> NonNull<RankRecord> {
+        // If no rank list exists, create one for this rank
+        if self.rank_list.is_none() {
+            let new_record = RankRecord::new(rank);
+            let new_ptr = NonNull::new(Box::into_raw(new_record)).unwrap();
+            self.rank_list = Some(new_ptr);
+            return new_ptr;
+        }
+
+        let mut current = self.rank_list.unwrap();
+
+        // Navigate to find or create the rank record
+        loop {
+            let current_rank = (*current.as_ptr()).rank;
+
+            if current_rank == rank {
+                return current;
+            } else if current_rank < rank {
+                // Need to go to higher ranks
+                if let Some(next) = (*current.as_ptr()).next {
+                    if (*next.as_ptr()).rank <= rank {
+                        current = next;
+                        continue;
+                    }
+                }
+                // Create new rank record after current
+                let new_record = RankRecord::new(rank);
+                let new_ptr = NonNull::new(Box::into_raw(new_record)).unwrap();
+
+                (*new_ptr.as_ptr()).prev = Some(current);
+                (*new_ptr.as_ptr()).next = (*current.as_ptr()).next;
+
+                if let Some(mut next) = (*current.as_ptr()).next {
+                    next.as_mut().prev = Some(new_ptr);
+                }
+                (*current.as_ptr()).next = Some(new_ptr);
+
+                return new_ptr;
+            } else {
+                // current_rank > rank, need to go to lower ranks or insert before
+                if let Some(prev) = (*current.as_ptr()).prev {
+                    if (*prev.as_ptr()).rank >= rank {
+                        current = prev;
+                        continue;
+                    }
+                }
+                // Create new rank record before current
+                let new_record = RankRecord::new(rank);
+                let new_ptr = NonNull::new(Box::into_raw(new_record)).unwrap();
+
+                (*new_ptr.as_ptr()).next = Some(current);
+                (*new_ptr.as_ptr()).prev = (*current.as_ptr()).prev;
+
+                if let Some(mut prev) = (*current.as_ptr()).prev {
+                    prev.as_mut().next = Some(new_ptr);
+                }
+                (*current.as_ptr()).prev = Some(new_ptr);
+
+                // Update rank_list if this is the new head
+                if self.rank_list == Some(current) && rank < current_rank {
+                    self.rank_list = Some(new_ptr);
+                }
+
+                return new_ptr;
+            }
+        }
+    }
+
+    // =========================================================================
     // Fix-list operations (Phase 3)
     // =========================================================================
 
@@ -1134,10 +1222,12 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
     /// - loss_one_single: fixed nodes with loss = 1 with unique rank
     /// - loss_two: fixed nodes with loss >= 2
     ///
+    /// For free nodes and loss=1 nodes, uses rank records to track counts
+    /// and determine whether to place in `_multiple` or `_single` groups.
+    ///
     /// # Safety
     ///
     /// The node must be valid and not already in the fix-list.
-    #[allow(dead_code)] // Will be used when reductions are integrated
     fn fix_list_add(&mut self, node_ptr: NonNull<Node<T, P>>) {
         let ops = CircularListOps::new();
 
@@ -1149,17 +1239,34 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
             let group_ptr = if (*node).is_passive() {
                 &mut self.fix_passive
             } else if (*node).is_free() {
-                // TODO: Check if there's another free node of same rank
-                // For now, add to free_single; we'll refine this with rank tracking
-                &mut self.fix_free_single
+                // Get node's rank and update rank record
+                let rank = (*node).rank();
+                let rank_record = self.get_or_create_rank_record(rank);
+                (*rank_record.as_ptr()).free_count += 1;
+
+                // Choose group based on whether there are 2+ free nodes of same rank
+                if (*rank_record.as_ptr()).free_count >= 2 {
+                    &mut self.fix_free_multiple
+                } else {
+                    &mut self.fix_free_single
+                }
             } else {
                 // Node is fixed
                 let loss = (*node).loss;
                 if loss == 0 {
                     &mut self.fix_loss_zero
                 } else if loss == 1 {
-                    // TODO: Check if there's another loss=1 node of same rank
-                    &mut self.fix_loss_one_single
+                    // Get node's rank and update rank record
+                    let rank = (*node).rank();
+                    let rank_record = self.get_or_create_rank_record(rank);
+                    (*rank_record.as_ptr()).loss_one_count += 1;
+
+                    // Choose group based on whether there are 2+ loss=1 nodes of same rank
+                    if (*rank_record.as_ptr()).loss_one_count >= 2 {
+                        &mut self.fix_loss_one_multiple
+                    } else {
+                        &mut self.fix_loss_one_single
+                    }
                 } else {
                     &mut self.fix_loss_two
                 }
@@ -1182,10 +1289,12 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
 
     /// Removes a node from its current fix-list group.
     ///
+    /// For free nodes and loss=1 nodes, decrements the corresponding count
+    /// in the rank record.
+    ///
     /// # Safety
     ///
     /// The node must be valid and currently in the fix-list.
-    #[allow(dead_code)] // Will be used when reductions are integrated
     fn fix_list_remove(&mut self, node_ptr: NonNull<Node<T, P>>) {
         let ops = CircularListOps::new();
 
@@ -1193,10 +1302,34 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
             let node = node_ptr.as_ptr();
             let node_link = (*node).fix_link_ptr();
 
-            // Determine which group this node is in
+            // Determine which group this node is in and update rank record counts
             let group_ptr = if (*node).is_passive() {
                 &mut self.fix_passive
             } else if (*node).is_free() {
+                // Decrement free_count in rank record
+                let rank = (*node).rank();
+                if let Some(rank_list) = self.rank_list {
+                    // Find the rank record for this rank
+                    let mut current = rank_list;
+                    loop {
+                        if (*current.as_ptr()).rank == rank {
+                            if (*current.as_ptr()).free_count > 0 {
+                                (*current.as_ptr()).free_count -= 1;
+                            }
+                            break;
+                        }
+                        if let Some(next) = (*current.as_ptr()).next {
+                            if (*next.as_ptr()).rank <= rank {
+                                current = next;
+                            } else {
+                                break;
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                }
+
                 // Check both free groups
                 if self.fix_free_multiple == Some(node_ptr)
                     || self.is_in_fix_group(node_ptr, self.fix_free_multiple)
@@ -1211,6 +1344,30 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
                 if loss == 0 {
                     &mut self.fix_loss_zero
                 } else if loss == 1 {
+                    // Decrement loss_one_count in rank record
+                    let rank = (*node).rank();
+                    if let Some(rank_list) = self.rank_list {
+                        // Find the rank record for this rank
+                        let mut current = rank_list;
+                        loop {
+                            if (*current.as_ptr()).rank == rank {
+                                if (*current.as_ptr()).loss_one_count > 0 {
+                                    (*current.as_ptr()).loss_one_count -= 1;
+                                }
+                                break;
+                            }
+                            if let Some(next) = (*current.as_ptr()).next {
+                                if (*next.as_ptr()).rank <= rank {
+                                    current = next;
+                                } else {
+                                    break;
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+
                     if self.fix_loss_one_multiple == Some(node_ptr)
                         || self.is_in_fix_group(node_ptr, self.fix_loss_one_multiple)
                     {
@@ -2980,5 +3137,180 @@ mod tests {
             assert!(p >= last);
             last = p;
         }
+    }
+
+    // =========================================================================
+    // Phase 7: Rank-based fix-list grouping tests
+    // =========================================================================
+
+    #[test]
+    fn test_rank_record_free_count_tracking() {
+        // Test that free_count is correctly tracked in rank records
+        let mut heap: StrictFibonacciHeap<i32, i32> = StrictFibonacciHeap::new();
+
+        // Create two free nodes with the same rank (0)
+        let node1 = Node::new(1, 10);
+        let node2 = Node::new(2, 20);
+        let node1_ptr = NonNull::new(Box::into_raw(node1)).unwrap();
+        let node2_ptr = NonNull::new(Box::into_raw(node2)).unwrap();
+
+        unsafe {
+            // Set both as free (active with LOSS_FREE)
+            (*node1_ptr.as_ptr()).active = true;
+            (*node1_ptr.as_ptr()).loss = LOSS_FREE;
+            (*node2_ptr.as_ptr()).active = true;
+            (*node2_ptr.as_ptr()).loss = LOSS_FREE;
+
+            // Add first node - should go to fix_free_single (free_count becomes 1)
+            heap.fix_list_add(node1_ptr);
+            assert!(
+                heap.fix_free_single.is_some(),
+                "First free node should go to fix_free_single"
+            );
+            assert!(
+                heap.fix_free_multiple.is_none(),
+                "fix_free_multiple should be empty with one node"
+            );
+
+            // Add second node with same rank - should go to fix_free_multiple (free_count becomes 2)
+            heap.fix_list_add(node2_ptr);
+            assert!(
+                heap.fix_free_multiple.is_some(),
+                "Second free node of same rank should go to fix_free_multiple"
+            );
+
+            // Remove second node - free_count becomes 1
+            heap.fix_list_remove(node2_ptr);
+
+            // Remove first node - free_count becomes 0
+            heap.fix_list_remove(node1_ptr);
+
+            // Clean up
+            drop(Box::from_raw(node1_ptr.as_ptr()));
+            drop(Box::from_raw(node2_ptr.as_ptr()));
+        }
+    }
+
+    #[test]
+    fn test_rank_record_loss_one_count_tracking() {
+        // Test that loss_one_count is correctly tracked in rank records
+        let mut heap: StrictFibonacciHeap<i32, i32> = StrictFibonacciHeap::new();
+
+        // Create two fixed nodes with loss=1 and same rank (0)
+        let node1 = Node::new(1, 10);
+        let node2 = Node::new(2, 20);
+        let node1_ptr = NonNull::new(Box::into_raw(node1)).unwrap();
+        let node2_ptr = NonNull::new(Box::into_raw(node2)).unwrap();
+
+        unsafe {
+            // Set both as fixed with loss=1
+            (*node1_ptr.as_ptr()).active = true;
+            (*node1_ptr.as_ptr()).loss = 1;
+            (*node2_ptr.as_ptr()).active = true;
+            (*node2_ptr.as_ptr()).loss = 1;
+
+            // Add first node - should go to fix_loss_one_single (loss_one_count becomes 1)
+            heap.fix_list_add(node1_ptr);
+            assert!(
+                heap.fix_loss_one_single.is_some(),
+                "First loss=1 node should go to fix_loss_one_single"
+            );
+            assert!(
+                heap.fix_loss_one_multiple.is_none(),
+                "fix_loss_one_multiple should be empty with one node"
+            );
+
+            // Add second node with same rank - should go to fix_loss_one_multiple
+            heap.fix_list_add(node2_ptr);
+            assert!(
+                heap.fix_loss_one_multiple.is_some(),
+                "Second loss=1 node of same rank should go to fix_loss_one_multiple"
+            );
+
+            // Remove both nodes
+            heap.fix_list_remove(node2_ptr);
+            heap.fix_list_remove(node1_ptr);
+
+            // Clean up
+            drop(Box::from_raw(node1_ptr.as_ptr()));
+            drop(Box::from_raw(node2_ptr.as_ptr()));
+        }
+    }
+
+    #[test]
+    fn test_different_ranks_go_to_single_groups() {
+        // Nodes with different ranks should go to _single groups
+        let mut heap: StrictFibonacciHeap<i32, i32> = StrictFibonacciHeap::new();
+
+        // Create two free nodes with different ranks
+        let node1 = Node::new(1, 10);
+        let node2 = Node::new(2, 20);
+        let node1_ptr = NonNull::new(Box::into_raw(node1)).unwrap();
+        let node2_ptr = NonNull::new(Box::into_raw(node2)).unwrap();
+
+        unsafe {
+            // Set both as free
+            (*node1_ptr.as_ptr()).active = true;
+            (*node1_ptr.as_ptr()).loss = LOSS_FREE;
+            (*node1_ptr.as_ptr()).rank_count = 0; // rank 0
+
+            (*node2_ptr.as_ptr()).active = true;
+            (*node2_ptr.as_ptr()).loss = LOSS_FREE;
+            (*node2_ptr.as_ptr()).rank_count = 1; // rank 1 (different)
+
+            // Add both nodes - both should go to fix_free_single (different ranks)
+            heap.fix_list_add(node1_ptr);
+            heap.fix_list_add(node2_ptr);
+
+            // Both should be in fix_free_single since they have different ranks
+            assert!(
+                heap.fix_free_single.is_some(),
+                "Nodes with different ranks should be in fix_free_single"
+            );
+            assert!(
+                heap.fix_free_multiple.is_none(),
+                "fix_free_multiple should be empty (no same-rank pairs)"
+            );
+
+            // Clean up
+            heap.fix_list_remove(node2_ptr);
+            heap.fix_list_remove(node1_ptr);
+            drop(Box::from_raw(node1_ptr.as_ptr()));
+            drop(Box::from_raw(node2_ptr.as_ptr()));
+        }
+    }
+
+    #[test]
+    fn test_get_or_create_rank_record() {
+        // Test that get_or_create_rank_record creates and finds rank records correctly
+        let mut heap: StrictFibonacciHeap<i32, i32> = StrictFibonacciHeap::new();
+
+        unsafe {
+            // Initially no rank list
+            assert!(heap.rank_list.is_none());
+
+            // Create rank record for rank 5
+            let rank5 = heap.get_or_create_rank_record(5);
+            assert_eq!((*rank5.as_ptr()).rank, 5);
+            assert!(heap.rank_list.is_some());
+
+            // Get the same rank record again
+            let rank5_again = heap.get_or_create_rank_record(5);
+            assert_eq!(rank5, rank5_again);
+
+            // Create rank record for rank 3 (before 5)
+            let rank3 = heap.get_or_create_rank_record(3);
+            assert_eq!((*rank3.as_ptr()).rank, 3);
+
+            // Create rank record for rank 7 (after 5)
+            let rank7 = heap.get_or_create_rank_record(7);
+            assert_eq!((*rank7.as_ptr()).rank, 7);
+
+            // Verify ordering: rank_list should start at lowest rank
+            let head = heap.rank_list.unwrap();
+            assert_eq!((*head.as_ptr()).rank, 3);
+        }
+
+        // Clean up is handled by Drop
     }
 }
