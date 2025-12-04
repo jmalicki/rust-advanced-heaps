@@ -80,8 +80,8 @@ pub trait NodeStorage<N>: Default {
     /// Create an "empty" weak key (analogous to Weak::new())
     fn empty_weak() -> Self::WeakKey;
 
-    /// Check if a weak key is empty/null (was never set or points to nothing)
-    fn is_weak_empty(weak: &Self::WeakKey) -> bool;
+    /// Check if a weak key is empty/null (was never set or points to a removed node)
+    fn is_weak_empty(&self, weak: &Self::WeakKey) -> bool;
 }
 
 // ============================================================================
@@ -243,7 +243,7 @@ impl<N> NodeStorage<N> for RcStorage<N> {
         RcWeakKey(Weak::new())
     }
 
-    fn is_weak_empty(weak: &Self::WeakKey) -> bool {
+    fn is_weak_empty(&self, weak: &Self::WeakKey) -> bool {
         // A weak reference is "empty" if it was never connected to an Rc
         // or if all strong references have been dropped
         weak.0.strong_count() == 0
@@ -333,13 +333,13 @@ impl<N> NodeStorage<N> for SlotMapStorage<N> {
         SlotMapWeakKey(None)
     }
 
-    fn is_weak_empty(weak: &Self::WeakKey) -> bool {
-        // Note: This only checks if the weak key was created empty (None).
-        // Unlike RcStorage, we cannot check if the node was removed because
-        // is_weak_empty is a static method with no access to the storage.
-        // SlotMapWeakKey is just an Option<Key> with no back-reference to storage.
-        // Use upgrade() to check if a key is still valid.
-        weak.0.is_none()
+    fn is_weak_empty(&self, weak: &Self::WeakKey) -> bool {
+        // Check if the weak key is None (never set) or points to a removed node
+        // (generation mismatch detected by contains_key)
+        match weak.0 {
+            None => true,
+            Some(key) => !self.nodes.contains_key(key),
+        }
     }
 }
 
@@ -367,7 +367,7 @@ mod tests {
     fn test_rc_storage_weak_empty() {
         let storage: RcStorage<i32> = RcStorage::default();
         let empty = RcStorage::<i32>::empty_weak();
-        assert!(RcStorage::<i32>::is_weak_empty(&empty));
+        assert!(storage.is_weak_empty(&empty));
         assert!(storage.upgrade(&empty).is_none());
     }
 
@@ -413,7 +413,7 @@ mod tests {
     fn test_slotmap_storage_weak_empty() {
         let storage: SlotMapStorage<i32> = SlotMapStorage::default();
         let empty = SlotMapStorage::<i32>::empty_weak();
-        assert!(SlotMapStorage::<i32>::is_weak_empty(&empty));
+        assert!(storage.is_weak_empty(&empty));
         assert!(storage.upgrade(&empty).is_none());
     }
 }
