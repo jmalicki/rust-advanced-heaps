@@ -509,7 +509,8 @@ run_queries_optimized!(run_queries_binomial_opt, BinomialHeap<usize, _>);
 run_queries_optimized!(run_queries_strict_fibonacci_opt, StrictFibonacciHeap<usize, _>);
 run_queries_optimized!(run_queries_twothree_opt, TwoThreeHeap<usize, _>);
 run_queries_optimized!(run_queries_skew_binomial_opt, SkewBinomialHeap<usize, _>);
-run_queries_optimized!(run_queries_skiplist_opt, SkipListHeap<usize, _>);
+// DISABLED: skiplist_opt is 8x slower than skiplist_lazy
+// run_queries_optimized!(run_queries_skiplist_opt, SkipListHeap<usize, _>);
 
 // Lazy runners (use re-insertion)
 run_queries_lazy!(run_queries_fibonacci_lazy, FibonacciHeap<usize, _>);
@@ -983,11 +984,13 @@ fn benchmark_all_heaps_by_rank(c: &mut Criterion) {
             &queries,
             |b, qs| b.iter(|| black_box(run_queries_pairing_opt(&graph, qs))),
         );
-        group.bench_with_input(
-            BenchmarkId::new("rank_pairing_opt", &rank_label),
-            &queries,
-            |b, qs| b.iter(|| black_box(run_queries_rank_pairing_opt(&graph, qs))),
-        );
+        // DISABLED: RankPairingHeap has severe performance regression (8x slower than expected)
+        // See: https://github.com/jmalicki/rust-advanced-heaps/issues/54
+        // group.bench_with_input(
+        //     BenchmarkId::new("rank_pairing_opt", &rank_label),
+        //     &queries,
+        //     |b, qs| b.iter(|| black_box(run_queries_rank_pairing_opt(&graph, qs))),
+        // );
         group.bench_with_input(
             BenchmarkId::new("binomial_opt", &rank_label),
             &queries,
@@ -1008,11 +1011,13 @@ fn benchmark_all_heaps_by_rank(c: &mut Criterion) {
             &queries,
             |b, qs| b.iter(|| black_box(run_queries_skew_binomial_opt(&graph, qs))),
         );
-        group.bench_with_input(
-            BenchmarkId::new("skiplist_opt", &rank_label),
-            &queries,
-            |b, qs| b.iter(|| black_box(run_queries_skiplist_opt(&graph, qs))),
-        );
+        // DISABLED: SkipListHeap optimized is 8x slower than lazy variant
+        // The lazy (re-insertion) approach is far more efficient for this heap
+        // group.bench_with_input(
+        //     BenchmarkId::new("skiplist_opt", &rank_label),
+        //     &queries,
+        //     |b, qs| b.iter(|| black_box(run_queries_skiplist_opt(&graph, qs))),
+        // );
 
         // All lazy (re-insertion) implementations
         group.bench_with_input(
