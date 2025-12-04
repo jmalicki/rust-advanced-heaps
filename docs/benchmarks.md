@@ -197,6 +197,7 @@ The `data/` directory is git-ignored. Available datasets:
 | USA-road-d.FLA | 1.1M | 2.7M | Florida |
 | USA-road-d.NE | 1.5M | 3.9M | Northeast USA |
 | USA-road-d.CAL | 1.9M | 4.7M | California/Nevada |
+| USA-road-d.USA | 23.9M | 58.3M | Full USA (largest) |
 
 ## DIMACS Format
 

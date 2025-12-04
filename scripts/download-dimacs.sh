@@ -12,7 +12,8 @@
 #   COL  - Colorado (436K nodes, 1M edges)
 #   FLA  - Florida (1.1M nodes, 2.7M edges)
 #   NE   - Northeast USA (1.5M nodes, 3.9M edges)
-#   CAL  - California/Nevada (1.9M nodes, 4.7M edges) - largest
+#   CAL  - California/Nevada (1.9M nodes, 4.7M edges)
+#   USA  - Full USA (23.9M nodes, 58.3M edges) - largest, ~335MB compressed
 
 set -e
 
@@ -30,6 +31,7 @@ declare -A DATASETS=(
     ["FLA"]="USA-road-d.FLA"
     ["NE"]="USA-road-d.NE"
     ["CAL"]="USA-road-d.CAL"
+    ["USA"]="USA-road-d.USA"
 )
 
 # Dataset sizes for user info
@@ -40,6 +42,7 @@ declare -A SIZES=(
     ["FLA"]="~50MB compressed"
     ["NE"]="~70MB compressed"
     ["CAL"]="~90MB compressed"
+    ["USA"]="~335MB compressed"
 )
 
 download_dataset() {
@@ -84,12 +87,13 @@ list_datasets() {
     echo ""
     printf "  %-6s %-20s %s\n" "Name" "Size" "Description"
     printf "  %-6s %-20s %s\n" "----" "----" "-----------"
-    printf "  %-6s %-20s %s\n" "NY" "264K nodes, 730K edges" "New York (default)"
-    printf "  %-6s %-20s %s\n" "BAY" "321K nodes, 800K edges" "San Francisco Bay"
-    printf "  %-6s %-20s %s\n" "COL" "436K nodes, 1M edges" "Colorado"
-    printf "  %-6s %-20s %s\n" "FLA" "1.1M nodes, 2.7M edges" "Florida"
-    printf "  %-6s %-20s %s\n" "NE" "1.5M nodes, 3.9M edges" "Northeast USA"
-    printf "  %-6s %-20s %s\n" "CAL" "1.9M nodes, 4.7M edges" "California/Nevada"
+    printf "  %-6s %-25s %s\n" "NY" "264K nodes, 730K edges" "New York (default)"
+    printf "  %-6s %-25s %s\n" "BAY" "321K nodes, 800K edges" "San Francisco Bay"
+    printf "  %-6s %-25s %s\n" "COL" "436K nodes, 1M edges" "Colorado"
+    printf "  %-6s %-25s %s\n" "FLA" "1.1M nodes, 2.7M edges" "Florida"
+    printf "  %-6s %-25s %s\n" "NE" "1.5M nodes, 3.9M edges" "Northeast USA"
+    printf "  %-6s %-25s %s\n" "CAL" "1.9M nodes, 4.7M edges" "California/Nevada"
+    printf "  %-6s %-25s %s\n" "USA" "23.9M nodes, 58.3M edges" "Full USA (largest)"
     echo ""
     echo "Currently downloaded:"
     if [[ -d "$DATA_DIR" ]]; then
@@ -125,7 +129,7 @@ elif [[ "$1" == "--help" || "$1" == "-h" ]]; then
 elif [[ "$1" == "--list" || "$1" == "-l" ]]; then
     list_datasets
 elif [[ "$1" == "all" ]]; then
-    for name in NY BAY COL FLA NE CAL; do
+    for name in NY BAY COL FLA NE CAL USA; do
         download_dataset "$name"
     done
 else
