@@ -34,7 +34,7 @@
 //!   LNCS 1627, 41-50. [Springer](https://link.springer.com/chapter/10.1007/3-540-48686-0_4)
 
 use crate::rank::Rank;
-use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError};
+use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError, MergeableHeap};
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
@@ -216,7 +216,9 @@ impl<T, P: Ord + Clone> Heap<T, P> for TwoThreeHeap<T, P> {
 
         Some((node.priority, node.item))
     }
+}
 
+impl<T, P: Ord + Clone> MergeableHeap<T, P> for TwoThreeHeap<T, P> {
     fn merge(&mut self, mut other: Self) {
         if other.is_empty() {
             return;

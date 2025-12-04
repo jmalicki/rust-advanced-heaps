@@ -35,7 +35,7 @@ use rust_advanced_heaps::skew_binomial::SkewBinomialHeap;
 use rust_advanced_heaps::skiplist::SkipListHeap;
 use rust_advanced_heaps::strict_fibonacci::StrictFibonacciHeap;
 use rust_advanced_heaps::twothree::TwoThreeHeap;
-use rust_advanced_heaps::{DecreaseKeyHeap, Heap};
+use rust_advanced_heaps::{DecreaseKeyHeap, Heap, MergeableHeap};
 
 use std::collections::HashMap;
 
@@ -125,7 +125,7 @@ fn test_pop_order_invariant<H: Heap<i32, i32>>(values: Vec<i32>) -> Result<(), T
 ///
 /// Many heap implementations have merge as a fundamental operation, and bugs here can
 /// lead to incorrect priorities being returned.
-fn test_merge_invariant<H: Heap<i32, i32>>(
+fn test_merge_invariant<H: MergeableHeap<i32, i32>>(
     heap1_values: Vec<i32>,
     heap2_values: Vec<i32>,
 ) -> Result<(), TestCaseError> {
@@ -229,7 +229,9 @@ fn test_pop_maintains_property<H: Heap<i32, i32>>(values: Vec<i32>) -> Result<()
 ///
 /// This is important for heaps used in parallel algorithms where multiple heaps need to
 /// be combined, or in applications that naturally use multiple priority queues.
-fn test_multiple_merges<H: Heap<i32, i32>>(heaps: Vec<Vec<i32>>) -> Result<(), TestCaseError> {
+fn test_multiple_merges<H: MergeableHeap<i32, i32>>(
+    heaps: Vec<Vec<i32>>,
+) -> Result<(), TestCaseError> {
     if heaps.is_empty() {
         return Ok(());
     }

@@ -7,12 +7,15 @@
 //!
 //! # Trait Hierarchy
 //!
-//! This crate provides a two-tier trait design:
+//! This crate provides a multi-tier trait design:
 //!
-//! - [`Heap`]: Base trait for simple heaps (push, pop, peek, merge)
+//! - [`Heap`]: Base trait for simple heaps (push, pop, peek)
+//! - [`MergeableHeap`]: Extension trait for heaps that support efficient merge operations
 //! - [`DecreaseKeyHeap`]: Extended trait adding `decrease_key` and handle-based operations
 //!
 //! This allows algorithms to be generic over heaps at the appropriate level.
+//! The [`MergeableHeap`] trait is separate because some storage backends (like arena-based
+//! storage) cannot efficiently support merging heaps while maintaining handle validity.
 //!
 //! # Implementations
 //!
@@ -74,9 +77,10 @@ pub mod simple_binary;
 pub mod skew_binomial;
 pub mod skiplist;
 pub mod stdlib_compat;
+pub mod storage;
 pub mod strict_fibonacci;
 pub mod traits;
 pub mod twothree;
 
 // Re-export the main traits for convenience
-pub use traits::{DecreaseKeyHeap, Heap};
+pub use traits::{DecreaseKeyHeap, Heap, MergeableHeap};

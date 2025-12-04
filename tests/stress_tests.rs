@@ -7,7 +7,7 @@ use rust_advanced_heaps::binomial::BinomialHeap;
 use rust_advanced_heaps::fibonacci::FibonacciHeap;
 use rust_advanced_heaps::pairing::PairingHeap;
 use rust_advanced_heaps::rank_pairing::RankPairingHeap;
-use rust_advanced_heaps::{DecreaseKeyHeap, Heap};
+use rust_advanced_heaps::{DecreaseKeyHeap, Heap, MergeableHeap};
 
 /// Test massive numbers of inserts and pops
 fn test_massive_operations<H: Heap<i32, i32>>() {
@@ -72,7 +72,7 @@ fn test_alternating_ops<H: Heap<i32, i32>>() {
 }
 
 /// Test merge with large heaps
-fn test_large_merge<H: Heap<i32, i32>>() {
+fn test_large_merge<H: MergeableHeap<i32, i32>>() {
     let mut heap1 = H::new();
     let mut heap2 = H::new();
 

@@ -50,7 +50,7 @@
 //!   [Springer](https://link.springer.com/article/10.1007/BF01840439)
 //! - [Wikipedia: Pairing heap](https://en.wikipedia.org/wiki/Pairing_heap)
 
-use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError};
+use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError, MergeableHeap};
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
@@ -247,7 +247,9 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
         let node = cell.into_inner();
         Some((node.priority, node.item))
     }
+}
 
+impl<T, P: Ord> MergeableHeap<T, P> for PairingHeap<T, P> {
     /// Merges another heap into this heap
     ///
     /// **Time Complexity**: O(1) amortized

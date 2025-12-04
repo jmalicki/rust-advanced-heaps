@@ -39,7 +39,7 @@
 //! assert_eq!(heap.peek(), Some((&5, &"item")));
 //! ```
 
-use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError};
+use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError, MergeableHeap};
 use skiplist::OrderedSkipList;
 use std::cell::Cell;
 use std::cmp::Ordering;
@@ -179,8 +179,13 @@ impl<T, P: Ord + Copy> Heap<T, P> for SkipListHeap<T, P> {
             .pop_front()
             .map(|entry| (entry.priority.get(), entry.item))
     }
+}
 
+impl<T, P: Ord + Copy> MergeableHeap<T, P> for SkipListHeap<T, P> {
     fn merge(&mut self, other: Self) {
+        // Cache next_id before consuming other.list to avoid partial move
+        let other_next_id = other.next_id;
+
         // O(n log n) - insert each element from other into self
         for entry in other.list {
             self.list.insert(entry);
@@ -188,7 +193,7 @@ impl<T, P: Ord + Copy> Heap<T, P> for SkipListHeap<T, P> {
 
         // Keep IDs monotonic within the merged heap to reduce future ID collisions.
         // This helps keep `m` small in `decrease_key`'s O(log n + m) bound.
-        self.next_id = self.next_id.max(other.next_id);
+        self.next_id = self.next_id.max(other_next_id);
     }
 }
 

@@ -16,6 +16,9 @@ categories = ["data-structures", "algorithms"]
 # Enable expensive O(n) invariant verification checks. Only use for debugging specific issues.
 # These checks significantly slow down all heap operations.
 expensive_verify = []
+# Enable experimental arena-based storage using slotmap for better cache locality.
+# This provides alternative heap types with *Arena suffix (e.g., SkewBinomialHeapArena).
+arena-storage = ["slotmap"]
 
 [dependencies]
 # For stack-allocated vectors in fixed-arity heaps
@@ -26,6 +29,8 @@ rustc-hash = "2.0"
 intrusive-circular-list = { path = "crates/intrusive-circular-list" }
 # For skiplist-based heap implementation
 skiplist = "0.6"
+# For arena-based storage (experimental, enabled via "arena-storage" feature)
+slotmap = { version = "1.0", optional = true }
 
 [dev-dependencies]
 proptest = "1.4"

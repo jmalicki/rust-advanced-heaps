@@ -52,7 +52,7 @@
 //! - [Wikipedia: Rank-pairing heap](https://en.wikipedia.org/wiki/Rank-pairing_heap)
 
 use crate::rank::Rank;
-use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError};
+use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError, MergeableHeap};
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
@@ -270,7 +270,9 @@ impl<T, P: Ord> Heap<T, P> for RankPairingHeap<T, P> {
         let node = cell.into_inner();
         Some((node.priority, node.item))
     }
+}
 
+impl<T, P: Ord> MergeableHeap<T, P> for RankPairingHeap<T, P> {
     /// Merges another heap into this heap
     ///
     /// **Time Complexity**: O(1) amortized
