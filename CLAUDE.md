@@ -51,16 +51,16 @@ Key methods: `push`, `pop`, `decrease_key`, `merge`
 
 ### Heap Implementations (`src/`)
 
-| Module                 | Heap Type         | decrease_key       | Notes                  |
-| ---------------------- | ----------------- | ------------------ | ---------------------- |
-| `fibonacci.rs`         | Fibonacci Heap    | O(1) amortized     | Complex, optimal       |
-| `pairing.rs`           | Pairing Heap      | o(log n) amortized | Simpler than Fibonacci |
-| `rank_pairing.rs`      | Rank-Pairing Heap | O(1) amortized     | Same bounds, simpler   |
-| `binomial.rs`          | Binomial Heap     | O(log n)           | Simple, uses bubble-up |
-| `strict_fibonacci.rs`  | Strict Fibonacci  | O(1) worst-case    | Worst-case variant     |
-| `twothree.rs`          | 2-3 Heap          | O(1) amortized     | Uses Rc/RefCell        |
-| `skew_binomial.rs`     | Skew Binomial     | O(log n)           | O(1) insert            |
-| `hollow.rs`            | Hollow Heap       | O(1) amortized     | Lazy deletion, simple  |
+| Module | Heap Type | decrease_key | Notes |
+| --- | --- | --- | --- |
+| `fibonacci.rs` | Fibonacci Heap | O(1) amortized | Complex, optimal |
+| `pairing.rs` | Pairing Heap | o(log n) amortized | Simpler than Fibonacci |
+| `rank_pairing.rs` | Rank-Pairing Heap | O(1) amortized | Same bounds, simpler |
+| `binomial.rs` | Binomial Heap | O(log n) | Simple, uses bubble-up |
+| `strict_fibonacci.rs` | Strict Fibonacci | O(1) worst-case | Worst-case variant |
+| `twothree.rs` | 2-3 Heap | O(1) amortized | Uses Rc/RefCell |
+| `skew_binomial.rs` | Skew Binomial | O(log n) | O(1) insert |
+| `hollow.rs` | Hollow Heap | O(1) amortized | Lazy deletion, simple |
 
 ### Implementation Patterns
 

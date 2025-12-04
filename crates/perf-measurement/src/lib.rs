@@ -1,5 +1,7 @@
 //! Multi-metric Criterion measurement using Linux perf counters.
 //!
+#![warn(missing_docs)]
+//!
 //! This crate provides a Criterion `Measurement` implementation that captures
 //! wall clock time AND hardware performance counters simultaneously.
 //!
