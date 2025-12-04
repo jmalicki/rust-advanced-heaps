@@ -17,7 +17,8 @@ categories = ["data-structures", "algorithms"]
 # These checks significantly slow down all heap operations.
 expensive_verify = []
 # Enable hardware performance counter benchmarks (Linux only)
-perf-counters = ["perf-event"]
+# The feature flag controls which measurement type is used in benchmarks
+perf-counters = []
 
 [dependencies]
 # For stack-allocated vectors in fixed-arity heaps
@@ -31,17 +32,22 @@ skiplist = "0.6"
 
 [dev-dependencies]
 proptest = "1.4"
-criterion = "0.5"
+criterion = "0.8"
 big-o-test = "0.2"
 ctor = "0.2"
 parking_lot = "0.12"
 
-# Hardware performance counters (Linux only, optional)
-[target.'cfg(target_os = "linux")'.dependencies]
-perf-event = { version = "0.4", optional = true }
+# Hardware performance counters for benchmarks (Linux only)
+# Use with: cargo bench --features perf-counters
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+criterion-linux-perf = { git = "https://github.com/jmalicki/criterion-linux-perf" }
 
 [[bench]]
 name = "dimacs_benchmark"
+harness = false
+
+[[bench]]
+name = "perf_benchmark"
 harness = false
 
 # Commands for cargo-cmd (install with: cargo install cargo-cmd)
