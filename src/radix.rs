@@ -34,14 +34,17 @@
 //! |----------------|---------------------|
 //! | `push`         | O(1)                |
 //! | `pop`          | O(log C) amortized* |
-//! | `peek`         | O(1)                |
-//! | `decrease_key` | O(k)**              |
+//! | `peek`         | O(1) expected**     |
+//! | `decrease_key` | O(k)***             |
 //! | `merge`        | O(n)                |
 //!
 //! *Where C is the maximum difference between any key and the minimum key when inserted.
 //! For Dijkstra with bounded edge weights, this is effectively O(1).
 //!
-//! **Where k is the bucket size. In typical Dijkstra usage with well-distributed priorities,
+//! **After `pop` redistributes elements, `peek` is O(1). Before any pop or when bucket 0
+//! is empty, `peek` scans all buckets making it O(n) worst-case.
+//!
+//! ***Where k is the bucket size. In typical Dijkstra usage with well-distributed priorities,
 //! k is small and this is effectively O(1). Worst case (all elements in one bucket) is O(n).
 //!
 //! # Cache Performance
@@ -238,7 +241,9 @@ impl<T, P: RadixKey> RadixHeap<T, P> {
     #[inline]
     fn bucket_index(&self, priority: P) -> usize {
         let diff = priority.bitxor(self.last_min);
-        if diff.as_usize() == 0 {
+        // Compare against default (zero) directly instead of using as_usize(),
+        // which would truncate u128 on 32-bit platforms and cause misclassification.
+        if diff == P::default() {
             0
         } else {
             (P::BITS - diff.leading_zeros()) as usize
