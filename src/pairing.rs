@@ -27,6 +27,28 @@
 //! 2. **Tree structure**: Each node has at most one parent
 //! 3. **Sibling list**: Children of a node form a linked list via sibling pointers
 //! 4. **Root tracking**: The minimum element is always at the root
+//!
+//! # Why Pairing Heaps?
+//!
+//! Pairing heaps were designed as a simpler alternative to Fibonacci heaps that
+//! would be "competitive in theory and easy to implement and fast in practice."
+//! The structure uses a simple multi-way tree where each node stores pointers
+//! to its leftmost child and right sibling.
+//!
+//! The key operation is the two-pass pairing during delete-min: children are
+//! paired left-to-right, then the resulting trees are merged right-to-left.
+//! This pairing strategy gives the heap its name.
+//!
+//! Interestingly, the exact complexity of decrease-key remained an open problem
+//! for decades. The current best bound is o(log n) amortized (strictly better
+//! than log n), proven by Iacono and Özkan in 2014.
+//!
+//! # References
+//!
+//! - Fredman, M. L., Sedgewick, R., Sleator, D. D., & Tarjan, R. E. (1986).
+//!   "The pairing heap: A new form of self-adjusting heap." *Algorithmica*, 1(1), 111-129.
+//!   [Springer](https://link.springer.com/article/10.1007/BF01840439)
+//! - [Wikipedia: Pairing heap](https://en.wikipedia.org/wiki/Pairing_heap)
 
 use crate::traits::{Handle, Heap, HeapError};
 use std::cell::RefCell;

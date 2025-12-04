@@ -9,21 +9,29 @@
 //! Fibonacci heaps, but uses a "trunk" structure where two trees of the same
 //! dimension can be paired together.
 //!
+//! This implementation uses Rc/Weak references for memory safety:
+//! - Strong references (Rc) point from parent to children
+//! - Weak references point from children back to parents
+//! - Items are stored behind Rc so handles remain valid after bubble-up swaps
+//!
+//! # Why 2-3 Heaps?
+//!
+//! The 2-3 heap is designed as a simpler alternative to Fibonacci heaps while
+//! maintaining the same amortized bounds. The name comes from the constraint
+//! that each internal node has either 2 or 3 children.
+//!
+//! The key insight is replacing Fibonacci heaps' cascading cuts with **rank
+//! propagation**: instead of cutting marked nodes, ranks are updated and
+//! propagated upward. This eliminates the complex marking mechanism while
+//! preserving O(1) amortized insert and decrease-key.
+//!
+//! As Takaoka notes: "The merit of the 2-3 heap is that it is conceptually
+//! simpler and easier to implement" compared to other Fibonacci-like structures.
+//!
 //! # References
 //!
-//! Takaoka, T. (1999). "Theory of 2-3 Heaps". COCOON 1999, LNCS 1627, pp. 41-50.
-//! Also published in Discrete Applied Mathematics 126 (2003), pp. 115-128.
-//!
-//! # Ownership Model
-//!
-//! Each node has exactly ONE strong Rc reference:
-//! - Root nodes: owned by `trees[dim]`
-//! - Children: owned by parent's `child` field (first) or prev sibling's `sibling` field
-//! - Extra partner: owned by primary partner's `partner` field
-//!
-//! Weak references are used for back-pointers (parent, prev, partner_back).
-//! All internal Weak refs are guaranteed valid while the node is in the heap.
-//! Operations move ownership rather than cloning Rc.
+//! - Takaoka, T. (1999). "Theory of 2-3 heaps." *Computing and Combinatorics (COCOON)*,
+//!   LNCS 1627, 41-50. [Springer](https://link.springer.com/chapter/10.1007/3-540-48686-0_4)
 
 use crate::traits::{Handle, Heap, HeapError};
 use std::cell::RefCell;

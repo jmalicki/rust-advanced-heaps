@@ -1,3 +1,5 @@
+#![warn(missing_docs)]
+
 //! Advanced Heap Data Structures for Rust
 //!
 //! This crate provides implementations of various advanced heap/priority queue data structures

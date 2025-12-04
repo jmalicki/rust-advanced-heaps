@@ -27,12 +27,27 @@
 //! 3. **Marking rule**: A node can lose at most one child before being cut
 //! 4. **Fibonacci property**: Tree with root degree k has at least F_{k+2} nodes
 //!
-//! # Ownership Model
+//! # Why Fibonacci Heaps?
 //!
-//! - The heap owns all root nodes via `Vec<Rc<RefCell<Node>>>`
-//! - Each node owns its children via `Vec<Rc<RefCell<Node>>>`
-//! - Parent links use `Weak` to avoid reference cycles
-//! - Handles use `Weak` to detect when nodes are removed
+//! Fibonacci heaps achieve O(1) amortized time for insert, decrease-key, and merge
+//! operations, while delete-min remains O(log n) amortized. This makes them
+//! theoretically optimal for algorithms like Dijkstra's shortest path (improving
+//! from O(E log V) to O(E + V log V)) and minimum spanning tree algorithms.
+//!
+//! The key innovation is the "lazy" approach: insertions and merges simply add
+//! trees to a root list without restructuring. The work is deferred until
+//! delete-min, which consolidates trees by degree. Cascading cuts during
+//! decrease-key maintain the Fibonacci property that bounds tree sizes.
+//!
+//! The name "Fibonacci" comes from the Fibonacci numbers appearing in the
+//! analysis of the maximum degree of nodes.
+//!
+//! # References
+//!
+//! - Fredman, M. L., & Tarjan, R. E. (1987). "Fibonacci heaps and their uses in
+//!   improved network optimization algorithms." *Journal of the ACM*, 34(3), 596-615.
+//!   [ACM DL](https://dl.acm.org/doi/10.1145/28869.28874)
+//! - [Wikipedia: Fibonacci heap](https://en.wikipedia.org/wiki/Fibonacci_heap)
 
 use crate::traits::{Handle, Heap, HeapError};
 use std::cell::RefCell;
