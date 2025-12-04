@@ -60,9 +60,17 @@ fn test_push_pop_invariant<H: Heap<i32, i32>>(ops: Vec<(bool, i32)>) -> Result<(
             heap.push(value, value);
             inserted.push(value);
         }
-
-        // Verify heap property: min should be in inserted (verified by pop sequence)
     }
+
+    // Verify heap contents match the tracked multiset
+    let mut popped = Vec::new();
+    while let Some((priority, _item)) = heap.pop() {
+        popped.push(priority);
+    }
+    let mut expected = inserted;
+    popped.sort();
+    expected.sort();
+    prop_assert_eq!(popped, expected);
 
     Ok(())
 }
@@ -101,12 +109,17 @@ fn test_decrease_key_invariant<H: Heap<i32, i32>>(
                 priorities.insert(handle_idx, new_priority);
             }
         }
-
-        // Verify heap property maintained
-        if !heap.is_empty() {
-            // Minimum verified by final pop sequence
-        }
     }
+
+    // Verify final heap contents via pop sequence
+    let mut popped = Vec::new();
+    while let Some((priority, _item)) = heap.pop() {
+        popped.push(priority);
+    }
+    let mut expected: Vec<i32> = priorities.values().copied().collect();
+    popped.sort();
+    expected.sort();
+    prop_assert_eq!(popped, expected);
 
     Ok(())
 }
@@ -168,12 +181,12 @@ fn test_merge_invariant<H: Heap<i32, i32>>(
     }
 
     // Get minimums by popping and pushing back
-    let min1 = heap1.pop().map(|(p, _)| {
-        heap1.push(p, 0);
+    let min1 = heap1.pop().map(|(p, item)| {
+        heap1.push(p, item);
         p
     });
-    let min2 = heap2.pop().map(|(p, _)| {
-        heap2.push(p, 0);
+    let min2 = heap2.pop().map(|(p, item)| {
+        heap2.push(p, item);
         p
     });
     let expected_min = [min1, min2].iter().flatten().min().copied();
@@ -314,18 +327,25 @@ fn test_complex_operations<H: Heap<i32, i32>>(
                 }
             }
             3 => {
-                // Skip peek operation (removed from API)
-                // Heap property verified by other operations
+                // Skip inline peek checks; peek is covered by dedicated tests
             }
             _ => {}
         }
 
-        // Verify invariants after each operation
-        // Minimum verified by final pop sequence
-
+        // Verify length invariants after each operation
         prop_assert_eq!(heap.len(), priorities.len());
         prop_assert_eq!(heap.is_empty(), priorities.is_empty());
     }
+
+    // Verify final heap contents via pop sequence
+    let mut popped = Vec::new();
+    while let Some((_priority, item)) = heap.pop() {
+        popped.push(item as usize);
+    }
+    let mut expected: Vec<usize> = priorities.keys().copied().collect();
+    popped.sort();
+    expected.sort();
+    prop_assert_eq!(popped, expected);
 
     Ok(())
 }
@@ -373,6 +393,9 @@ fn test_multiple_merges<H: Heap<i32, i32>>(heaps: Vec<Vec<i32>>) -> Result<(), T
                 result.push(p, i); // Restore
             }
         }
+    } else {
+        // All heaps were empty; merged result should be empty as well
+        prop_assert!(result.is_empty());
     }
 
     Ok(())
