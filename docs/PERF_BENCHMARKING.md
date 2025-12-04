@@ -12,6 +12,19 @@ using Dijkstra's algorithm on synthetic sparse graphs. We capture:
 - **IPC (Instructions Per Cycle)**: CPU efficiency (higher = better)
 - **LLC Miss Rate**: Last-Level Cache (L3) miss percentage
 
+### Algorithm Naming Convention
+
+Each heap is tested in two modes:
+
+- **`_opt`** (optimistic): Uses native `decrease_key` operation when a shorter
+  path is found to an already-visited node
+- **`_lazy`**: Ignores `decrease_key`; instead re-inserts the node with the new
+  priority, letting duplicates be filtered out on pop
+
+For example, `pairing_opt` uses `PairingHeap::decrease_key()` while
+`pairing_lazy` uses re-insertion. The `simple_binary` heap has no suffix
+because `SimpleBinaryHeap` does not support `decrease_key`.
+
 ## Running Benchmarks
 
 ### Prerequisites (Linux)
