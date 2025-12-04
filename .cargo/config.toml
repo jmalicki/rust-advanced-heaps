@@ -1,7 +1,7 @@
 # Cargo aliases for convenience
 [alias]
-# Download DIMACS benchmark data
-download-dimacs = ["xtask", "download-dimacs"]
+# Download DIMACS benchmark data (requires: cargo install cargo-cmd)
+download-dimacs = ["cmd", "download-dimacs"]
 
 # Run all benchmarks
 bench-all = "bench"

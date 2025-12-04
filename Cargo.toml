@@ -35,3 +35,7 @@ parking_lot = "0.12"
 [[bench]]
 name = "dimacs_benchmark"
 harness = false
+
+# Commands for cargo-cmd (install with: cargo install cargo-cmd)
+[package.metadata.commands]
+download-dimacs = "./scripts/download-dimacs.sh"
