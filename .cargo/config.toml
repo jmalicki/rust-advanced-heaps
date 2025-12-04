@@ -1,0 +1,16 @@
+# Cargo aliases for convenience
+[alias]
+# Download DIMACS benchmark data
+download-dimacs = ["xtask", "download-dimacs"]
+
+# Run all benchmarks
+bench-all = "bench"
+
+# Run only synthetic benchmarks (no data download needed)
+bench-synthetic = "bench -- random_queries dijkstra_rank graph_scale correctness"
+
+# Run only real DIMACS benchmarks (requires data download)
+bench-dimacs = "bench -- real_dimacs"
+
+# Quick benchmark - just random queries
+bench-quick = "bench -- random_queries"

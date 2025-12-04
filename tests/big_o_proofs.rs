@@ -21,7 +21,7 @@ use rust_advanced_heaps::rank_pairing::RankPairingHeap;
 use rust_advanced_heaps::skew_binomial::SkewBinomialHeap;
 use rust_advanced_heaps::strict_fibonacci::StrictFibonacciHeap;
 use rust_advanced_heaps::twothree::TwoThreeHeap;
-use rust_advanced_heaps::Heap;
+use rust_advanced_heaps::{DecreaseKeyHeap, Heap};
 
 use ctor::ctor;
 use parking_lot::RwLock;
@@ -123,7 +123,7 @@ fn test_pop_batch_complexity<H: Heap<i32, i32>>(heap_name: &str) {
 /// - O(1) worst-case: Brodal -> O(n) batch
 /// - o(log n) amortized: Pairing -> O(n) batch (sub-logarithmic, better than O(log n))
 /// - O(log n) worst-case: Binomial, SkewBinomial -> O(n log n) batch
-fn test_decrease_key_batch_complexity<H: Heap<i32, i32>>(
+fn test_decrease_key_batch_complexity<H: DecreaseKeyHeap<i32, i32>>(
     heap_name: &str,
     batch_expected: BigOAlgorithmComplexity,
 ) {
@@ -148,7 +148,7 @@ fn test_decrease_key_batch_complexity<H: Heap<i32, i32>>(
                 let mut h = heap1.write();
                 // Insert elements with high priorities
                 for i in 0..1000 {
-                    handles.push(h.push(i + 10000, i));
+                    handles.push(h.push_with_handle(i + 10000, i));
                 }
             }
 
@@ -165,7 +165,7 @@ fn test_decrease_key_batch_complexity<H: Heap<i32, i32>>(
             {
                 let mut h = heap2.write();
                 for i in 0..2000 {
-                    handles.push(h.push(i + 20000, i));
+                    handles.push(h.push_with_handle(i + 20000, i));
                 }
             }
 
@@ -356,6 +356,7 @@ fn test_strict_fibonacci_decrease_key() {
 
 #[test]
 fn test_twothree_insert() {
+    // O(1) amortized per insert -> O(n) batch
     test_insert_batch_complexity::<TwoThreeHeap<i32, i32>>(
         "TwoThreeHeap",
         BigOAlgorithmComplexity::ON,
@@ -363,19 +364,60 @@ fn test_twothree_insert() {
 }
 
 #[test]
-#[ignore] // Segfault occurs during pop operations: The TwoThreeHeap's structure maintenance
-          //          // operations (node splitting and merging) can trigger memory safety issues when
-          //          // processing large batches of pop operations. The 2-3 tree structure requires
-          //          // careful handling of node splits (when a node has 4 children) and merges (when
-          //          // a node has 1 child), and under certain heap states these operations may access
-          //          // invalidated pointers or create inconsistent tree structures. This appears to
-          //          // be an implementation bug in the structure maintenance logic that needs fixing.
 fn test_twothree_pop() {
+    // O(log n) amortized per pop -> O(n log n) batch
     test_pop_batch_complexity::<TwoThreeHeap<i32, i32>>("TwoThreeHeap");
+}
+
+/// Smaller pop test for TwoThreeHeap batch complexity verification
+#[test]
+#[allow(clippy::arc_with_non_send_sync)]
+fn test_twothree_pop_small() {
+    // TwoThreeHeap uses Rc internally so isn't Send/Sync, but big_o_test requires Arc
+    let heap = Arc::new(RwLock::new(TwoThreeHeap::<i32, i32>::new()));
+
+    test_algorithm(
+        "TwoThreeHeap pop batch (small)",
+        3,
+        || {
+            *heap.write() = TwoThreeHeap::new();
+        },
+        100,
+        || {
+            let mut h = heap.write();
+            for i in 0..100 {
+                h.push(i, i);
+            }
+            for _ in 0..100 {
+                assert!(
+                    h.pop().is_some(),
+                    "pop() must succeed after pushing elements"
+                );
+            }
+            42
+        },
+        200,
+        || {
+            let mut h = heap.write();
+            for i in 0..200 {
+                h.push(i, i);
+            }
+            for _ in 0..200 {
+                assert!(
+                    h.pop().is_some(),
+                    "pop() must succeed after pushing elements"
+                );
+            }
+            42
+        },
+        BigOAlgorithmComplexity::ONLogN,
+        BigOAlgorithmComplexity::ON,
+    );
 }
 
 #[test]
 fn test_twothree_decrease_key() {
+    // O(1) amortized per decrease_key (cut and meld) -> O(n) batch
     test_decrease_key_batch_complexity::<TwoThreeHeap<i32, i32>>(
         "TwoThreeHeap",
         BigOAlgorithmComplexity::ON,

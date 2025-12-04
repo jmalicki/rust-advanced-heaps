@@ -17,16 +17,26 @@ Dijkstra's algorithm is the canonical use case for heaps with `decrease_key`:
 
 ### What We Measure
 
-We compare three heap implementations:
+We compare heap implementations using two Dijkstra variants:
 
-| Heap | `decrease_key` | Why Include |
-|------|----------------|-------------|
-| **Fibonacci** | O(1) amortized | Optimal theoretical bounds |
-| **Pairing** | o(log n) amortized | Simpler, often faster in practice |
-| **Rank-Pairing** | O(1) amortized | Optimal bounds, simpler than Fibonacci |
+**Optimized Dijkstra** (`_opt` suffix): Uses `decrease_key` for efficient
+priority updates. Requires `DecreaseKeyHeap` trait.
 
-BinomialHeap is excluded because its ownership model conflicts with storing
-handles during pathfinding.
+**Lazy Dijkstra** (`_lazy` suffix): Uses re-insertion instead of `decrease_key`.
+Works with any `Heap` trait implementation.
+
+| Heap | `decrease_key` | Variants | Why Include |
+|------|----------------|----------|-------------|
+| **Fibonacci** | O(1) amortized | opt, lazy | Optimal theoretical bounds |
+| **Pairing** | o(log n) amortized | opt, lazy | Simpler, often faster in practice |
+| **Rank-Pairing** | O(1) amortized | opt, lazy | Optimal bounds, simpler than Fibonacci |
+| **Simple Binary** | N/A | lazy only | Baseline comparison |
+
+This allows comparing:
+
+1. **Same heap, different algorithms**: e.g., `fibonacci_opt` vs `fibonacci_lazy`
+2. **Different heaps, same algorithm**: e.g., `pairing_opt` vs `rank_pairing_opt`
+3. **Simple vs advanced heaps**: `simple_binary_lazy` vs others
 
 ### Methodology
 
@@ -98,14 +108,33 @@ This design lets you:
 # Run synthetic benchmarks (no data download needed)
 cargo bench
 
-# Run with real DIMACS data (requires download)
-mkdir -p data
-cd data
-wget http://www.diag.uniroma1.it/challenge9/data/USA-road-d/USA-road-d.NY.gr.gz
-gunzip USA-road-d.NY.gr.gz
-cd ..
-cargo bench
+# Or use the alias for synthetic-only
+cargo bench-synthetic
+
+# Download DIMACS data and run full benchmarks
+./scripts/download-dimacs.sh          # Downloads NY dataset (~12MB)
+./scripts/download-dimacs.sh all      # Downloads all datasets (~260MB)
+./scripts/download-dimacs.sh NY BAY   # Download specific datasets
+
+# Run benchmarks with real data
+cargo bench                           # All benchmarks
+cargo bench-dimacs                    # Only real DIMACS benchmarks
+cargo bench-quick                     # Quick random queries only
+
+# List available datasets
+./scripts/download-dimacs.sh --list
 ```
+
+### Cargo Aliases
+
+The project includes convenient cargo aliases in `.cargo/config.toml`:
+
+| Alias | Description |
+|-------|-------------|
+| `cargo bench-all` | Run all benchmarks |
+| `cargo bench-synthetic` | Run only synthetic benchmarks (no download needed) |
+| `cargo bench-dimacs` | Run only real DIMACS benchmarks |
+| `cargo bench-quick` | Quick benchmark with random queries only |
 
 ## Benchmark Groups
 
@@ -268,6 +297,91 @@ The report includes:
 - Time distribution plots
 - Comparison against baseline
 - Regression detection
+
+## Generating DIMACS-Style Results
+
+The DIMACS Implementation Challenge uses a specific reporting format for
+comparing shortest path algorithms. Here's how to generate consistent results:
+
+### DIMACS Standard Format
+
+DIMACS results are typically reported as:
+
+- **Time per query** (microseconds or milliseconds)
+- **Grouped by Dijkstra rank** (2^10, 2^12, ..., 2^24)
+- **Averaged over 1000+ random queries**
+
+### Generating Comparable Results
+
+```bash
+# 1. Download the standard NY dataset (used in most DIMACS papers)
+./scripts/download-dimacs.sh NY
+
+# 2. Run the Dijkstra rank benchmark
+cargo bench -- real_dimacs_by_rank
+
+# 3. Extract timing data from Criterion output
+# Results are in target/criterion/real_dimacs_by_rank/*/new/estimates.json
+```
+
+### Export to CSV for Plotting
+
+Use the provided export script to extract Criterion results:
+
+```bash
+# Export all results to CSV
+./scripts/export-results.sh > results.csv
+
+# Export specific benchmark group
+./scripts/export-results.sh real_dimacs_by_rank > rank_results.csv
+
+# List available benchmark groups
+./scripts/export-results.sh --list
+```
+
+Output format: `benchmark,variant,mean_ns,std_dev_ns`
+
+Example output:
+
+```csv
+benchmark,variant,mean_ns,std_dev_ns
+random_queries,fibonacci_opt,45230000,1234000
+random_queries,fibonacci_lazy,48900000,1567000
+random_queries,pairing_opt,42100000,987000
+```
+
+### Plotting with gnuplot (DIMACS Standard)
+
+DIMACS papers typically use log-scale plots with Dijkstra rank on x-axis:
+
+```gnuplot
+set terminal png size 800,600
+set output 'dijkstra_rank.png'
+set xlabel 'Dijkstra Rank (log2)'
+set ylabel 'Time per Query (μs)'
+set logscale y
+set key top left
+plot 'results.csv' using 1:2 with linespoints title 'Fibonacci', \
+     '' using 1:3 with linespoints title 'Pairing', \
+     '' using 1:4 with linespoints title 'Rank-Pairing'
+```
+
+### Comparison with Published Results
+
+When comparing with DIMACS papers, note:
+
+1. **Hardware matters**: DIMACS results from 2006-2009 used different CPUs
+2. **Query count**: Papers use 1000+ queries; our benchmarks use 30-100 for speed
+3. **Graph variants**: `-d` suffix means distance weights, `-t` means travel time
+4. **Implementation language**: Most DIMACS entries were C/C++
+
+To increase query count for publication-quality results, modify the benchmark:
+
+```rust
+// In benches/dimacs_benchmark.rs, change:
+let queries = generate_queries_for_rank(&graph, log_rank, 1000, seed);
+//                                                        ^^^^
+```
 
 ## References
 

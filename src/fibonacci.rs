@@ -27,14 +27,29 @@
 //! 3. **Marking rule**: A node can lose at most one child before being cut
 //! 4. **Fibonacci property**: Tree with root degree k has at least F_{k+2} nodes
 //!
-//! # Ownership Model
+//! # Why Fibonacci Heaps?
 //!
-//! - The heap owns all root nodes via `Vec<Rc<RefCell<Node>>>`
-//! - Each node owns its children via `Vec<Rc<RefCell<Node>>>`
-//! - Parent links use `Weak` to avoid reference cycles
-//! - Handles use `Weak` to detect when nodes are removed
+//! Fibonacci heaps achieve O(1) amortized time for insert, decrease-key, and merge
+//! operations, while delete-min remains O(log n) amortized. This makes them
+//! theoretically optimal for algorithms like Dijkstra's shortest path (improving
+//! from O(E log V) to O(E + V log V)) and minimum spanning tree algorithms.
+//!
+//! The key innovation is the "lazy" approach: insertions and merges simply add
+//! trees to a root list without restructuring. The work is deferred until
+//! delete-min, which consolidates trees by degree. Cascading cuts during
+//! decrease-key maintain the Fibonacci property that bounds tree sizes.
+//!
+//! The name "Fibonacci" comes from the Fibonacci numbers appearing in the
+//! analysis of the maximum degree of nodes.
+//!
+//! # References
+//!
+//! - Fredman, M. L., & Tarjan, R. E. (1987). "Fibonacci heaps and their uses in
+//!   improved network optimization algorithms." *Journal of the ACM*, 34(3), 596-615.
+//!   [ACM DL](https://dl.acm.org/doi/10.1145/28869.28874)
+//! - [Wikipedia: Fibonacci heap](https://en.wikipedia.org/wiki/Fibonacci_heap)
 
-use crate::traits::{Handle, Heap, HeapError};
+use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError};
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
@@ -122,12 +137,12 @@ impl<T, P> Node<T, P> {
 ///
 /// ```rust
 /// use rust_advanced_heaps::fibonacci::FibonacciHeap;
-/// use rust_advanced_heaps::Heap;
+/// use rust_advanced_heaps::{Heap, DecreaseKeyHeap};
 ///
 /// let mut heap = FibonacciHeap::new();
-/// let handle = heap.insert(5, "item");
-/// heap.decrease_key(&handle, 1);
-/// assert_eq!(heap.find_min(), Some((&1, &"item")));
+/// let handle = heap.push_with_handle(5, "item");
+/// heap.decrease_key(&handle, 1).unwrap();
+/// assert_eq!(heap.peek(), Some((&1, &"item")));
 /// ```
 pub struct FibonacciHeap<T, P: Ord> {
     /// All root trees (strong references)
@@ -145,8 +160,6 @@ impl<T, P: Ord> Default for FibonacciHeap<T, P> {
 }
 
 impl<T, P: Ord> Heap<T, P> for FibonacciHeap<T, P> {
-    type Handle = FibonacciHandle<T, P>;
-
     fn new() -> Self {
         Self {
             roots: Vec::new(),
@@ -163,37 +176,11 @@ impl<T, P: Ord> Heap<T, P> for FibonacciHeap<T, P> {
         self.len
     }
 
-    fn push(&mut self, priority: P, item: T) -> Self::Handle {
-        self.insert(priority, item)
-    }
-
-    fn insert(&mut self, priority: P, item: T) -> Self::Handle {
-        let node = Rc::new(RefCell::new(Node::new(item, priority)));
-        let handle = FibonacciHandle {
-            node: Rc::downgrade(&node),
-        };
-
-        // Update min if necessary
-        let should_update_min = if let Some(min_rc) = self.min.upgrade() {
-            node.borrow().priority < min_rc.borrow().priority
-        } else {
-            true // No current min, so this becomes min
-        };
-
-        if should_update_min {
-            self.min = Rc::downgrade(&node);
-        }
-
-        self.roots.push(node);
-        self.len += 1;
-        handle
+    fn push(&mut self, priority: P, item: T) {
+        let _ = self.push_with_handle(priority, item);
     }
 
     fn peek(&self) -> Option<(&P, &T)> {
-        self.find_min()
-    }
-
-    fn find_min(&self) -> Option<(&P, &T)> {
         self.min.upgrade().map(|min_rc| {
             // SAFETY: We're returning references to data inside RefCell.
             // This is safe because:
@@ -209,10 +196,6 @@ impl<T, P: Ord> Heap<T, P> for FibonacciHeap<T, P> {
     }
 
     fn pop(&mut self) -> Option<(P, T)> {
-        self.delete_min()
-    }
-
-    fn delete_min(&mut self) -> Option<(P, T)> {
         // Find min in roots using the weak reference
         let min_idx = {
             let min_rc = self.min.upgrade()?;
@@ -256,6 +239,63 @@ impl<T, P: Ord> Heap<T, P> for FibonacciHeap<T, P> {
         Some((node.priority, node.item))
     }
 
+    fn merge(&mut self, mut other: Self) {
+        if other.is_empty() {
+            return;
+        }
+
+        if self.is_empty() {
+            *self = other;
+            return;
+        }
+
+        // Compare mins and update
+        let other_is_smaller =
+            if let (Some(self_min), Some(other_min)) = (self.min.upgrade(), other.min.upgrade()) {
+                other_min.borrow().priority < self_min.borrow().priority
+            } else {
+                other.min.upgrade().is_some()
+            };
+
+        if other_is_smaller {
+            self.min = other.min.clone();
+        }
+
+        // Append other's roots to self
+        self.roots.append(&mut other.roots);
+        self.len += other.len;
+
+        // Prevent double-cleanup
+        other.min = Weak::new();
+        other.len = 0;
+    }
+}
+
+impl<T, P: Ord> DecreaseKeyHeap<T, P> for FibonacciHeap<T, P> {
+    type Handle = FibonacciHandle<T, P>;
+
+    fn push_with_handle(&mut self, priority: P, item: T) -> Self::Handle {
+        let node = Rc::new(RefCell::new(Node::new(item, priority)));
+        let handle = FibonacciHandle {
+            node: Rc::downgrade(&node),
+        };
+
+        // Update min if necessary
+        let should_update_min = if let Some(min_rc) = self.min.upgrade() {
+            node.borrow().priority < min_rc.borrow().priority
+        } else {
+            true // No current min, so this becomes min
+        };
+
+        if should_update_min {
+            self.min = Rc::downgrade(&node);
+        }
+
+        self.roots.push(node);
+        self.len += 1;
+        handle
+    }
+
     fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) -> Result<(), HeapError> {
         // Upgrade weak reference to get the node
         let node_rc = match handle.node.upgrade() {
@@ -296,37 +336,6 @@ impl<T, P: Ord> Heap<T, P> for FibonacciHeap<T, P> {
         self.maybe_update_min(&node_rc);
 
         Ok(())
-    }
-
-    fn merge(&mut self, mut other: Self) {
-        if other.is_empty() {
-            return;
-        }
-
-        if self.is_empty() {
-            *self = other;
-            return;
-        }
-
-        // Compare mins and update
-        let other_is_smaller =
-            if let (Some(self_min), Some(other_min)) = (self.min.upgrade(), other.min.upgrade()) {
-                other_min.borrow().priority < self_min.borrow().priority
-            } else {
-                other.min.upgrade().is_some()
-            };
-
-        if other_is_smaller {
-            self.min = other.min.clone();
-        }
-
-        // Append other's roots to self
-        self.roots.append(&mut other.roots);
-        self.len += other.len;
-
-        // Prevent double-cleanup
-        other.min = Weak::new();
-        other.len = 0;
     }
 }
 

@@ -33,8 +33,9 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use rust_advanced_heaps::fibonacci::FibonacciHeap;
 use rust_advanced_heaps::pairing::PairingHeap;
-use rust_advanced_heaps::pathfinding::{dijkstra, SearchNode};
+use rust_advanced_heaps::pathfinding::{shortest_path, shortest_path_lazy, SearchNode};
 use rust_advanced_heaps::rank_pairing::RankPairingHeap;
+use rust_advanced_heaps::simple_binary::SimpleBinaryHeap;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -425,41 +426,48 @@ impl SearchNode for DimacsNode {
 // Benchmark runners for multiple queries
 // ============================================================================
 
-/// Run dijkstra with FibonacciHeap on a batch of queries
-fn run_queries_fibonacci(graph: &Arc<DimacsGraph>, queries: &[Query]) -> usize {
-    let mut found = 0;
-    for query in queries {
-        let start = DimacsNode::new(query.source, query.target, Arc::clone(graph));
-        if dijkstra::<_, FibonacciHeap<_, _>>(&start).is_some() {
-            found += 1;
+/// Macro to generate optimized (decrease_key) query runners
+macro_rules! run_queries_optimized {
+    ($name:ident, $heap:ty) => {
+        fn $name(graph: &Arc<DimacsGraph>, queries: &[Query]) -> usize {
+            let mut found = 0;
+            for query in queries {
+                let start = DimacsNode::new(query.source, query.target, Arc::clone(graph));
+                if shortest_path::<_, $heap>(&start).is_some() {
+                    found += 1;
+                }
+            }
+            found
         }
-    }
-    found
+    };
 }
 
-/// Run dijkstra with PairingHeap on a batch of queries
-fn run_queries_pairing(graph: &Arc<DimacsGraph>, queries: &[Query]) -> usize {
-    let mut found = 0;
-    for query in queries {
-        let start = DimacsNode::new(query.source, query.target, Arc::clone(graph));
-        if dijkstra::<_, PairingHeap<_, _>>(&start).is_some() {
-            found += 1;
+/// Macro to generate lazy (re-insertion) query runners
+macro_rules! run_queries_lazy {
+    ($name:ident, $heap:ty) => {
+        fn $name(graph: &Arc<DimacsGraph>, queries: &[Query]) -> usize {
+            let mut found = 0;
+            for query in queries {
+                let start = DimacsNode::new(query.source, query.target, Arc::clone(graph));
+                if shortest_path_lazy::<_, $heap>(&start).is_some() {
+                    found += 1;
+                }
+            }
+            found
         }
-    }
-    found
+    };
 }
 
-/// Run dijkstra with RankPairingHeap on a batch of queries
-fn run_queries_rank_pairing(graph: &Arc<DimacsGraph>, queries: &[Query]) -> usize {
-    let mut found = 0;
-    for query in queries {
-        let start = DimacsNode::new(query.source, query.target, Arc::clone(graph));
-        if dijkstra::<_, RankPairingHeap<_, _>>(&start).is_some() {
-            found += 1;
-        }
-    }
-    found
-}
+// Optimized runners (use decrease_key)
+run_queries_optimized!(run_queries_fibonacci_opt, FibonacciHeap<usize, _>);
+run_queries_optimized!(run_queries_pairing_opt, PairingHeap<usize, _>);
+run_queries_optimized!(run_queries_rank_pairing_opt, RankPairingHeap<usize, _>);
+
+// Lazy runners (use re-insertion)
+run_queries_lazy!(run_queries_fibonacci_lazy, FibonacciHeap<usize, _>);
+run_queries_lazy!(run_queries_pairing_lazy, PairingHeap<usize, _>);
+run_queries_lazy!(run_queries_rank_pairing_lazy, RankPairingHeap<usize, _>);
+run_queries_lazy!(run_queries_simple_binary_lazy, SimpleBinaryHeap<usize, _>);
 
 // ============================================================================
 // Benchmarks
@@ -493,16 +501,34 @@ fn benchmark_random_queries(c: &mut Criterion) {
             .collect()
     };
 
-    group.bench_function("fibonacci", |b| {
-        b.iter(|| black_box(run_queries_fibonacci(&graph, &queries)));
+    // Optimized (decrease_key) implementations
+    group.bench_function("fibonacci_opt", |b| {
+        b.iter(|| black_box(run_queries_fibonacci_opt(&graph, &queries)));
     });
 
-    group.bench_function("pairing", |b| {
-        b.iter(|| black_box(run_queries_pairing(&graph, &queries)));
+    group.bench_function("pairing_opt", |b| {
+        b.iter(|| black_box(run_queries_pairing_opt(&graph, &queries)));
     });
 
-    group.bench_function("rank_pairing", |b| {
-        b.iter(|| black_box(run_queries_rank_pairing(&graph, &queries)));
+    group.bench_function("rank_pairing_opt", |b| {
+        b.iter(|| black_box(run_queries_rank_pairing_opt(&graph, &queries)));
+    });
+
+    // Lazy (re-insertion) implementations
+    group.bench_function("fibonacci_lazy", |b| {
+        b.iter(|| black_box(run_queries_fibonacci_lazy(&graph, &queries)));
+    });
+
+    group.bench_function("pairing_lazy", |b| {
+        b.iter(|| black_box(run_queries_pairing_lazy(&graph, &queries)));
+    });
+
+    group.bench_function("rank_pairing_lazy", |b| {
+        b.iter(|| black_box(run_queries_rank_pairing_lazy(&graph, &queries)));
+    });
+
+    group.bench_function("simple_binary_lazy", |b| {
+        b.iter(|| black_box(run_queries_simple_binary_lazy(&graph, &queries)));
     });
 
     group.finish();
@@ -531,27 +557,53 @@ fn benchmark_by_dijkstra_rank(c: &mut Criterion) {
 
         let rank_label = format!("2^{}", log_rank);
 
+        // Optimized implementations
         group.bench_with_input(
-            BenchmarkId::new("fibonacci", &rank_label),
+            BenchmarkId::new("fibonacci_opt", &rank_label),
             &queries,
             |b, qs| {
-                b.iter(|| black_box(run_queries_fibonacci(&graph, qs)));
+                b.iter(|| black_box(run_queries_fibonacci_opt(&graph, qs)));
             },
         );
 
         group.bench_with_input(
-            BenchmarkId::new("pairing", &rank_label),
+            BenchmarkId::new("pairing_opt", &rank_label),
             &queries,
             |b, qs| {
-                b.iter(|| black_box(run_queries_pairing(&graph, qs)));
+                b.iter(|| black_box(run_queries_pairing_opt(&graph, qs)));
             },
         );
 
         group.bench_with_input(
-            BenchmarkId::new("rank_pairing", &rank_label),
+            BenchmarkId::new("rank_pairing_opt", &rank_label),
             &queries,
             |b, qs| {
-                b.iter(|| black_box(run_queries_rank_pairing(&graph, qs)));
+                b.iter(|| black_box(run_queries_rank_pairing_opt(&graph, qs)));
+            },
+        );
+
+        // Lazy implementations
+        group.bench_with_input(
+            BenchmarkId::new("fibonacci_lazy", &rank_label),
+            &queries,
+            |b, qs| {
+                b.iter(|| black_box(run_queries_fibonacci_lazy(&graph, qs)));
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("pairing_lazy", &rank_label),
+            &queries,
+            |b, qs| {
+                b.iter(|| black_box(run_queries_pairing_lazy(&graph, qs)));
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("simple_binary_lazy", &rank_label),
+            &queries,
+            |b, qs| {
+                b.iter(|| black_box(run_queries_simple_binary_lazy(&graph, qs)));
             },
         );
     }
@@ -594,17 +646,47 @@ fn benchmark_graph_scale(c: &mut Criterion) {
                 .collect()
         };
 
-        group.bench_with_input(BenchmarkId::new("fibonacci", name), &queries, |b, qs| {
-            b.iter(|| black_box(run_queries_fibonacci(&graph, qs)));
+        // Optimized implementations
+        group.bench_with_input(
+            BenchmarkId::new("fibonacci_opt", name),
+            &queries,
+            |b, qs| {
+                b.iter(|| black_box(run_queries_fibonacci_opt(&graph, qs)));
+            },
+        );
+
+        group.bench_with_input(BenchmarkId::new("pairing_opt", name), &queries, |b, qs| {
+            b.iter(|| black_box(run_queries_pairing_opt(&graph, qs)));
         });
 
-        group.bench_with_input(BenchmarkId::new("pairing", name), &queries, |b, qs| {
-            b.iter(|| black_box(run_queries_pairing(&graph, qs)));
+        group.bench_with_input(
+            BenchmarkId::new("rank_pairing_opt", name),
+            &queries,
+            |b, qs| {
+                b.iter(|| black_box(run_queries_rank_pairing_opt(&graph, qs)));
+            },
+        );
+
+        // Lazy implementations
+        group.bench_with_input(
+            BenchmarkId::new("fibonacci_lazy", name),
+            &queries,
+            |b, qs| {
+                b.iter(|| black_box(run_queries_fibonacci_lazy(&graph, qs)));
+            },
+        );
+
+        group.bench_with_input(BenchmarkId::new("pairing_lazy", name), &queries, |b, qs| {
+            b.iter(|| black_box(run_queries_pairing_lazy(&graph, qs)));
         });
 
-        group.bench_with_input(BenchmarkId::new("rank_pairing", name), &queries, |b, qs| {
-            b.iter(|| black_box(run_queries_rank_pairing(&graph, qs)));
-        });
+        group.bench_with_input(
+            BenchmarkId::new("simple_binary_lazy", name),
+            &queries,
+            |b, qs| {
+                b.iter(|| black_box(run_queries_simple_binary_lazy(&graph, qs)));
+            },
+        );
     }
 
     group.finish();
@@ -656,27 +738,53 @@ fn benchmark_real_dimacs(c: &mut Criterion) {
                 .collect()
         };
 
+        // Optimized implementations
         group.bench_with_input(
-            BenchmarkId::new("fibonacci", name),
+            BenchmarkId::new("fibonacci_opt", name),
             &(Arc::clone(&graph), queries.clone()),
             |b, (g, qs)| {
-                b.iter(|| black_box(run_queries_fibonacci(g, qs)));
+                b.iter(|| black_box(run_queries_fibonacci_opt(g, qs)));
             },
         );
 
         group.bench_with_input(
-            BenchmarkId::new("pairing", name),
+            BenchmarkId::new("pairing_opt", name),
             &(Arc::clone(&graph), queries.clone()),
             |b, (g, qs)| {
-                b.iter(|| black_box(run_queries_pairing(g, qs)));
+                b.iter(|| black_box(run_queries_pairing_opt(g, qs)));
             },
         );
 
         group.bench_with_input(
-            BenchmarkId::new("rank_pairing", name),
+            BenchmarkId::new("rank_pairing_opt", name),
+            &(Arc::clone(&graph), queries.clone()),
+            |b, (g, qs)| {
+                b.iter(|| black_box(run_queries_rank_pairing_opt(g, qs)));
+            },
+        );
+
+        // Lazy implementations
+        group.bench_with_input(
+            BenchmarkId::new("fibonacci_lazy", name),
+            &(Arc::clone(&graph), queries.clone()),
+            |b, (g, qs)| {
+                b.iter(|| black_box(run_queries_fibonacci_lazy(g, qs)));
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("pairing_lazy", name),
+            &(Arc::clone(&graph), queries.clone()),
+            |b, (g, qs)| {
+                b.iter(|| black_box(run_queries_pairing_lazy(g, qs)));
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("simple_binary_lazy", name),
             &(Arc::clone(&graph), queries),
             |b, (g, qs)| {
-                b.iter(|| black_box(run_queries_rank_pairing(g, qs)));
+                b.iter(|| black_box(run_queries_simple_binary_lazy(g, qs)));
             },
         );
     }
@@ -713,27 +821,53 @@ fn benchmark_real_dimacs_by_rank(c: &mut Criterion) {
 
         let rank_label = format!("2^{}", log_rank);
 
+        // Optimized implementations
         group.bench_with_input(
-            BenchmarkId::new("fibonacci", &rank_label),
+            BenchmarkId::new("fibonacci_opt", &rank_label),
             &queries,
             |b, qs| {
-                b.iter(|| black_box(run_queries_fibonacci(&graph, qs)));
+                b.iter(|| black_box(run_queries_fibonacci_opt(&graph, qs)));
             },
         );
 
         group.bench_with_input(
-            BenchmarkId::new("pairing", &rank_label),
+            BenchmarkId::new("pairing_opt", &rank_label),
             &queries,
             |b, qs| {
-                b.iter(|| black_box(run_queries_pairing(&graph, qs)));
+                b.iter(|| black_box(run_queries_pairing_opt(&graph, qs)));
             },
         );
 
         group.bench_with_input(
-            BenchmarkId::new("rank_pairing", &rank_label),
+            BenchmarkId::new("rank_pairing_opt", &rank_label),
             &queries,
             |b, qs| {
-                b.iter(|| black_box(run_queries_rank_pairing(&graph, qs)));
+                b.iter(|| black_box(run_queries_rank_pairing_opt(&graph, qs)));
+            },
+        );
+
+        // Lazy implementations
+        group.bench_with_input(
+            BenchmarkId::new("fibonacci_lazy", &rank_label),
+            &queries,
+            |b, qs| {
+                b.iter(|| black_box(run_queries_fibonacci_lazy(&graph, qs)));
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("pairing_lazy", &rank_label),
+            &queries,
+            |b, qs| {
+                b.iter(|| black_box(run_queries_pairing_lazy(&graph, qs)));
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("simple_binary_lazy", &rank_label),
+            &queries,
+            |b, qs| {
+                b.iter(|| black_box(run_queries_simple_binary_lazy(&graph, qs)));
             },
         );
     }
@@ -750,7 +884,7 @@ fn benchmark_correctness_check(c: &mut Criterion) {
     group.bench_function("grid_10x10_corner_to_corner", |b| {
         b.iter(|| {
             let start = DimacsNode::new(1, 100, Arc::clone(&grid));
-            let result = dijkstra::<_, FibonacciHeap<_, _>>(&start);
+            let result = shortest_path::<_, FibonacciHeap<_, _>>(&start);
             assert!(result.is_some());
             let (_, cost) = result.unwrap();
             assert_eq!(cost, 18);

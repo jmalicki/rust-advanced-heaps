@@ -7,12 +7,18 @@
 //! - Property-based testing
 //! - Performance characteristics
 
+use rust_advanced_heaps::binomial::BinomialHeap;
 use rust_advanced_heaps::fibonacci::FibonacciHeap;
 use rust_advanced_heaps::pairing::PairingHeap;
 use rust_advanced_heaps::pathfinding::{
-    astar, dijkstra, reachable_within, AStarNode, PathFinderBuilder, SearchNode,
+    reachable_within, reachable_within_lazy, shortest_path, shortest_path_lazy, PathFinderBuilder,
+    SearchNode,
 };
 use rust_advanced_heaps::rank_pairing::RankPairingHeap;
+use rust_advanced_heaps::simple_binary::SimpleBinaryHeap;
+use rust_advanced_heaps::skew_binomial::SkewBinomialHeap;
+use rust_advanced_heaps::strict_fibonacci::StrictFibonacciHeap;
+use rust_advanced_heaps::twothree::TwoThreeHeap;
 // Note: BinomialHeap is not used in these tests because it has ownership limitations
 // that conflict with storing handles during pathfinding (it requires exclusive ownership
 // when popping nodes, which fails when handles are kept for decrease_key operations).
@@ -123,9 +129,7 @@ impl SearchNode for Grid2D {
     fn is_goal(&self) -> bool {
         self.x == self.goal_x && self.y == self.goal_y
     }
-}
 
-impl AStarNode for Grid2D {
     fn heuristic(&self) -> u32 {
         ((self.x - self.goal_x).abs() + (self.y - self.goal_y).abs()) as u32
     }
@@ -213,10 +217,10 @@ impl<'a> SearchNode for TestGraphNode<'a> {
 }
 
 // ============================================================================
-// Dijkstra Tests - All Heap Types
+// Shortest Path Tests - All Heap Types
 // ============================================================================
 
-macro_rules! test_dijkstra_with_heap {
+macro_rules! test_shortest_path_with_heap {
     ($heap_type:ty, $test_name:ident) => {
         mod $test_name {
             use super::*;
@@ -224,7 +228,7 @@ macro_rules! test_dijkstra_with_heap {
             #[test]
             fn basic_path() {
                 let start = SimpleNode::new(0, 10);
-                let result = dijkstra::<_, $heap_type>(&start);
+                let result = shortest_path::<_, $heap_type>(&start);
                 assert!(result.is_some());
                 let (path, cost) = result.unwrap();
                 assert_eq!(cost, 10);
@@ -236,7 +240,7 @@ macro_rules! test_dijkstra_with_heap {
             #[test]
             fn start_equals_goal() {
                 let start = SimpleNode::new(5, 5);
-                let result = dijkstra::<_, $heap_type>(&start);
+                let result = shortest_path::<_, $heap_type>(&start);
                 assert!(result.is_some());
                 let (path, cost) = result.unwrap();
                 assert_eq!(cost, 0);
@@ -246,14 +250,14 @@ macro_rules! test_dijkstra_with_heap {
             #[test]
             fn unreachable_goal() {
                 let start = SimpleNode::new(0, 5000);
-                let result = dijkstra::<_, $heap_type>(&start);
+                let result = shortest_path::<_, $heap_type>(&start);
                 assert!(result.is_none());
             }
 
             #[test]
             fn bounded_grid() {
                 let start = Grid2D::bounded(0, 0, 10, 9, 9);
-                let result = dijkstra::<_, $heap_type>(&start);
+                let result = shortest_path::<_, $heap_type>(&start);
                 assert!(result.is_some());
                 let (path, cost) = result.unwrap();
                 assert_eq!(cost, 18); // Manhattan distance
@@ -267,7 +271,7 @@ macro_rules! test_dijkstra_with_heap {
             #[test]
             fn grid_corner_to_corner() {
                 let start = Grid2D::bounded(0, 0, 5, 4, 4);
-                let result = dijkstra::<_, $heap_type>(&start);
+                let result = shortest_path::<_, $heap_type>(&start);
                 assert!(result.is_some());
                 let (_, cost) = result.unwrap();
                 assert_eq!(cost, 8);
@@ -276,17 +280,17 @@ macro_rules! test_dijkstra_with_heap {
     };
 }
 
-test_dijkstra_with_heap!(FibonacciHeap<usize, _>, dijkstra_fibonacci);
-test_dijkstra_with_heap!(PairingHeap<usize, _>, dijkstra_pairing);
+test_shortest_path_with_heap!(FibonacciHeap<usize, _>, shortest_path_fibonacci);
+test_shortest_path_with_heap!(PairingHeap<usize, _>, shortest_path_pairing);
 // Note: BinomialHeap has a limitation where it expects exclusive ownership on pop,
 // which conflicts with keeping handles for decrease_key. Use for simple linear paths only.
-test_dijkstra_with_heap!(RankPairingHeap<usize, _>, dijkstra_rank_pairing);
+test_shortest_path_with_heap!(RankPairingHeap<usize, _>, shortest_path_rank_pairing);
 
 // ============================================================================
-// A* Tests - All Heap Types
+// Shortest Path with Heuristic Tests - All Heap Types
 // ============================================================================
 
-macro_rules! test_astar_with_heap {
+macro_rules! test_shortest_path_heuristic_with_heap {
     ($heap_type:ty, $test_name:ident) => {
         mod $test_name {
             use super::*;
@@ -294,7 +298,7 @@ macro_rules! test_astar_with_heap {
             #[test]
             fn basic_grid_path() {
                 let start = Grid2D::bounded(0, 0, 20, 10, 10);
-                let result = astar::<_, $heap_type>(&start);
+                let result = shortest_path::<_, $heap_type>(&start);
                 assert!(result.is_some());
                 let (path, cost) = result.unwrap();
                 assert_eq!(cost, 20);
@@ -308,7 +312,7 @@ macro_rules! test_astar_with_heap {
             #[test]
             fn same_start_and_goal() {
                 let start = Grid2D::bounded(5, 5, 10, 5, 5);
-                let result = astar::<_, $heap_type>(&start);
+                let result = shortest_path::<_, $heap_type>(&start);
                 assert!(result.is_some());
                 let (path, cost) = result.unwrap();
                 assert_eq!(cost, 0);
@@ -318,7 +322,7 @@ macro_rules! test_astar_with_heap {
             #[test]
             fn adjacent_nodes() {
                 let start = Grid2D::bounded(5, 5, 10, 6, 5);
-                let result = astar::<_, $heap_type>(&start);
+                let result = shortest_path::<_, $heap_type>(&start);
                 assert!(result.is_some());
                 let (path, cost) = result.unwrap();
                 assert_eq!(cost, 1);
@@ -328,10 +332,10 @@ macro_rules! test_astar_with_heap {
     };
 }
 
-test_astar_with_heap!(FibonacciHeap<usize, _>, astar_fibonacci);
-test_astar_with_heap!(PairingHeap<usize, _>, astar_pairing);
-// Note: BinomialHeap excluded due to ownership limitations (see dijkstra tests)
-test_astar_with_heap!(RankPairingHeap<usize, _>, astar_rank_pairing);
+test_shortest_path_heuristic_with_heap!(FibonacciHeap<usize, _>, heuristic_fibonacci);
+test_shortest_path_heuristic_with_heap!(PairingHeap<usize, _>, heuristic_pairing);
+// Note: BinomialHeap excluded due to ownership limitations (see shortest_path tests)
+test_shortest_path_heuristic_with_heap!(RankPairingHeap<usize, _>, heuristic_rank_pairing);
 
 // ============================================================================
 // Decrease Key Correctness Tests
@@ -390,7 +394,7 @@ impl SearchNode for DecreaseKeyTestNode {
 #[test]
 fn test_decrease_key_optimal_path_fibonacci() {
     let start = DecreaseKeyTestNode::new(0, 2);
-    let result = dijkstra::<_, FibonacciHeap<_, _>>(&start);
+    let result = shortest_path::<_, FibonacciHeap<_, _>>(&start);
     assert!(result.is_some());
     let (path, cost) = result.unwrap();
     // Optimal is 0->1->2 = 11, not 0->2 = 100
@@ -402,7 +406,7 @@ fn test_decrease_key_optimal_path_fibonacci() {
 #[test]
 fn test_decrease_key_optimal_path_pairing() {
     let start = DecreaseKeyTestNode::new(0, 2);
-    let result = dijkstra::<_, PairingHeap<_, _>>(&start);
+    let result = shortest_path::<_, PairingHeap<_, _>>(&start);
     assert!(result.is_some());
     let (_, cost) = result.unwrap();
     assert_eq!(cost, 11);
@@ -411,7 +415,7 @@ fn test_decrease_key_optimal_path_pairing() {
 #[test]
 fn test_decrease_key_longer_optimal_path() {
     let start = DecreaseKeyTestNode::new(0, 4);
-    let result = dijkstra::<_, FibonacciHeap<_, _>>(&start);
+    let result = shortest_path::<_, FibonacciHeap<_, _>>(&start);
     assert!(result.is_some());
     let (path, cost) = result.unwrap();
     // Optimal path: 0->1->3->4 = 3
@@ -443,7 +447,7 @@ fn test_weighted_graph_with_multiple_paths() {
     graph.add_edge('C', 'D', 1);
 
     let start = graph.node('A', 'D');
-    let result = dijkstra::<_, FibonacciHeap<_, _>>(&start);
+    let result = shortest_path::<_, FibonacciHeap<_, _>>(&start);
     assert!(result.is_some());
     let (path, cost) = result.unwrap();
     // Optimal: A->B->D = 3
@@ -465,7 +469,7 @@ fn test_graph_with_cycles() {
     graph.add_edge('B', 'D', 5);
 
     let start = graph.node('A', 'D');
-    let result = dijkstra::<_, FibonacciHeap<_, _>>(&start);
+    let result = shortest_path::<_, FibonacciHeap<_, _>>(&start);
     assert!(result.is_some());
     let (path, cost) = result.unwrap();
     assert_eq!(cost, 6); // A->B->D
@@ -480,7 +484,7 @@ fn test_undirected_graph() {
     graph.add_undirected_edge('A', 'C', 10);
 
     let start = graph.node('A', 'C');
-    let result = dijkstra::<_, FibonacciHeap<_, _>>(&start);
+    let result = shortest_path::<_, FibonacciHeap<_, _>>(&start);
     assert!(result.is_some());
     let (_, cost) = result.unwrap();
     // Should go A->B->C (cost 3) not A->C (cost 10)
@@ -496,7 +500,7 @@ fn test_builder_max_cost_prevents_exploration() {
     let start = SimpleNode::new(0, 10);
     let result = PathFinderBuilder::new(start)
         .max_cost(5)
-        .dijkstra::<FibonacciHeap<_, _>>();
+        .shortest_path::<FibonacciHeap<_, _>>();
     assert!(result.is_none());
 }
 
@@ -505,7 +509,7 @@ fn test_builder_max_cost_allows_valid_path() {
     let start = SimpleNode::new(0, 5);
     let result = PathFinderBuilder::new(start)
         .max_cost(10)
-        .dijkstra::<FibonacciHeap<_, _>>();
+        .shortest_path::<FibonacciHeap<_, _>>();
     assert!(result.is_some());
     let (_, cost) = result.unwrap();
     assert_eq!(cost, 5);
@@ -516,7 +520,7 @@ fn test_builder_max_nodes_prevents_exploration() {
     let start = SimpleNode::new(0, 10);
     let result = PathFinderBuilder::new(start)
         .max_nodes(3)
-        .dijkstra::<FibonacciHeap<_, _>>();
+        .shortest_path::<FibonacciHeap<_, _>>();
     assert!(result.is_none());
 }
 
@@ -526,7 +530,7 @@ fn test_builder_combined_limits() {
     let result = PathFinderBuilder::new(start)
         .max_cost(100)
         .max_nodes(50)
-        .dijkstra::<FibonacciHeap<_, _>>();
+        .shortest_path::<FibonacciHeap<_, _>>();
     assert!(result.is_some());
 }
 
@@ -586,7 +590,7 @@ fn test_single_node_graph_is_goal() {
     }
 
     // Goal is start
-    let result = dijkstra::<_, FibonacciHeap<_, _>>(&IsolatedGoalNode);
+    let result = shortest_path::<_, FibonacciHeap<_, _>>(&IsolatedGoalNode);
     assert!(result.is_some());
 }
 
@@ -606,7 +610,7 @@ fn test_single_node_graph_not_goal() {
     }
 
     // Goal is not start (unreachable)
-    let result = dijkstra::<_, FibonacciHeap<_, _>>(&IsolatedNonGoalNode);
+    let result = shortest_path::<_, FibonacciHeap<_, _>>(&IsolatedNonGoalNode);
     assert!(result.is_none());
 }
 
@@ -644,7 +648,7 @@ fn test_self_loop() {
     }
 
     let start = SelfLoopNode { id: 0, goal: 3 };
-    let result = dijkstra::<_, FibonacciHeap<_, _>>(&start);
+    let result = shortest_path::<_, FibonacciHeap<_, _>>(&start);
     assert!(result.is_some());
     let (path, cost) = result.unwrap();
     assert_eq!(cost, 6); // 0->1->2->3, each costs 2
@@ -684,7 +688,7 @@ fn test_high_branching_factor() {
     }
 
     let start = HighBranchNode { id: 0, goal: 15 };
-    let result = dijkstra::<_, FibonacciHeap<_, _>>(&start);
+    let result = shortest_path::<_, FibonacciHeap<_, _>>(&start);
     assert!(result.is_some());
     let (path, cost) = result.unwrap();
     assert_eq!(cost, 2); // Direct path 0 -> 1-10 (pick 1) -> 11-20 (15 is in this range)
@@ -692,24 +696,24 @@ fn test_high_branching_factor() {
 }
 
 // ============================================================================
-// Consistency Tests (Dijkstra vs A*)
+// Consistency Tests (Different Heap Types)
 // ============================================================================
 
 #[test]
-fn test_dijkstra_astar_same_result() {
+fn test_all_heaps_same_result() {
     let start = Grid2D::bounded(0, 0, 15, 10, 10);
 
-    let dijkstra_result = dijkstra::<_, FibonacciHeap<_, _>>(&start);
-    let astar_result = astar::<_, FibonacciHeap<_, _>>(&start);
+    let fib_result = shortest_path::<_, FibonacciHeap<_, _>>(&start);
+    let pair_result = shortest_path::<_, PairingHeap<_, _>>(&start);
 
-    assert!(dijkstra_result.is_some());
-    assert!(astar_result.is_some());
+    assert!(fib_result.is_some());
+    assert!(pair_result.is_some());
 
-    let (_, dijkstra_cost) = dijkstra_result.unwrap();
-    let (_, astar_cost) = astar_result.unwrap();
+    let (_, fib_cost) = fib_result.unwrap();
+    let (_, pair_cost) = pair_result.unwrap();
 
     // Both should find optimal path
-    assert_eq!(dijkstra_cost, astar_cost);
+    assert_eq!(fib_cost, pair_cost);
 }
 
 // ============================================================================
@@ -719,7 +723,7 @@ fn test_dijkstra_astar_same_result() {
 #[test]
 fn test_long_path() {
     let start = SimpleNode::new(0, 500);
-    let result = dijkstra::<_, FibonacciHeap<_, _>>(&start);
+    let result = shortest_path::<_, FibonacciHeap<_, _>>(&start);
     assert!(result.is_some());
     let (path, cost) = result.unwrap();
     assert_eq!(cost, 500);
@@ -727,9 +731,9 @@ fn test_long_path() {
 }
 
 #[test]
-fn test_large_grid_astar() {
+fn test_large_grid_with_heuristic() {
     let start = Grid2D::bounded(0, 0, 50, 49, 49);
-    let result = astar::<_, FibonacciHeap<_, _>>(&start);
+    let result = shortest_path::<_, FibonacciHeap<_, _>>(&start);
     assert!(result.is_some());
     let (_, cost) = result.unwrap();
     assert_eq!(cost, 98); // Manhattan distance in bounded grid
@@ -748,9 +752,9 @@ mod property_tests {
         #![proptest_config(ProptestConfig::with_cases(50))]
 
         #[test]
-        fn dijkstra_path_cost_matches_sum(goal in 1u32..50) {
+        fn shortest_path_cost_matches_sum(goal in 1u32..50) {
             let start = SimpleNode::new(0, goal);
-            let result = dijkstra::<_, FibonacciHeap<_, _>>(&start);
+            let result = shortest_path::<_, FibonacciHeap<_, _>>(&start);
             prop_assert!(result.is_some());
             let (path, cost) = result.unwrap();
 
@@ -769,7 +773,7 @@ mod property_tests {
         #[test]
         fn grid_path_cost_equals_manhattan(x in 1i32..20, y in 1i32..20) {
             let start = Grid2D::bounded(0, 0, 25, x, y);
-            let result = astar::<_, FibonacciHeap<_, _>>(&start);
+            let result = shortest_path::<_, FibonacciHeap<_, _>>(&start);
             prop_assert!(result.is_some());
             let (_, cost) = result.unwrap();
 
@@ -791,9 +795,9 @@ mod property_tests {
         }
 
         #[test]
-        fn dijkstra_finds_path_when_exists(start_val in 0u32..50, goal in 0u32..100) {
+        fn shortest_path_finds_path_when_exists(start_val in 0u32..50, goal in 0u32..100) {
             let start = SimpleNode::new(start_val, goal);
-            let result = dijkstra::<_, FibonacciHeap<_, _>>(&start);
+            let result = shortest_path::<_, FibonacciHeap<_, _>>(&start);
 
             if goal >= start_val && goal <= 1000 {
                 // Path should exist
@@ -818,10 +822,10 @@ mod property_tests {
 fn test_all_heaps_produce_same_cost() {
     let start = Grid2D::bounded(0, 0, 15, 10, 10);
 
-    let fib_result = dijkstra::<_, FibonacciHeap<_, _>>(&start);
-    let pair_result = dijkstra::<_, PairingHeap<_, _>>(&start);
+    let fib_result = shortest_path::<_, FibonacciHeap<_, _>>(&start);
+    let pair_result = shortest_path::<_, PairingHeap<_, _>>(&start);
     // BinomialHeap excluded due to ownership limitations with handle storage
-    let rank_result = dijkstra::<_, RankPairingHeap<_, _>>(&start);
+    let rank_result = shortest_path::<_, RankPairingHeap<_, _>>(&start);
 
     let (_, fib_cost) = fib_result.unwrap();
     let (_, pair_cost) = pair_result.unwrap();
@@ -829,4 +833,162 @@ fn test_all_heaps_produce_same_cost() {
 
     assert_eq!(fib_cost, pair_cost);
     assert_eq!(pair_cost, rank_cost);
+    assert_eq!(fib_cost, 20); // Manhattan distance from (0,0) to (10,10)
 }
+
+// ============================================================================
+// Lazy Dijkstra Tests (for base Heap trait without decrease_key)
+// ============================================================================
+
+macro_rules! test_shortest_path_lazy_with_heap {
+    ($heap_type:ty, $test_name:ident) => {
+        mod $test_name {
+            use super::*;
+
+            #[test]
+            fn basic_path() {
+                let start = SimpleNode::new(0, 10);
+                let result = shortest_path_lazy::<_, $heap_type>(&start);
+                assert!(result.is_some());
+                let (path, cost) = result.unwrap();
+                assert_eq!(cost, 10);
+                assert_eq!(path.len(), 11);
+                assert_eq!(path[0].value, 0);
+                assert_eq!(path[10].value, 10);
+            }
+
+            #[test]
+            fn start_equals_goal() {
+                let start = SimpleNode::new(5, 5);
+                let result = shortest_path_lazy::<_, $heap_type>(&start);
+                assert!(result.is_some());
+                let (path, cost) = result.unwrap();
+                assert_eq!(cost, 0);
+                assert_eq!(path.len(), 1);
+            }
+
+            #[test]
+            fn unreachable_goal() {
+                let start = SimpleNode::new(0, 5000);
+                let result = shortest_path_lazy::<_, $heap_type>(&start);
+                assert!(result.is_none());
+            }
+
+            #[test]
+            fn bounded_grid() {
+                let start = Grid2D::bounded(0, 0, 10, 9, 9);
+                let result = shortest_path_lazy::<_, $heap_type>(&start);
+                assert!(result.is_some());
+                let (path, cost) = result.unwrap();
+                assert_eq!(cost, 18); // Manhattan distance
+                assert_eq!(path[0].x, 0);
+                assert_eq!(path[0].y, 0);
+                let last = path.last().unwrap();
+                assert_eq!(last.x, 9);
+                assert_eq!(last.y, 9);
+            }
+
+            #[test]
+            fn grid_corner_to_corner() {
+                let start = Grid2D::bounded(0, 0, 5, 4, 4);
+                let result = shortest_path_lazy::<_, $heap_type>(&start);
+                assert!(result.is_some());
+                let (_, cost) = result.unwrap();
+                assert_eq!(cost, 8);
+            }
+
+            #[test]
+            fn decrease_key_scenario() {
+                // Test graph that requires updating priorities for optimal path
+                let start = DecreaseKeyTestNode::new(0, 2);
+                let result = shortest_path_lazy::<_, $heap_type>(&start);
+                assert!(result.is_some());
+                let (path, cost) = result.unwrap();
+                // Optimal is 0->1->2 = 11, not 0->2 = 100
+                assert_eq!(cost, 11);
+                assert_eq!(path.len(), 3);
+            }
+
+            #[test]
+            fn complex_graph() {
+                let start = DecreaseKeyTestNode::new(0, 4);
+                let result = shortest_path_lazy::<_, $heap_type>(&start);
+                assert!(result.is_some());
+                let (_, cost) = result.unwrap();
+                assert_eq!(cost, 3); // 0->1->3->4
+            }
+
+            #[test]
+            fn reachable_within() {
+                let start = ReachableNode(0);
+                let reachable = reachable_within_lazy::<_, $heap_type>(&start, 10);
+                assert_eq!(reachable.len(), 11); // 0 through 10
+            }
+        }
+    };
+}
+
+// Test lazy Dijkstra with all heap types (both base Heap and DecreaseKeyHeap)
+test_shortest_path_lazy_with_heap!(SimpleBinaryHeap<usize, _>, lazy_simple_binary);
+test_shortest_path_lazy_with_heap!(BinomialHeap<usize, _>, lazy_binomial);
+test_shortest_path_lazy_with_heap!(FibonacciHeap<usize, _>, lazy_fibonacci);
+test_shortest_path_lazy_with_heap!(PairingHeap<usize, _>, lazy_pairing);
+test_shortest_path_lazy_with_heap!(RankPairingHeap<usize, _>, lazy_rank_pairing);
+test_shortest_path_lazy_with_heap!(SkewBinomialHeap<usize, _>, lazy_skew_binomial);
+test_shortest_path_lazy_with_heap!(StrictFibonacciHeap<usize, _>, lazy_strict_fibonacci);
+test_shortest_path_lazy_with_heap!(TwoThreeHeap<usize, _>, lazy_twothree);
+
+// ============================================================================
+// Optimized Dijkstra Tests (for DecreaseKeyHeap trait with decrease_key)
+// ============================================================================
+
+macro_rules! test_shortest_path_optimized_with_heap {
+    ($heap_type:ty, $test_name:ident) => {
+        mod $test_name {
+            use super::*;
+
+            #[test]
+            fn basic_path() {
+                let start = SimpleNode::new(0, 10);
+                let result = shortest_path::<_, $heap_type>(&start);
+                assert!(result.is_some());
+                let (path, cost) = result.unwrap();
+                assert_eq!(cost, 10);
+                assert_eq!(path.len(), 11);
+            }
+
+            #[test]
+            fn grid_path() {
+                let start = Grid2D::bounded(0, 0, 15, 10, 10);
+                let result = shortest_path::<_, $heap_type>(&start);
+                assert!(result.is_some());
+                let (_, cost) = result.unwrap();
+                assert_eq!(cost, 20); // Manhattan distance
+            }
+
+            #[test]
+            fn decrease_key_scenario() {
+                let start = DecreaseKeyTestNode::new(0, 4);
+                let result = shortest_path::<_, $heap_type>(&start);
+                assert!(result.is_some());
+                let (_, cost) = result.unwrap();
+                assert_eq!(cost, 3); // 0->1->3->4
+            }
+
+            #[test]
+            fn reachable_within() {
+                let start = ReachableNode(0);
+                let reachable = super::reachable_within::<_, $heap_type>(&start, 10);
+                assert_eq!(reachable.len(), 11); // 0 through 10
+            }
+        }
+    };
+}
+
+// Test optimized Dijkstra with all DecreaseKeyHeap types
+test_shortest_path_optimized_with_heap!(FibonacciHeap<usize, _>, opt_fibonacci);
+test_shortest_path_optimized_with_heap!(PairingHeap<usize, _>, opt_pairing);
+test_shortest_path_optimized_with_heap!(RankPairingHeap<usize, _>, opt_rank_pairing);
+test_shortest_path_optimized_with_heap!(SkewBinomialHeap<usize, _>, opt_skew_binomial);
+test_shortest_path_optimized_with_heap!(StrictFibonacciHeap<usize, _>, opt_strict_fibonacci);
+test_shortest_path_optimized_with_heap!(TwoThreeHeap<usize, _>, opt_twothree);

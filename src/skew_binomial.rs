@@ -10,8 +10,26 @@
 //!
 //! This implementation uses Rc/Weak references instead of raw pointers,
 //! providing memory safety for tree structure management.
+//!
+//! # Why Skew Binomial Heaps?
+//!
+//! Skew binomial heaps extend binomial heaps to achieve O(1) worst-case insertion
+//! (vs O(log n) for binomial heaps). The key innovation is the **skew link**: a
+//! special linking operation that can combine three trees at once.
+//!
+//! The "skew" in the name refers to the skew binary number system used to represent
+//! tree sizes, which allows constant-time increment operations. Originally designed
+//! for purely functional programming languages, this structure demonstrates that
+//! optimal priority queue bounds are achievable without mutation.
+//!
+//! # References
+//!
+//! - Brodal, G. S., & Okasaki, C. (1996). "Optimal purely functional priority queues."
+//!   *Journal of Functional Programming*, 6(6), 839-857.
+//!   [Cambridge](https://doi.org/10.1017/S095679680000201X)
+//! - [Wikipedia: Skew binomial heap](https://en.wikipedia.org/wiki/Skew_binomial_heap)
 
-use crate::traits::{Handle, Heap, HeapError};
+use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError};
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
@@ -64,8 +82,6 @@ pub struct SkewBinomialHeap<T, P: Ord> {
 }
 
 impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
-    type Handle = SkewBinomialHandle<T, P>;
-
     fn new() -> Self {
         Self {
             trees: Vec::new(),
@@ -82,41 +98,11 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
         self.len
     }
 
-    fn push(&mut self, priority: P, item: T) -> Self::Handle {
-        self.insert(priority, item)
-    }
-
-    fn insert(&mut self, priority: P, item: T) -> Self::Handle {
-        let node = Rc::new(RefCell::new(Node {
-            item: Some(item),
-            priority: Some(priority),
-            parent: Weak::new(),
-            child: None,
-            sibling: None,
-            rank: 0,
-            skew: true,
-        }));
-
-        let handle = SkewBinomialHandle {
-            node: Rc::downgrade(&node),
-        };
-
-        self.insert_tree(node);
-        self.len += 1;
-
-        // Update min pointer AFTER insert_tree, because during insert_tree
-        // the node may become a child of another node during linking.
-        // find_and_update_min scans roots to find the actual minimum.
-        self.find_and_update_min();
-
-        handle
+    fn push(&mut self, priority: P, item: T) {
+        let _ = self.push_with_handle(priority, item);
     }
 
     fn peek(&self) -> Option<(&P, &T)> {
-        self.find_min()
-    }
-
-    fn find_min(&self) -> Option<(&P, &T)> {
         self.min.as_ref().map(|min_ref| unsafe {
             let ptr = min_ref.as_ptr();
             (
@@ -127,10 +113,6 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
     }
 
     fn pop(&mut self) -> Option<(P, T)> {
-        self.delete_min()
-    }
-
-    fn delete_min(&mut self) -> Option<(P, T)> {
         let min_ref = self.min.take()?;
 
         // Clear from trees
@@ -181,39 +163,6 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
         Some((priority, item))
     }
 
-    fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) -> Result<(), HeapError> {
-        let node_ref = handle
-            .node
-            .upgrade()
-            .ok_or(HeapError::PriorityNotDecreased)?;
-
-        // Check if node has been deleted (priority is None)
-        {
-            let node = node_ref.borrow();
-            if node.priority.is_none() {
-                return Err(HeapError::PriorityNotDecreased);
-            }
-            if new_priority >= *node.priority.as_ref().unwrap() {
-                return Err(HeapError::PriorityNotDecreased);
-            }
-        }
-
-        // Check if node is a root (no parent)
-        let has_parent = node_ref.borrow().parent.upgrade().is_some();
-
-        if !has_parent {
-            // Node is a root, just update priority and min
-            node_ref.borrow_mut().priority = Some(new_priority);
-            self.find_and_update_min();
-            return Ok(());
-        }
-
-        // Cut the node from its parent and reinsert
-        self.cut_and_reinsert(node_ref, new_priority);
-
-        Ok(())
-    }
-
     fn merge(&mut self, mut other: Self) {
         if other.is_empty() {
             return;
@@ -240,6 +189,66 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
 
         other.min = None;
         other.len = 0;
+    }
+}
+
+impl<T, P: Ord> DecreaseKeyHeap<T, P> for SkewBinomialHeap<T, P> {
+    type Handle = SkewBinomialHandle<T, P>;
+
+    fn push_with_handle(&mut self, priority: P, item: T) -> Self::Handle {
+        let node = Rc::new(RefCell::new(Node {
+            item: Some(item),
+            priority: Some(priority),
+            parent: Weak::new(),
+            child: None,
+            sibling: None,
+            rank: 0,
+            skew: true,
+        }));
+
+        let handle = SkewBinomialHandle {
+            node: Rc::downgrade(&node),
+        };
+
+        self.insert_tree(node);
+        self.len += 1;
+
+        // Update min pointer AFTER insert_tree, because during insert_tree
+        // the node may become a child of another node during linking.
+        // find_and_update_min scans roots to find the actual minimum.
+        self.find_and_update_min();
+
+        handle
+    }
+
+    fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) -> Result<(), HeapError> {
+        let node_ref = handle.node.upgrade().ok_or(HeapError::InvalidHandle)?;
+
+        // Check if node has been deleted (priority is None)
+        {
+            let node = node_ref.borrow();
+            if node.priority.is_none() {
+                return Err(HeapError::InvalidHandle);
+            }
+            if new_priority >= *node.priority.as_ref().unwrap() {
+                return Err(HeapError::PriorityNotDecreased);
+            }
+        }
+
+        // Check if node is a root (no parent)
+        let has_parent = node_ref.borrow().parent.upgrade().is_some();
+
+        if !has_parent {
+            // Node is a root, just update priority and min
+            node_ref.borrow_mut().priority = Some(new_priority);
+            self.find_and_update_min();
+            return Ok(());
+        }
+
+        // Cut the node from its parent and reinsert
+        self.cut_and_reinsert(node_ref, new_priority);
+
+        Ok(())
     }
 }
 

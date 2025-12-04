@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "crates/intrusive-circular-list"]
+
 [package]
 name = "rust-advanced-heaps"
 version = "0.1.0"
@@ -19,6 +22,8 @@ expensive_verify = []
 smallvec = "1.13"
 # Fast hashing for pathfinding algorithms
 rustc-hash = "2.0"
+# For intrusive circular doubly-linked lists (used by strict Fibonacci heap)
+intrusive-circular-list = { path = "crates/intrusive-circular-list" }
 
 [dev-dependencies]
 proptest = "1.4"

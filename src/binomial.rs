@@ -28,8 +28,24 @@
 //!
 //! **Invariant**: After merge, at most one tree of each degree. This ensures
 //! O(log n) trees total, bounding operation costs.
+//!
+//! # Why Binomial Heaps?
+//!
+//! Binomial heaps represent priority queues as a forest of binomial trees, where
+//! the number of trees corresponds to the binary representation of n. This elegant
+//! design makes merging two heaps analogous to binary addition: when two trees of
+//! the same order meet, they combine into a tree of the next higher order, just
+//! like carrying in addition. This achieves O(log n) merge time - a significant
+//! improvement over binary heaps which require O(n) to merge.
+//!
+//! # References
+//!
+//! - Vuillemin, J. (1978). "A data structure for manipulating priority queues."
+//!   *Communications of the ACM*, 21(4), 309-315.
+//!   [ACM DL](https://dl.acm.org/doi/10.1145/359460.359478)
+//! - [Wikipedia: Binomial heap](https://en.wikipedia.org/wiki/Binomial_heap)
 
-use crate::traits::{Handle, Heap, HeapError};
+use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError};
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
@@ -110,12 +126,12 @@ struct Node<T, P> {
 ///
 /// ```rust
 /// use rust_advanced_heaps::binomial::BinomialHeap;
-/// use rust_advanced_heaps::Heap;
+/// use rust_advanced_heaps::{Heap, DecreaseKeyHeap};
 ///
 /// let mut heap = BinomialHeap::new();
-/// let handle = heap.insert(5, "item");
-/// heap.decrease_key(&handle, 1);
-/// assert_eq!(heap.find_min(), Some((&1, &"item")));
+/// let handle = heap.push_with_handle(5, "item");
+/// heap.decrease_key(&handle, 1).unwrap();
+/// assert_eq!(heap.peek(), Some((&1, &"item")));
 /// ```
 pub struct BinomialHeap<T, P: Ord> {
     /// Array of binomial trees indexed by degree. Each slot holds at most one tree.
@@ -129,8 +145,6 @@ pub struct BinomialHeap<T, P: Ord> {
 // No manual Drop needed - Rc handles cleanup automatically when strong refs go to 0
 
 impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
-    type Handle = BinomialHandle<T, P>;
-
     fn new() -> Self {
         Self {
             trees: Vec::new(),
@@ -147,9 +161,130 @@ impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
         self.len
     }
 
-    fn push(&mut self, priority: P, item: T) -> Self::Handle {
-        self.insert(priority, item)
+    fn push(&mut self, priority: P, item: T) {
+        let _ = self.push_with_handle(priority, item);
     }
+
+    fn peek(&self) -> Option<(&P, &T)> {
+        // We need to return references that live as long as self
+        // Since RefCell borrows are temporary, we search the trees array
+        // and use pointer magic to get stable references
+        let min_weak = self.min.as_ref()?;
+        let min_rc = min_weak.upgrade()?;
+
+        // SAFETY: We return references tied to &self lifetime.
+        // The Rc keeps the node alive as long as it's in trees[].
+        // This is safe because:
+        // 1. The node is owned by trees[] (strong ref)
+        // 2. We're borrowing self immutably, so trees[] can't change
+        // 3. RefCell contents won't move while we hold &self
+        let node_ptr = min_rc.as_ptr();
+        unsafe { Some((&(*node_ptr).priority, &(*node_ptr).item)) }
+    }
+
+    /// Removes and returns the minimum element
+    ///
+    /// **Time Complexity**: O(log n) worst-case
+    ///
+    /// **Algorithm**:
+    /// 1. Find and remove the minimum root (tracked separately, O(1))
+    /// 2. Remove minimum tree from the trees array at its degree
+    /// 3. Collect all children of the minimum root
+    /// 4. Each child is a binomial tree (B_{k-1} if parent was Bₖ)
+    /// 5. Create a temporary heap from children
+    /// 6. Merge the temporary heap back into the main heap
+    /// 7. Find new minimum by scanning all roots (O(log n))
+    ///
+    /// **Why O(log n)?**
+    /// - Minimum root has at most O(log n) children (degree ≤ log n)
+    /// - Collecting children: O(log n)
+    /// - Merging heaps: O(log n) - merge trees by degree with carry propagation
+    /// - Finding new minimum: O(log n) - scan at most log n roots
+    /// - Total: O(log n)
+    ///
+    /// **Binomial Tree Property**: When the root of a Bₖ tree is removed, its
+    /// children are Bₖ₋₁, Bₖ₋₂, ..., B₀ trees. This maintains the binomial
+    /// tree structure after deletion.
+    fn pop(&mut self) -> Option<(P, T)> {
+        let min_weak = self.min.take()?;
+        let min_rc = min_weak.upgrade()?;
+
+        // Remove minimum tree from trees array
+        // We must search all slots because after bubble_up, the node's degree
+        // may not match its slot (degree changes during swaps but slot doesn't)
+        for i in 0..self.trees.len() {
+            if let Some(ref tree) = self.trees[i] {
+                if Rc::ptr_eq(tree, &min_rc) {
+                    self.trees[i] = None;
+                    break;
+                }
+            }
+        }
+
+        // Collect children into a temporary heap
+        let mut child_heap = self.collect_children(&min_rc);
+
+        // Merge the child heap back into the main heap
+        self.merge_trees(&mut child_heap);
+
+        // Find new minimum
+        self.find_and_update_min();
+
+        self.len -= 1;
+
+        // Extract item and priority from the minimum node
+        // At this point, min_rc should be the only strong reference
+        // (we removed it from trees[] and detached children)
+        let node = Rc::try_unwrap(min_rc)
+            .ok()
+            .expect("min node should have no other strong references")
+            .into_inner();
+        Some((node.priority, node.item))
+    }
+
+    /// Merges another heap into this heap
+    ///
+    /// **Time Complexity**: O(log n) worst-case, O(1) amortized for sequential merges
+    ///
+    /// **Algorithm**:
+    /// 1. Merge trees from both heaps by degree
+    /// 2. Use carry propagation (like binary addition)
+    /// 3. For each degree from 0 to max:
+    ///    - Collect trees from both heaps at this degree
+    ///    - Link pairs until at most one tree remains
+    ///    - Carry the result to next degree if linking occurred
+    /// 4. Update minimum pointer
+    ///
+    /// **Why O(log n)?**
+    /// - At most O(log n) distinct degrees in each heap
+    /// - Processing each degree: O(1) per tree
+    /// - Total trees: O(log n)
+    /// - Worst-case: O(log n)
+    ///
+    /// **Why O(1) amortized for sequential merges?**
+    /// - Similar to binary addition: most merges are cheap
+    /// - Expensive merges (with many carry propagations) are rare
+    /// - Amortized analysis shows average cost is O(1) per merge
+    ///
+    /// **Invariant**: After merge, at most one tree of each degree (maintained by
+    /// carry propagation, exactly like binary addition maintains at most one bit
+    /// per position).
+    fn merge(&mut self, mut other: Self) {
+        // Merge trees from both heaps
+        self.merge_trees(&mut other);
+
+        // Update minimum pointer after merge
+        self.find_and_update_min();
+
+        // Update length
+        self.len += other.len;
+        other.min = None;
+        other.len = 0;
+    }
+}
+
+impl<T, P: Ord> DecreaseKeyHeap<T, P> for BinomialHeap<T, P> {
+    type Handle = BinomialHandle<T, P>;
 
     /// Inserts a new element into the heap
     ///
@@ -160,8 +295,8 @@ impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
     /// 2. Update minimum pointer if necessary
     /// 3. Merge the single-node tree into the heap:
     ///    - Start at degree 0
-    ///    - If slot[degree] is empty, place tree there
-    ///    - If slot[degree] has a tree, link them (produces degree+1 tree)
+    ///    - If `slot[degree]` is empty, place tree there
+    ///    - If `slot[degree]` has a tree, link them (produces degree+1 tree)
     ///    - Continue with carry propagation (like binary addition)
     ///
     /// **Why O(log n)?**
@@ -173,7 +308,7 @@ impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
     /// **Invariant**: After insert, at most one tree of each degree (maintained by
     /// the carry propagation process, just like binary addition maintains at most
     /// one bit per position).
-    fn insert(&mut self, priority: P, item: T) -> Self::Handle {
+    fn push_with_handle(&mut self, priority: P, item: T) -> Self::Handle {
         // Create new single-node tree (B₀ tree, degree 0)
         let node = Rc::new(RefCell::new(Node {
             item,
@@ -220,91 +355,6 @@ impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
         handle
     }
 
-    fn peek(&self) -> Option<(&P, &T)> {
-        self.find_min()
-    }
-
-    fn find_min(&self) -> Option<(&P, &T)> {
-        // We need to return references that live as long as self
-        // Since RefCell borrows are temporary, we search the trees array
-        // and use pointer magic to get stable references
-        let min_weak = self.min.as_ref()?;
-        let min_rc = min_weak.upgrade()?;
-
-        // SAFETY: We return references tied to &self lifetime.
-        // The Rc keeps the node alive as long as it's in trees[].
-        // This is safe because:
-        // 1. The node is owned by trees[] (strong ref)
-        // 2. We're borrowing self immutably, so trees[] can't change
-        // 3. RefCell contents won't move while we hold &self
-        let node_ptr = min_rc.as_ptr();
-        unsafe { Some((&(*node_ptr).priority, &(*node_ptr).item)) }
-    }
-
-    fn pop(&mut self) -> Option<(P, T)> {
-        self.delete_min()
-    }
-
-    /// Removes and returns the minimum element
-    ///
-    /// **Time Complexity**: O(log n) worst-case
-    ///
-    /// **Algorithm**:
-    /// 1. Find and remove the minimum root (tracked separately, O(1))
-    /// 2. Remove minimum tree from the trees array at its degree
-    /// 3. Collect all children of the minimum root
-    /// 4. Each child is a binomial tree (B_{k-1} if parent was Bₖ)
-    /// 5. Create a temporary heap from children
-    /// 6. Merge the temporary heap back into the main heap
-    /// 7. Find new minimum by scanning all roots (O(log n))
-    ///
-    /// **Why O(log n)?**
-    /// - Minimum root has at most O(log n) children (degree ≤ log n)
-    /// - Collecting children: O(log n)
-    /// - Merging heaps: O(log n) - merge trees by degree with carry propagation
-    /// - Finding new minimum: O(log n) - scan at most log n roots
-    /// - Total: O(log n)
-    ///
-    /// **Binomial Tree Property**: When the root of a Bₖ tree is removed, its
-    /// children are Bₖ₋₁, Bₖ₋₂, ..., B₀ trees. This maintains the binomial
-    /// tree structure after deletion.
-    fn delete_min(&mut self) -> Option<(P, T)> {
-        let min_weak = self.min.take()?;
-        let min_rc = min_weak.upgrade()?;
-
-        // Remove minimum tree from trees array
-        // We must search all slots because after bubble_up, the node's degree
-        // may not match its slot (degree changes during swaps but slot doesn't)
-        for i in 0..self.trees.len() {
-            if let Some(ref tree) = self.trees[i] {
-                if Rc::ptr_eq(tree, &min_rc) {
-                    self.trees[i] = None;
-                    break;
-                }
-            }
-        }
-
-        // Collect children into a temporary heap
-        let mut child_heap = self.collect_children(&min_rc);
-
-        // Merge the child heap back into the main heap
-        self.merge_trees(&mut child_heap);
-
-        // Find new minimum
-        self.find_and_update_min();
-
-        self.len -= 1;
-
-        // Extract item and priority from the minimum node
-        // At this point, min_rc should be the only strong reference
-        // (we removed it from trees[] and detached children)
-        let node = Rc::try_unwrap(min_rc)
-            .ok()
-            .expect("min node should have no other strong references")
-            .into_inner();
-        Some((node.priority, node.item))
-    }
-
     /// Decreases the priority of an element
     ///
     /// **Time Complexity**: O(log n) worst-case
@@ -347,46 +397,6 @@ impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
         self.bubble_up(node_rc);
 
         Ok(())
-    }
-
-    /// Merges another heap into this heap
-    ///
-    /// **Time Complexity**: O(log n) worst-case, O(1) amortized for sequential merges
-    ///
-    /// **Algorithm**:
-    /// 1. Merge trees from both heaps by degree
-    /// 2. Use carry propagation (like binary addition)
-    /// 3. For each degree from 0 to max:
-    ///    - Collect trees from both heaps at this degree
-    ///    - Link pairs until at most one tree remains
-    ///    - Carry the result to next degree if linking occurred
-    /// 4. Update minimum pointer
-    ///
-    /// **Why O(log n)?**
-    /// - At most O(log n) distinct degrees in each heap
-    /// - Processing each degree: O(1) per tree
-    /// - Total trees: O(log n)
-    /// - Worst-case: O(log n)
-    ///
-    /// **Why O(1) amortized for sequential merges?**
-    /// - Similar to binary addition: most merges are cheap
-    /// - Expensive merges (with many carry propagations) are rare
-    /// - Amortized analysis shows average cost is O(1) per merge
-    ///
-    /// **Invariant**: After merge, at most one tree of each degree (maintained by
-    /// carry propagation, exactly like binary addition maintains at most one bit
-    /// per position).
-    fn merge(&mut self, mut other: Self) {
-        // Merge trees from both heaps
-        self.merge_trees(&mut other);
-
-        // Update minimum pointer after merge
-        self.find_and_update_min();
-
-        // Update length
-        self.len += other.len;
-        other.min = None;
-        other.len = 0;
     }
 }
 
@@ -919,12 +929,13 @@ mod tests {
 
     #[test]
     fn test_decrease_key_min_update() {
+        use crate::DecreaseKeyHeap;
         let mut heap: BinomialHeap<i32, i32> = BinomialHeap::new();
         let mut handles = Vec::new();
 
         // Insert 16 zeros
         for i in 0..16 {
-            handles.push(heap.push(0, i));
+            handles.push(heap.push_with_handle(0, i));
         }
         println!("After 16 pushes, min: {:?}", heap.peek());
         println!(
@@ -965,6 +976,7 @@ mod tests {
 
     #[test]
     fn test_complex_operations_failure() {
+        use crate::DecreaseKeyHeap;
         // Simplified test case focusing on the issue
         let mut heap: BinomialHeap<i32, i32> = BinomialHeap::new();
         let mut handles = Vec::new();
@@ -972,7 +984,7 @@ mod tests {
         // Insert: [54, -34, 48, 55, 19, 8, 23, 87]
         let initial = [54i32, -34, 48, 55, 19, 8, 23, 87];
         for (i, priority) in initial.iter().enumerate() {
-            handles.push(heap.push(*priority, i as i32));
+            handles.push(heap.push_with_handle(*priority, i as i32));
         }
         println!("After initial inserts, min: {:?}", heap.peek());
         assert_eq!(heap.peek().map(|(p, _)| *p), Some(-34));
@@ -985,9 +997,9 @@ mod tests {
         assert_eq!(heap.peek().map(|(p, _)| *p), Some(-34));
 
         // Push a few more items
-        handles.push(heap.push(71, 8)); // idx 8
-        handles.push(heap.push(94, 9)); // idx 9
-        handles.push(heap.push(-87, 10)); // idx 10
+        handles.push(heap.push_with_handle(71, 8)); // idx 8
+        handles.push(heap.push_with_handle(94, 9)); // idx 9
+        handles.push(heap.push_with_handle(-87, 10)); // idx 10
         println!("After pushes, min: {:?}", heap.peek());
         assert_eq!(heap.peek().map(|(p, _)| *p), Some(-87)); // -87 is now min
 
@@ -1032,6 +1044,7 @@ mod tests {
 
     #[test]
     fn test_failing_input_from_proptest() {
+        use crate::DecreaseKeyHeap;
         use std::collections::HashMap;
 
         let mut heap: BinomialHeap<i32, i32> = BinomialHeap::new();
@@ -1044,7 +1057,7 @@ mod tests {
         ];
 
         for (i, priority) in initial.iter().enumerate() {
-            handles.push(heap.push(*priority, i as i32));
+            handles.push(heap.push_with_handle(*priority, i as i32));
             priorities.insert(i, *priority);
         }
 
