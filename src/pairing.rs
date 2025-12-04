@@ -128,9 +128,9 @@ struct Node<T, P> {
 /// use rust_advanced_heaps::Heap;
 ///
 /// let mut heap = PairingHeap::new();
-/// let handle = heap.insert(5, "item");
+/// let handle = heap.push(5, "item");
 /// heap.decrease_key(&handle, 1);
-/// assert_eq!(heap.find_min(), Some((&1, &"item")));
+/// assert_eq!(heap.peek(), Some((&1, &"item")));
 /// ```
 pub struct PairingHeap<T, P: Ord> {
     /// Root of the heap tree. Uses strong reference as the heap owns the root.
@@ -157,10 +157,6 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
         self.len
     }
 
-    fn push(&mut self, priority: P, item: T) -> Self::Handle {
-        self.insert(priority, item)
-    }
-
     /// Inserts a new element into the heap
     ///
     /// **Time Complexity**: O(1) amortized
@@ -178,7 +174,7 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
     /// - Heap property maintained: smaller priority becomes parent
     /// - Tree structure preserved: parent-child relationships correctly linked
     /// - Root always points to minimum: updated if new element is smaller
-    fn insert(&mut self, priority: P, item: T) -> Self::Handle {
+    fn push(&mut self, priority: P, item: T) -> Self::Handle {
         // Create new node with no children or siblings yet
         let node = Rc::new(RefCell::new(Node {
             item,
@@ -221,10 +217,6 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
     }
 
     fn peek(&self) -> Option<(&P, &T)> {
-        self.find_min()
-    }
-
-    fn find_min(&self) -> Option<(&P, &T)> {
         // Safety: The references we return point to data inside an Rc that the heap owns.
         // As long as the caller has a borrow of &self, the Rc stays alive and the data is valid.
         // This is effectively a lifetime extension that is safe because:
@@ -235,10 +227,6 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
             let node = root.as_ptr();
             unsafe { (&(*node).priority, &(*node).item) }
         })
-    }
-
-    fn pop(&mut self) -> Option<(P, T)> {
-        self.delete_min()
     }
 
     /// Removes and returns the minimum element
@@ -265,7 +253,7 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
     /// - Single pass (left-to-right) would create an unbalanced structure
     /// - Two passes ensure logarithmic height in the amortized sense
     /// - Right-to-left merge in second pass balances the tree better
-    fn delete_min(&mut self) -> Option<(P, T)> {
+    fn pop(&mut self) -> Option<(P, T)> {
         let root = self.root.take()?;
 
         // Get the first child before we consume the root

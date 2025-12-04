@@ -22,10 +22,10 @@
 //! use rust_advanced_heaps::Heap;
 //!
 //! let mut heap = FibonacciHeap::new();
-//! let handle1 = heap.insert(5, "item1");
-//! let handle2 = heap.insert(3, "item2");
+//! let handle1 = heap.push(5, "item1");
+//! let handle2 = heap.push(3, "item2");
 //! heap.decrease_key(&handle1, 1);
-//! assert_eq!(heap.find_min(), Some((&1, &"item1")));
+//! assert_eq!(heap.peek(), Some((&1, &"item1")));
 //! ```
 
 pub mod binomial;

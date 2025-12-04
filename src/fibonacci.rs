@@ -140,9 +140,9 @@ impl<T, P> Node<T, P> {
 /// use rust_advanced_heaps::Heap;
 ///
 /// let mut heap = FibonacciHeap::new();
-/// let handle = heap.insert(5, "item");
+/// let handle = heap.push(5, "item");
 /// heap.decrease_key(&handle, 1);
-/// assert_eq!(heap.find_min(), Some((&1, &"item")));
+/// assert_eq!(heap.peek(), Some((&1, &"item")));
 /// ```
 pub struct FibonacciHeap<T, P: Ord> {
     /// All root trees (strong references)
@@ -179,10 +179,6 @@ impl<T, P: Ord> Heap<T, P> for FibonacciHeap<T, P> {
     }
 
     fn push(&mut self, priority: P, item: T) -> Self::Handle {
-        self.insert(priority, item)
-    }
-
-    fn insert(&mut self, priority: P, item: T) -> Self::Handle {
         let node = Rc::new(RefCell::new(Node::new(item, priority)));
         let handle = FibonacciHandle {
             node: Rc::downgrade(&node),
@@ -205,10 +201,6 @@ impl<T, P: Ord> Heap<T, P> for FibonacciHeap<T, P> {
     }
 
     fn peek(&self) -> Option<(&P, &T)> {
-        self.find_min()
-    }
-
-    fn find_min(&self) -> Option<(&P, &T)> {
         self.min.upgrade().map(|min_rc| {
             // SAFETY: We're returning references to data inside RefCell.
             // This is safe because:
@@ -224,10 +216,6 @@ impl<T, P: Ord> Heap<T, P> for FibonacciHeap<T, P> {
     }
 
     fn pop(&mut self) -> Option<(P, T)> {
-        self.delete_min()
-    }
-
-    fn delete_min(&mut self) -> Option<(P, T)> {
         // Find min in roots using the weak reference
         let min_idx = {
             let min_rc = self.min.upgrade()?;

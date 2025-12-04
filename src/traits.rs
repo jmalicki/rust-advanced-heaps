@@ -63,7 +63,6 @@ pub trait Heap<T, P: Ord> {
 
     /// Inserts an element with the given priority, returning a handle
     ///
-    /// Equivalent to `BinaryHeap::push`, but returns a handle for `decrease_key`.
     /// The handle can be used later with `decrease_key` to update the priority.
     ///
     /// # Time Complexity
@@ -71,22 +70,11 @@ pub trait Heap<T, P: Ord> {
     /// - Pairing Heap: O(1) amortized
     /// - Rank-Pairing Heap: O(1) amortized
     /// - Binomial Heap: O(log n)
-    /// - Brodal Heap: O(1) worst-case
     fn push(&mut self, priority: P, item: T) -> Self::Handle;
-
-    /// Inserts an element with the given priority, returning a handle
-    ///
-    /// Alias for `push` for consistency with older API.
-    /// Prefer using `push` for compatibility with standard Rust heaps.
-    #[inline]
-    fn insert(&mut self, priority: P, item: T) -> Self::Handle {
-        self.push(priority, item)
-    }
 
     /// Returns the minimum priority and associated item without removing it
     ///
-    /// Equivalent to `BinaryHeap::peek`. Note that `BinaryHeap` is a max-heap,
-    /// while these heaps are min-heaps.
+    /// Note that `BinaryHeap` is a max-heap, while these heaps are min-heaps.
     ///
     /// # Lifetime Safety
     ///
@@ -104,36 +92,16 @@ pub trait Heap<T, P: Ord> {
     /// All implementations: O(1)
     fn peek(&self) -> Option<(&P, &T)>;
 
-    /// Returns the minimum priority and associated item without removing it
-    ///
-    /// Alias for `peek` for consistency with older API.
-    /// Prefer using `peek` for compatibility with standard Rust heaps.
-    #[inline]
-    fn find_min(&self) -> Option<(&P, &T)> {
-        self.peek()
-    }
-
     /// Removes and returns the minimum priority and associated item
     ///
-    /// Equivalent to `BinaryHeap::pop`. Note that `BinaryHeap` is a max-heap,
-    /// while these heaps are min-heaps.
+    /// Note that `BinaryHeap` is a max-heap, while these heaps are min-heaps.
     ///
     /// # Time Complexity
     /// - Fibonacci Heap: O(log n) amortized
     /// - Pairing Heap: O(log n) amortized
     /// - Rank-Pairing Heap: O(log n) amortized
     /// - Binomial Heap: O(log n)
-    /// - Brodal Heap: O(log n) worst-case
     fn pop(&mut self) -> Option<(P, T)>;
-
-    /// Removes and returns the minimum priority and associated item
-    ///
-    /// Alias for `pop` for consistency with older API.
-    /// Prefer using `pop` for compatibility with standard Rust heaps.
-    #[inline]
-    fn delete_min(&mut self) -> Option<(P, T)> {
-        self.pop()
-    }
 
     /// Decreases the priority of an element identified by the handle
     ///
@@ -154,18 +122,14 @@ pub trait Heap<T, P: Ord> {
     /// - Pairing Heap: o(log n) amortized
     /// - Rank-Pairing Heap: O(1) amortized
     /// - Binomial Heap: O(log n)
-    /// - Brodal Heap: O(1) worst-case
     fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) -> Result<(), HeapError>;
 
     /// Merges another heap into this one, consuming the other heap
-    ///
-    /// Similar to `BinaryHeap::append`, but consumes the other heap.
     ///
     /// # Time Complexity
     /// - Fibonacci Heap: O(1)
     /// - Pairing Heap: O(1)
     /// - Rank-Pairing Heap: O(1)
     /// - Binomial Heap: O(log n)
-    /// - Brodal Heap: O(1) worst-case
     fn merge(&mut self, other: Self);
 }

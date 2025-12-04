@@ -22,7 +22,6 @@ fn test_empty_heap<H: Heap<String, i32>>() {
     assert_eq!(heap.len(), 0);
     assert_eq!(heap.peek(), None);
     assert_eq!(heap.pop(), None);
-    assert_eq!(heap.find_min(), None);
 }
 
 /// Test basic insert and pop operations
@@ -625,20 +624,19 @@ fn test_decrease_to_negative<H: Heap<i32, i32>>() {
     assert_eq!(heap.pop(), Some((-5, 1)));
 }
 
-/// Test insert/alias methods (insert, find_min, delete_min)
+/// Test basic push/peek/pop cycle
 fn test_alias_methods<H: Heap<&'static str, i32>>() {
     let mut heap = H::new();
 
-    // Test insert alias
-    let _h = heap.insert(5, "five");
+    // Test push
+    let _h = heap.push(5, "five");
     assert_eq!(heap.len(), 1);
 
-    // Test find_min alias
-    assert_eq!(heap.find_min(), Some((&5, &"five")));
-    assert_eq!(heap.peek(), Some((&5, &"five"))); // Same as find_min
+    // Test peek
+    assert_eq!(heap.peek(), Some((&5, &"five")));
 
-    // Test delete_min alias
-    assert_eq!(heap.delete_min(), Some((5, "five")));
+    // Test pop
+    assert_eq!(heap.pop(), Some((5, "five")));
     assert_eq!(heap.pop(), None); // Should be empty now
 }
 

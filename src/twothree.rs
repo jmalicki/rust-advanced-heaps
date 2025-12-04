@@ -146,10 +146,6 @@ impl<T, P: Ord + Clone> Heap<T, P> for TwoThreeHeap<T, P> {
     }
 
     fn push(&mut self, priority: P, item: T) -> Self::Handle {
-        self.insert(priority, item)
-    }
-
-    fn insert(&mut self, priority: P, item: T) -> Self::Handle {
         let node = Rc::new(RefCell::new(Node::new(item, priority)));
         let handle = TwoThreeHandle {
             node: Rc::downgrade(&node),
@@ -160,10 +156,6 @@ impl<T, P: Ord + Clone> Heap<T, P> for TwoThreeHeap<T, P> {
     }
 
     fn peek(&self) -> Option<(&P, &T)> {
-        self.find_min()
-    }
-
-    fn find_min(&self) -> Option<(&P, &T)> {
         let min_node = self.find_min_node()?;
         let node = min_node.borrow();
         // SAFETY: The returned references are valid for the lifetime of `&self`:
@@ -181,10 +173,6 @@ impl<T, P: Ord + Clone> Heap<T, P> for TwoThreeHeap<T, P> {
     }
 
     fn pop(&mut self) -> Option<(P, T)> {
-        self.delete_min()
-    }
-
-    fn delete_min(&mut self) -> Option<(P, T)> {
         if self.is_empty() {
             return None;
         }
