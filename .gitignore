@@ -18,3 +18,6 @@ Thumbs.db
 solver_output.log
 tmp_*.csv
 kani*.log
+
+# Benchmark data (downloaded DIMACS datasets)
+data/

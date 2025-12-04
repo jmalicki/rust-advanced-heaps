@@ -18,10 +18,10 @@ categories = ["data-structures", "algorithms"]
 expensive_verify = []
 
 [dependencies]
-# For benchmarking
-criterion = "0.5"
 # For stack-allocated vectors in fixed-arity heaps
 smallvec = "1.13"
+# Fast hashing for pathfinding algorithms
+rustc-hash = "2.0"
 # For intrusive circular doubly-linked lists (used by strict Fibonacci heap)
 intrusive-circular-list = { path = "crates/intrusive-circular-list" }
 # For skiplist-based heap implementation
@@ -33,3 +33,11 @@ criterion = "0.5"
 big-o-test = "0.2"
 ctor = "0.2"
 parking_lot = "0.12"
+
+[[bench]]
+name = "dimacs_benchmark"
+harness = false
+
+# Commands for cargo-cmd (install with: cargo install cargo-cmd)
+[package.metadata.commands]
+download-dimacs = "./scripts/download-dimacs.sh"
