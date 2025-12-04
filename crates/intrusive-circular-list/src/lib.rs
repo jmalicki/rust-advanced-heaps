@@ -99,13 +99,14 @@ impl CircularLink {
         self.next.get().is_some()
     }
 
-    /// Forcibly unlinks this node.
+    /// Forcibly unlinks this node without updating neighbors.
     ///
     /// # Safety
     ///
     /// This does not update neighboring nodes. Only use this after the
-    /// list has been cleared with `fast_clear`, or when you know the
-    /// node is the only element and you're removing it.
+    /// owning data structure has already disconnected neighbors (e.g., in
+    /// a bulk clear operation), or when you know the node is the only
+    /// element and you're removing it.
     #[inline]
     pub unsafe fn force_unlink(&self) {
         self.next.set(None);
@@ -162,7 +163,8 @@ impl fmt::Debug for CircularLink {
     }
 }
 
-// A CircularLink can be sent to another thread if it is unlinked.
+// `CircularLink` is `Send` but not `Sync`. Thread-safety for linked nodes
+// must be enforced by higher-level data structures.
 unsafe impl Send for CircularLink {}
 
 // =============================================================================
@@ -233,12 +235,15 @@ impl CircularListOps {
 
     /// Unlinks a node and marks it as not linked.
     ///
+    /// This is equivalent to [`remove`](Self::remove) but discards the
+    /// return value.
+    ///
     /// # Safety
     ///
-    /// The node must be linked.
+    /// The node must be linked (part of a circular list).
     #[inline]
     pub unsafe fn unlink(&self, ptr: NonNull<CircularLink>) {
-        ptr.as_ref().force_unlink();
+        let _ = self.remove(ptr);
     }
 
     /// Inserts `new` after `at` in the circular list.

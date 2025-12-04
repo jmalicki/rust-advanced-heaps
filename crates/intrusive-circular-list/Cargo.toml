@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["rust-advanced-heaps contributors"]
 description = "Intrusive circular doubly-linked list, compatible with intrusive-collections"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/yourusername/rust-advanced-heaps"
+repository = "https://github.com/jmalicki/rust-advanced-heaps"
 keywords = ["intrusive", "circular", "linked-list", "data-structure"]
 categories = ["data-structures", "no-std"]
 
