@@ -37,12 +37,12 @@ use std::collections::HashMap;
 /// Test that push and pop maintain heap property
 ///
 /// This is the fundamental heap invariant: after any sequence of pushes and pops,
-/// the minimum element should always be at the top. We generate random sequences
-/// of push/pop operations and verify that `peek()` always returns the global minimum
-/// among all currently inserted elements.
+/// the heap contains exactly the multiset of elements we expect. We generate random
+/// sequences of push/pop operations, track them in a simple Vec model, and then
+/// fully pop the heap to ensure the multisets match.
 ///
-/// This catches bugs where the heap structure becomes corrupted or the minimum
-/// pointer is not properly maintained during operations.
+/// This catches bugs where the heap structure becomes corrupted or elements are
+/// lost or duplicated during operations.
 fn test_push_pop_invariant<H: Heap<i32, i32>>(ops: Vec<(bool, i32)>) -> Result<(), TestCaseError> {
     let mut heap = H::new();
     let mut inserted = Vec::new();
