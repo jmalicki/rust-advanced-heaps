@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "crates/intrusive-circular-list"]
+
 [package]
 name = "rust-advanced-heaps"
 version = "0.1.0"
