@@ -305,6 +305,11 @@ impl<T, P> Node<T, P> {
 unsafe fn retire_rank_record(rank_ptr: NonNull<RankRecord>) {
     let rank = rank_ptr.as_ptr();
 
+    debug_assert!(
+        (*rank).reference_count == 0,
+        "Retiring rank record with non-zero reference_count"
+    );
+
     // Unlink from the doubly-linked list
     if let Some(mut prev_ptr) = (*rank).prev {
         prev_ptr.as_mut().next = (*rank).next;
@@ -920,6 +925,10 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
             ops.unlink(node_link);
 
             // Decrement parent's rank
+            debug_assert!(
+                (*parent).rank_count > 0,
+                "Parent rank_count underflow in cut()"
+            );
             (*parent).rank_count -= 1;
 
             // Clear parent link
