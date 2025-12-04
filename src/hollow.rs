@@ -203,10 +203,9 @@ impl<T, P: Ord + Clone> Heap<T, P> for HollowHeap<T, P> {
                 // This shouldn't happen in a well-formed heap
                 return None;
             }
-            (
-                std::mem::replace(&mut root.priority, unsafe { std::mem::zeroed() }),
-                root.item.take().unwrap(),
-            )
+            // Clone the priority since we need to return it but the node
+            // may still be referenced during delete_min_rebuild
+            (root.priority.clone(), root.item.take().unwrap())
         };
 
         self.len -= 1;
@@ -214,9 +213,6 @@ impl<T, P: Ord + Clone> Heap<T, P> for HollowHeap<T, P> {
         // Process children and rebuild heap
         self.delete_min_rebuild(root_rc);
 
-        // SAFETY: We already took ownership of priority above with mem::replace
-        // and now need to return it. The zeroed placeholder will be dropped
-        // when root_rc is dropped, but P: Ord so it's a primitive/simple type.
         Some((priority, item))
     }
 
