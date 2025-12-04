@@ -167,6 +167,8 @@ impl<T, P: Ord + Copy> Heap<T, P> for SkipListHeap<T, P> {
             // 1. The entry lives as long as &self
             // 2. The Rc keeps the Cell alive
             // 3. We're only reading, not modifying
+            // 4. All mutations of priority go through methods requiring &mut self,
+            //    so no aliasing &mut P can exist while this &P is held.
             let priority_ptr = entry.priority.as_ptr();
             unsafe { (&*priority_ptr, &entry.item) }
         })
@@ -183,6 +185,10 @@ impl<T, P: Ord + Copy> Heap<T, P> for SkipListHeap<T, P> {
         for entry in other.list {
             self.list.insert(entry);
         }
+
+        // Keep IDs monotonic within the merged heap to reduce future ID collisions.
+        // This helps keep `m` small in `decrease_key`'s O(log n + m) bound.
+        self.next_id = self.next_id.max(other.next_id);
     }
 }
 

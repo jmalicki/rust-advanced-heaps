@@ -46,7 +46,8 @@ This allows algorithms to be generic over heaps at the appropriate level of abst
 | **Rank-Pairing** | 2011 | O(1) am. | O(log n) am. | **O(1) am.** | O(1) |
 | **Strict Fibonacci** | 2012 | O(1) worst | O(log n) worst | **O(1) worst** | O(1) worst |
 
-*m = duplicate (priority, id) pairs after merge, typically 1. Requires `T: Default`.
+*m = duplicate (priority, id) pairs after merge, typically 1.
+Requires `T: Default`, `P: Copy`.
 
 All times are amortized (am.) where applicable. See the [Wikipedia
 comparison table](https://en.wikipedia.org/wiki/Fibonacci_heap#Summary_of_running_times)
