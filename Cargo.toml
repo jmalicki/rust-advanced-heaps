@@ -24,6 +24,8 @@ criterion = "0.5"
 smallvec = "1.13"
 # For intrusive circular doubly-linked lists (used by strict Fibonacci heap)
 intrusive-circular-list = { path = "crates/intrusive-circular-list" }
+# For skiplist-based heap implementation
+skiplist = "0.6"
 
 [dev-dependencies]
 proptest = "1.4"

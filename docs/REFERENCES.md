@@ -5,16 +5,98 @@ structures implemented in this crate, ordered by publication date.
 
 ## Summary
 
-| Heap             | Year | decrease-key | Notes                   |
-| ---------------- | ---- | ------------ | ----------------------- |
-| Simple Binary    | 1964 | -            | No decrease_key support |
-| Binomial         | 1978 | O(log n)     | Foundational, simple    |
-| Pairing          | 1986 | o(log n) am. | Simple, fast in practice|
-| Fibonacci        | 1987 | O(1) am.     | Optimal amortized bounds|
-| Skew Binomial    | 1996 | O(log n)     | O(1) insert             |
-| 2-3 Heap         | 1999 | O(1) am.     | Simpler than Fibonacci  |
-| Rank-Pairing     | 2011 | O(1) am.     | Simple + optimal bounds |
-| Strict Fibonacci | 2012 | O(1) worst   | Optimal worst-case      |
+| Heap             | Year | decrease-key | Notes                     |
+| ---------------- | ---- | ------------ | ------------------------- |
+| Simple Binary    | 1964 | -            | No decrease_key support   |
+| Binomial         | 1978 | O(log n)     | Foundational, simple      |
+| Pairing          | 1986 | o(log n) am. | Simple, fast in practice  |
+| Fibonacci        | 1987 | O(1) am.     | Optimal amortized bounds  |
+| Skip List        | 1990 | O(log n + m)*| Simple wrapper, good cache|
+| Skew Binomial    | 1996 | O(log n)     | O(1) insert               |
+| 2-3 Heap         | 1999 | O(1) am.     | Simpler than Fibonacci    |
+| Rank-Pairing     | 2011 | O(1) am.     | Simple + optimal bounds   |
+| Strict Fibonacci | 2012 | O(1) worst   | Optimal worst-case        |
+
+*m = duplicate (priority, id) pairs, typically 1
+
+---
+
+## Skip List (1990)
+
+**Wikipedia:** <https://en.wikipedia.org/wiki/Skip_list>
+
+**Pugh, W. (1990).** Skip lists: A probabilistic alternative to balanced trees.
+*Communications of the ACM*, 33(6), 668-676.
+
+- **ACM Digital Library:** <https://dl.acm.org/doi/10.1145/78973.78977>
+- **PDF (original):** <https://www.cs.umd.edu/~pugh/SkipLists.pdf>
+
+Skip lists are a probabilistic data structure invented by William Pugh in 1990
+as a simpler alternative to balanced trees. They use multiple levels of linked
+lists with probabilistically-chosen heights, providing O(log n) expected time
+for search, insertion, and deletion.
+
+The key insight is that by randomly assigning "express lane" pointers at
+different heights, skip lists achieve the same average-case complexity as
+balanced trees without the complexity of rebalancing. Pugh describes them as
+"a data structure that has the same expected-time properties as a binary search
+tree built from random data."
+
+**As Priority Queues:**
+
+Skip lists can be used as priority queues by maintaining elements in sorted
+order. The minimum element is always at the front, providing O(1) peek
+operations. Skip lists were first proposed as a concurrent priority queue
+structure in:
+
+**Lotan, I. & Shavit, N. (2000).** Skiplist-Based Concurrent Priority Queues.
+*International Parallel and Distributed Processing Symposium (IPDPS)*, 263-268.
+
+- **IEEE Xplore:** <https://ieeexplore.ieee.org/document/845994>
+
+Lotan and Shavit were the first to propose using skip lists as the basis for
+priority queues (building on Pugh's concurrent skip list). Their key finding
+was that **skip lists scale significantly better than heaps** for concurrent
+access. While heap-based concurrent priority queues hit scalability limits
+around 10-20 processors, their skiplist-based "SkipQueue" continued scaling
+to hundreds of processors.
+
+The paper identifies the fundamental advantage: skip lists are **highly
+distributed with no hot spots or bottlenecks**. In heaps, the root is a
+contention point since every delete-min must access it. In skip lists,
+operations on different elements touch mostly disjoint sets of nodes.
+Their benchmarks showed deletes 3x faster and inserts 10x faster at 256
+processors compared to heap-based approaches.
+
+While the concurrent version requires complex locking or lock-free techniques,
+the sequential version is straightforward: insert maintains sorted order via
+skip list search, and delete-min removes the first element. The distributed
+structure that benefits concurrency also provides good cache behavior in
+sequential code, since level arrays are contiguous.
+
+**Trade-offs vs Fibonacci/Pairing heaps:**
+
+- Simpler implementation (wraps existing skiplist crate)
+- Better cache locality (contiguous level arrays)
+- O(log n) `decrease_key` instead of O(1) amortized
+- O(n log n) merge instead of O(1)
+
+**Trade-offs vs Binary heap:**
+
+- Supports `decrease_key` operation
+- Similar complexity for basic operations
+- Slightly higher memory overhead
+
+| Operation    | Expected Time |
+| ------------ | ------------- |
+| insert       | O(log n)      |
+| find-min     | O(1)          |
+| delete-min   | O(log n)*     |
+| decrease-key | O(log n + m)**|
+| merge        | O(n log n)    |
+
+*Technically O(1) to remove the first element, but we count update time
+**Where m is the number of duplicate (priority, id) pairs (typically 1)
 
 ---
 
