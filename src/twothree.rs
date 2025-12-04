@@ -33,7 +33,7 @@
 //! - Takaoka, T. (1999). "Theory of 2-3 heaps." *Computing and Combinatorics (COCOON)*,
 //!   LNCS 1627, 41-50. [Springer](https://link.springer.com/chapter/10.1007/3-540-48686-0_4)
 
-use crate::traits::{Handle, Heap, HeapError};
+use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError};
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
@@ -127,8 +127,6 @@ pub struct TwoThreeHeap<T, P: Ord> {
 }
 
 impl<T, P: Ord + Clone> Heap<T, P> for TwoThreeHeap<T, P> {
-    type Handle = TwoThreeHandle<T, P>;
-
     fn new() -> Self {
         Self {
             trees: Vec::new(),
@@ -145,14 +143,8 @@ impl<T, P: Ord + Clone> Heap<T, P> for TwoThreeHeap<T, P> {
         self.len
     }
 
-    fn push(&mut self, priority: P, item: T) -> Self::Handle {
-        let node = Rc::new(RefCell::new(Node::new(item, priority)));
-        let handle = TwoThreeHandle {
-            node: Rc::downgrade(&node),
-        };
-        self.meld_node(node);
-        self.len += 1;
-        handle
+    fn push(&mut self, priority: P, item: T) {
+        let _ = self.push_with_handle(priority, item);
     }
 
     fn peek(&self) -> Option<(&P, &T)> {
@@ -208,6 +200,39 @@ impl<T, P: Ord + Clone> Heap<T, P> for TwoThreeHeap<T, P> {
         Some((node.priority, node.item))
     }
 
+    fn merge(&mut self, mut other: Self) {
+        if other.is_empty() {
+            return;
+        }
+        if self.is_empty() {
+            *self = other;
+            return;
+        }
+
+        // Move all trees from other into self
+        for i in 0..other.trees.len() {
+            if let Some(tree) = other.trees[i].take() {
+                self.meld_node(tree);
+            }
+        }
+        self.len += other.len;
+        other.len = 0;
+    }
+}
+
+impl<T, P: Ord + Clone> DecreaseKeyHeap<T, P> for TwoThreeHeap<T, P> {
+    type Handle = TwoThreeHandle<T, P>;
+
+    fn push_with_handle(&mut self, priority: P, item: T) -> Self::Handle {
+        let node = Rc::new(RefCell::new(Node::new(item, priority)));
+        let handle = TwoThreeHandle {
+            node: Rc::downgrade(&node),
+        };
+        self.meld_node(node);
+        self.len += 1;
+        handle
+    }
+
     fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) -> Result<(), HeapError> {
         let node = handle
             .node
@@ -229,25 +254,6 @@ impl<T, P: Ord + Clone> Heap<T, P> for TwoThreeHeap<T, P> {
         // Cut and meld
         self.cut_and_meld(Rc::clone(&node));
         Ok(())
-    }
-
-    fn merge(&mut self, mut other: Self) {
-        if other.is_empty() {
-            return;
-        }
-        if self.is_empty() {
-            *self = other;
-            return;
-        }
-
-        // Move all trees from other into self
-        for i in 0..other.trees.len() {
-            if let Some(tree) = other.trees[i].take() {
-                self.meld_node(tree);
-            }
-        }
-        self.len += other.len;
-        other.len = 0;
     }
 }
 

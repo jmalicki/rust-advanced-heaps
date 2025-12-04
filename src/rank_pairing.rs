@@ -51,7 +51,7 @@
 //!   [SIAM](https://epubs.siam.org/doi/10.1137/100785351)
 //! - [Wikipedia: Rank-pairing heap](https://en.wikipedia.org/wiki/Rank-pairing_heap)
 
-use crate::traits::{Handle, Heap, HeapError};
+use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError};
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
@@ -136,11 +136,11 @@ struct Node<T, P> {
 ///
 /// ```rust
 /// use rust_advanced_heaps::rank_pairing::RankPairingHeap;
-/// use rust_advanced_heaps::Heap;
+/// use rust_advanced_heaps::{Heap, DecreaseKeyHeap};
 ///
 /// let mut heap = RankPairingHeap::new();
-/// let handle = heap.push(5, "item");
-/// heap.decrease_key(&handle, 1);
+/// let handle = heap.push_with_handle(5, "item");
+/// heap.decrease_key(&handle, 1).unwrap();
 /// assert_eq!(heap.peek(), Some((&1, &"item")));
 /// ```
 pub struct RankPairingHeap<T, P: Ord> {
@@ -154,8 +154,6 @@ pub struct RankPairingHeap<T, P: Ord> {
 // which recursively drops all children (via their strong references).
 
 impl<T, P: Ord> Heap<T, P> for RankPairingHeap<T, P> {
-    type Handle = RankPairingHandle<T, P>;
-
     fn new() -> Self {
         Self { root: None, len: 0 }
     }
@@ -168,61 +166,8 @@ impl<T, P: Ord> Heap<T, P> for RankPairingHeap<T, P> {
         self.len
     }
 
-    /// Inserts a new element into the heap
-    ///
-    /// **Time Complexity**: O(1) amortized
-    ///
-    /// **Algorithm**:
-    /// 1. Create a new node with rank 0 (leaf node)
-    /// 2. Compare priority with current root
-    /// 3. If new priority is smaller, make new node the root (old root becomes child)
-    /// 4. Otherwise, add new node as a child of the root
-    /// 5. Update ranks to maintain rank constraints
-    ///
-    /// **Rank Update**: When a node becomes a parent, its rank is updated based on
-    /// its children's ranks. Rank = min(rank(w₁), rank(w₂)) + 1 where w₁, w₂ are
-    /// children with smallest ranks. This maintains the rank constraint invariant.
-    ///
-    /// **Invariant Maintenance**:
-    /// - Heap property: smaller priority becomes parent
-    /// - Rank constraints: ranks updated to satisfy rank(v) ≤ rank(w₁) + 1 and rank(v) ≤ rank(w₂) + 1
-    fn push(&mut self, priority: P, item: T) -> Self::Handle {
-        // Create new node with rank 0 (leaf node, no children)
-        let node = Rc::new(RefCell::new(Node {
-            item,
-            priority,
-            parent: None,
-            child: None,
-            sibling: None,
-            rank: 0,       // Leaf nodes have rank 0
-            marked: false, // New nodes are unmarked
-        }));
-
-        // Link new node into the tree structure
-        if let Some(ref root) = self.root {
-            if node.borrow().priority < root.borrow().priority {
-                // Case 1: New node has smaller priority
-                // Make new node the root, old root becomes its child
-                // This maintains heap property: parent <= child
-                Self::make_child(&node, root);
-                // Update root pointer to new minimum
-                self.root = Some(Rc::clone(&node));
-            } else {
-                // Case 2: Current root has smaller or equal priority
-                // Add new node as a child of the root
-                // Heap property maintained: new node >= root
-                Self::make_child(root, &node);
-                // Root stays the same
-            }
-        } else {
-            // Empty heap: new node becomes root
-            self.root = Some(Rc::clone(&node));
-        }
-
-        self.len += 1;
-        RankPairingHandle {
-            node: Rc::downgrade(&node),
-        }
+    fn push(&mut self, priority: P, item: T) {
+        let _ = self.push_with_handle(priority, item);
     }
 
     fn peek(&self) -> Option<(&P, &T)> {
@@ -296,6 +241,115 @@ impl<T, P: Ord> Heap<T, P> for RankPairingHeap<T, P> {
         });
         let node = cell.into_inner();
         Some((node.priority, node.item))
+    }
+
+    /// Merges another heap into this heap
+    ///
+    /// **Time Complexity**: O(1) amortized
+    ///
+    /// **Algorithm**:
+    /// 1. Compare roots of both heaps
+    /// 2. Make the larger-priority root a child of the smaller-priority root
+    /// 3. Update ranks to maintain rank constraints
+    /// 4. The smaller root becomes the new root
+    ///
+    /// This is trivially O(1): we only need one comparison and a few pointer updates.
+    /// The rank update is O(1) because we're just adding one child.
+    ///
+    /// **Post-condition**: After merge, `other` is empty (consumed by this heap)
+    fn merge(&mut self, mut other: Self) {
+        // Empty heaps are easy cases
+        if other.is_empty() {
+            return; // Nothing to merge
+        }
+
+        if self.is_empty() {
+            // This heap is empty: just take the other heap
+            *self = other;
+            return;
+        }
+
+        // Both heaps are non-empty: need to link them
+        let self_root = self.root.take().unwrap();
+        let other_root = other.root.take().unwrap();
+
+        // Compare roots: smaller priority becomes parent (heap property)
+        if other_root.borrow().priority < self_root.borrow().priority {
+            // Other root has smaller priority: it becomes the new root
+            // Self root becomes a child of other root
+            Self::make_child(&other_root, &self_root);
+            self.root = Some(other_root);
+        } else {
+            // Self root has smaller or equal priority: it stays root
+            // Other root becomes a child of self root
+            Self::make_child(&self_root, &other_root);
+            self.root = Some(self_root);
+        }
+
+        // Update length and mark other as empty (prevent double-free)
+        self.len += other.len;
+        other.len = 0;
+    }
+}
+
+impl<T, P: Ord> DecreaseKeyHeap<T, P> for RankPairingHeap<T, P> {
+    type Handle = RankPairingHandle<T, P>;
+
+    /// Inserts a new element into the heap
+    ///
+    /// **Time Complexity**: O(1) amortized
+    ///
+    /// **Algorithm**:
+    /// 1. Create a new node with rank 0 (leaf node)
+    /// 2. Compare priority with current root
+    /// 3. If new priority is smaller, make new node the root (old root becomes child)
+    /// 4. Otherwise, add new node as a child of the root
+    /// 5. Update ranks to maintain rank constraints
+    ///
+    /// **Rank Update**: When a node becomes a parent, its rank is updated based on
+    /// its children's ranks. Rank = min(rank(w₁), rank(w₂)) + 1 where w₁, w₂ are
+    /// children with smallest ranks. This maintains the rank constraint invariant.
+    ///
+    /// **Invariant Maintenance**:
+    /// - Heap property: smaller priority becomes parent
+    /// - Rank constraints: ranks updated to satisfy rank(v) ≤ rank(w₁) + 1 and rank(v) ≤ rank(w₂) + 1
+    fn push_with_handle(&mut self, priority: P, item: T) -> Self::Handle {
+        // Create new node with rank 0 (leaf node, no children)
+        let node = Rc::new(RefCell::new(Node {
+            item,
+            priority,
+            parent: None,
+            child: None,
+            sibling: None,
+            rank: 0,       // Leaf nodes have rank 0
+            marked: false, // New nodes are unmarked
+        }));
+
+        // Link new node into the tree structure
+        if let Some(ref root) = self.root {
+            if node.borrow().priority < root.borrow().priority {
+                // Case 1: New node has smaller priority
+                // Make new node the root, old root becomes its child
+                // This maintains heap property: parent <= child
+                Self::make_child(&node, root);
+                // Update root pointer to new minimum
+                self.root = Some(Rc::clone(&node));
+            } else {
+                // Case 2: Current root has smaller or equal priority
+                // Add new node as a child of the root
+                // Heap property maintained: new node >= root
+                Self::make_child(root, &node);
+                // Root stays the same
+            }
+        } else {
+            // Empty heap: new node becomes root
+            self.root = Some(Rc::clone(&node));
+        }
+
+        self.len += 1;
+        RankPairingHandle {
+            node: Rc::downgrade(&node),
+        }
     }
 
     /// Decreases the priority of an element
@@ -392,54 +446,6 @@ impl<T, P: Ord> Heap<T, P> for RankPairingHeap<T, P> {
         // If heap property is not violated, no restructuring needed
 
         Ok(())
-    }
-
-    /// Merges another heap into this heap
-    ///
-    /// **Time Complexity**: O(1) amortized
-    ///
-    /// **Algorithm**:
-    /// 1. Compare roots of both heaps
-    /// 2. Make the larger-priority root a child of the smaller-priority root
-    /// 3. Update ranks to maintain rank constraints
-    /// 4. The smaller root becomes the new root
-    ///
-    /// This is trivially O(1): we only need one comparison and a few pointer updates.
-    /// The rank update is O(1) because we're just adding one child.
-    ///
-    /// **Post-condition**: After merge, `other` is empty (consumed by this heap)
-    fn merge(&mut self, mut other: Self) {
-        // Empty heaps are easy cases
-        if other.is_empty() {
-            return; // Nothing to merge
-        }
-
-        if self.is_empty() {
-            // This heap is empty: just take the other heap
-            *self = other;
-            return;
-        }
-
-        // Both heaps are non-empty: need to link them
-        let self_root = self.root.take().unwrap();
-        let other_root = other.root.take().unwrap();
-
-        // Compare roots: smaller priority becomes parent (heap property)
-        if other_root.borrow().priority < self_root.borrow().priority {
-            // Other root has smaller priority: it becomes the new root
-            // Self root becomes a child of other root
-            Self::make_child(&other_root, &self_root);
-            self.root = Some(other_root);
-        } else {
-            // Self root has smaller or equal priority: it stays root
-            // Other root becomes a child of self root
-            Self::make_child(&self_root, &other_root);
-            self.root = Some(self_root);
-        }
-
-        // Update length and mark other as empty (prevent double-free)
-        self.len += other.len;
-        other.len = 0;
     }
 }
 

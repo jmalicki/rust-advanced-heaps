@@ -35,7 +35,7 @@
 //!   [ACM DL](https://dl.acm.org/doi/10.1145/2213977.2214082)
 //! - [Wikipedia: Fibonacci heap (Strict Fibonacci heap section)](https://en.wikipedia.org/wiki/Fibonacci_heap#Strict_Fibonacci_heap)
 
-use crate::traits::{Handle, Heap, HeapError};
+use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError};
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
@@ -108,11 +108,11 @@ impl<T, P> Node<T, P> {
 ///
 /// ```rust
 /// use rust_advanced_heaps::strict_fibonacci::StrictFibonacciHeap;
-/// use rust_advanced_heaps::Heap;
+/// use rust_advanced_heaps::{Heap, DecreaseKeyHeap};
 ///
 /// let mut heap = StrictFibonacciHeap::new();
-/// let handle = heap.push(5, "item");
-/// heap.decrease_key(&handle, 1);
+/// let handle = heap.push_with_handle(5, "item");
+/// heap.decrease_key(&handle, 1).unwrap();
 /// assert_eq!(heap.peek(), Some((&1, &"item")));
 /// ```
 pub struct StrictFibonacciHeap<T, P: Ord> {
@@ -129,8 +129,6 @@ impl<T, P: Ord> Default for StrictFibonacciHeap<T, P> {
 }
 
 impl<T, P: Ord> Heap<T, P> for StrictFibonacciHeap<T, P> {
-    type Handle = StrictFibonacciHandle<T, P>;
-
     fn new() -> Self {
         Self {
             roots: Vec::new(),
@@ -148,46 +146,8 @@ impl<T, P: Ord> Heap<T, P> for StrictFibonacciHeap<T, P> {
         self.len
     }
 
-    /// Inserts a new element into the heap
-    ///
-    /// **Time Complexity**: O(1) worst-case
-    ///
-    /// **Algorithm**:
-    /// 1. Create new single-node tree (degree 0)
-    /// 2. Add to active root list
-    /// 3. Update minimum pointer if necessary
-    /// 4. Perform conditional consolidation (worst-case O(1))
-    fn push(&mut self, priority: P, item: T) -> Self::Handle {
-        let node = Node::new(priority, item);
-        let handle = StrictFibonacciHandle {
-            node: Rc::downgrade(&node),
-        };
-
-        // Update minimum if necessary
-        let should_update_min = match &self.min {
-            None => true,
-            Some(min_weak) => {
-                if let Some(min_rc) = min_weak.upgrade() {
-                    node.borrow().priority < min_rc.borrow().priority
-                } else {
-                    true // Min was deallocated, update it
-                }
-            }
-        };
-
-        if should_update_min {
-            self.min = Some(Rc::downgrade(&node));
-        }
-
-        // Add to active root list
-        self.roots.push(node);
-
-        // Perform consolidation if needed (worst-case O(1))
-        self.consolidate_if_needed();
-
-        self.len += 1;
-
-        handle
+    fn push(&mut self, priority: P, item: T) {
+        let _ = self.push_with_handle(priority, item);
     }
 
     fn peek(&self) -> Option<(&P, &T)> {
@@ -258,51 +218,6 @@ impl<T, P: Ord> Heap<T, P> for StrictFibonacciHeap<T, P> {
         }
     }
 
-    /// Decreases the priority of an element
-    ///
-    /// **Time Complexity**: O(1) worst-case
-    ///
-    /// **Algorithm**:
-    /// 1. Update the priority value
-    /// 2. If heap property is violated (new priority < parent priority):
-    ///    - Cut the node from its parent (O(1))
-    ///    - Add to active root list
-    /// 3. Update minimum pointer if necessary
-    fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) -> Result<(), HeapError> {
-        let node_rc = handle.node.upgrade().ok_or(HeapError::InvalidHandle)?;
-
-        // Check and update priority
-        {
-            let mut node = node_rc.borrow_mut();
-
-            if new_priority >= node.priority {
-                return Err(HeapError::PriorityNotDecreased);
-            }
-
-            node.priority = new_priority;
-        }
-
-        // Check if we need to cut from parent
-        let needs_cut = {
-            let node = node_rc.borrow();
-            if let Some(parent_rc) = node.parent.upgrade() {
-                let parent = parent_rc.borrow();
-                node.priority < parent.priority
-            } else {
-                false // Already a root
-            }
-        };
-
-        if needs_cut {
-            self.cut(Rc::clone(&node_rc));
-        }
-
-        // Update minimum pointer - O(1) comparison
-        self.update_min_after_decrease(&node_rc);
-
-        Ok(())
-    }
-
     /// Merges another heap into this heap
     ///
     /// **Time Complexity**: O(1) worst-case for the merge itself,
@@ -351,6 +266,97 @@ impl<T, P: Ord> Heap<T, P> for StrictFibonacciHeap<T, P> {
         // Prevent drop from running on other
         other.len = 0;
         other.min = None;
+    }
+}
+
+impl<T, P: Ord> DecreaseKeyHeap<T, P> for StrictFibonacciHeap<T, P> {
+    type Handle = StrictFibonacciHandle<T, P>;
+
+    /// Inserts a new element into the heap
+    ///
+    /// **Time Complexity**: O(1) worst-case
+    ///
+    /// **Algorithm**:
+    /// 1. Create new single-node tree (degree 0)
+    /// 2. Add to active root list
+    /// 3. Update minimum pointer if necessary
+    /// 4. Perform conditional consolidation (worst-case O(1))
+    fn push_with_handle(&mut self, priority: P, item: T) -> Self::Handle {
+        let node = Node::new(priority, item);
+        let handle = StrictFibonacciHandle {
+            node: Rc::downgrade(&node),
+        };
+
+        // Update minimum if necessary
+        let should_update_min = match &self.min {
+            None => true,
+            Some(min_weak) => {
+                if let Some(min_rc) = min_weak.upgrade() {
+                    node.borrow().priority < min_rc.borrow().priority
+                } else {
+                    true // Min was deallocated, update it
+                }
+            }
+        };
+
+        if should_update_min {
+            self.min = Some(Rc::downgrade(&node));
+        }
+
+        // Add to active root list
+        self.roots.push(node);
+
+        self.len += 1;
+
+        // Perform consolidation if needed (worst-case O(1))
+        self.consolidate_if_needed();
+
+        handle
+    }
+
+    /// Decreases the priority of an element
+    ///
+    /// **Time Complexity**: O(1) worst-case
+    ///
+    /// **Algorithm**:
+    /// 1. Update the priority value
+    /// 2. If heap property is violated (new priority < parent priority):
+    ///    - Cut the node from its parent (O(1))
+    ///    - Add to active root list
+    /// 3. Update minimum pointer if necessary
+    fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) -> Result<(), HeapError> {
+        let node_rc = handle.node.upgrade().ok_or(HeapError::InvalidHandle)?;
+
+        // Check and update priority
+        {
+            let mut node = node_rc.borrow_mut();
+
+            if new_priority >= node.priority {
+                return Err(HeapError::PriorityNotDecreased);
+            }
+
+            node.priority = new_priority;
+        }
+
+        // Check if we need to cut from parent
+        let needs_cut = {
+            let node = node_rc.borrow();
+            if let Some(parent_rc) = node.parent.upgrade() {
+                let parent = parent_rc.borrow();
+                node.priority < parent.priority
+            } else {
+                false // Already a root
+            }
+        };
+
+        if needs_cut {
+            self.cut(Rc::clone(&node_rc));
+        }
+
+        // Update minimum pointer - O(1) comparison
+        self.update_min_after_decrease(&node_rc);
+
+        Ok(())
     }
 }
 
@@ -530,6 +536,7 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::DecreaseKeyHeap;
 
     #[test]
     fn test_basic_operations() {
@@ -538,9 +545,9 @@ mod tests {
         assert!(heap.is_empty());
         assert_eq!(heap.len(), 0);
 
-        let h1 = heap.push(5, "five");
-        let h2 = heap.push(3, "three");
-        let _h3 = heap.push(7, "seven");
+        let h1 = heap.push_with_handle(5, "five");
+        let h2 = heap.push_with_handle(3, "three");
+        let _h3 = heap.push_with_handle(7, "seven");
 
         assert_eq!(heap.len(), 3);
         assert_eq!(heap.peek(), Some((&3, &"three")));
@@ -564,7 +571,7 @@ mod tests {
     #[test]
     fn test_decrease_key_errors() {
         let mut heap: StrictFibonacciHeap<&str, i32> = StrictFibonacciHeap::new();
-        let handle = heap.push(5, "item");
+        let handle = heap.push_with_handle(5, "item");
 
         // Try to increase priority
         assert_eq!(
@@ -610,7 +617,7 @@ mod tests {
 
         // Insert 1000 elements with priorities i*10
         for i in 0..1000 {
-            handles.push(heap.push(i * 10, i));
+            handles.push(heap.push_with_handle(i * 10, i));
         }
 
         // Decrease keys of every 10th element

@@ -7,6 +7,7 @@ structures implemented in this crate, ordered by publication date.
 
 | Heap             | Year | decrease-key | Notes                   |
 | ---------------- | ---- | ------------ | ----------------------- |
+| Simple Binary    | 1964 | -            | No decrease_key support |
 | Binomial         | 1978 | O(log n)     | Foundational, simple    |
 | Pairing          | 1986 | o(log n) am. | Simple, fast in practice|
 | Fibonacci        | 1987 | O(1) am.     | Optimal amortized bounds|
@@ -14,6 +15,46 @@ structures implemented in this crate, ordered by publication date.
 | 2-3 Heap         | 1999 | O(1) am.     | Simpler than Fibonacci  |
 | Rank-Pairing     | 2011 | O(1) am.     | Simple + optimal bounds |
 | Strict Fibonacci | 2012 | O(1) worst   | Optimal worst-case      |
+
+---
+
+## Simple Binary Heap (1964)
+
+**Wikipedia:** <https://en.wikipedia.org/wiki/Binary_heap>
+
+**Williams, J. W. J. (1964).** Algorithm 232: Heapsort. *Communications of the
+ACM*, 7(6), 347-348.
+
+**Floyd, R. W. (1964).** Algorithm 245: Treesort 3. *Communications of the ACM*,
+7(12), 701.
+
+The binary heap is one of the most fundamental data structures in computer
+science. Williams introduced it alongside the heapsort algorithm in 1964. Floyd
+published an improvement the same year showing how to build a heap in O(n) time.
+The structure uses a complete binary tree stored implicitly in an array, where
+parent-child relationships are computed from array indices.
+
+- **ACM Digital Library (Williams):** <https://dl.acm.org/doi/10.1145/512274.512284>
+- **ACM Digital Library (Floyd):** <https://dl.acm.org/doi/10.1145/355588.365103>
+
+The original papers are short algorithm descriptions behind the ACM paywall.
+For accessible explanations, see:
+
+- **Wikipedia:** <https://en.wikipedia.org/wiki/Binary_heap>
+- **CLRS textbook:** Cormen et al., *Introduction to Algorithms*, Chapter 6
+
+Note: Rust's standard library already provides `std::collections::BinaryHeap`.
+This crate includes `SimpleBinaryHeap` for completeness and to provide a
+consistent API across all heap types via the `Heap` trait. For algorithms
+requiring priority updates, use one of the advanced heap implementations.
+
+| Operation    | Worst-case Time |
+| ------------ | --------------- |
+| insert       | O(log n)        |
+| find-min     | O(1)            |
+| delete-min   | O(log n)        |
+| decrease-key | -               |
+| merge        | O(n log n)      |
 
 ---
 
