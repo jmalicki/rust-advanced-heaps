@@ -22,6 +22,8 @@ expensive_verify = []
 criterion = "0.5"
 # For stack-allocated vectors in fixed-arity heaps
 smallvec = "1.13"
+# For intrusive circular doubly-linked lists (used by strict Fibonacci heap)
+intrusive-circular-list = { path = "crates/intrusive-circular-list" }
 
 [dev-dependencies]
 proptest = "1.4"

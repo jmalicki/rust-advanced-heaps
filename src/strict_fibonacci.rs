@@ -1,63 +1,59 @@
 //! Strict Fibonacci Heap implementation
 //!
-//! A Strict Fibonacci heap achieves optimal worst-case time bounds:
-//! - O(1) worst-case insert, find_min, decrease_key, and merge
-//! - O(log n) worst-case delete_min
+//! # Current Implementation Status
 //!
-//! Strict Fibonacci heaps are a refinement of Fibonacci heaps with stricter
-//! structural constraints that ensure worst-case bounds rather than just
-//! amortized bounds.
+//! **IMPORTANT**: This implementation does NOT yet achieve the worst-case bounds
+//! described in the Brodal-Lagogiannis-Tarjan paper. It currently provides the
+//! same **amortized** bounds as a standard Fibonacci heap:
 //!
-//! This implementation uses Rc and Weak references for memory safety:
-//! - Strong references (Rc) flow from parent to children
-//! - Weak references flow from children to parent (backlinks)
-//! - Handles use Weak references
+//! | Operation | Current Bound | Target (Paper) |
+//! |-----------|---------------|----------------|
+//! | insert | O(1) amortized | O(1) worst-case |
+//! | peek | O(1) worst-case | O(1) worst-case |
+//! | pop | O(log n) amortized | O(log n) worst-case |
+//! | decrease_key | O(1) amortized | O(1) worst-case |
+//! | merge | O(1) amortized | O(1) worst-case |
 //!
-//! # Why Strict Fibonacci Heaps?
+//! This implementation is being incrementally refactored toward the full
+//! strict Fibonacci heap algorithm. See GitHub issue #42 for progress.
 //!
-//! Strict Fibonacci heaps achieve the same **worst-case** bounds as Brodal queues
-//! but with a simpler structure that more closely resembles the original Fibonacci
-//! heaps. Key innovations include:
+//! # Implementation Notes
 //!
-//! - **Simplified melding**: When merging heaps of different sizes, the smaller
-//!   heap's structure is discarded
-//! - **Pigeonhole-based balancing**: Uses the pigeonhole principle instead of
-//!   redundant counters
-//! - **Active/passive nodes**: Nodes are classified to track structural violations
-//!
-//! This provides O(1) worst-case insert, decrease-key, and merge, with O(log n)
-//! worst-case delete-min - the theoretical optimum for comparison-based heaps.
+//! This implementation uses:
+//! - Raw pointers (`NonNull<Node>`) for node management
+//! - Intrusive circular doubly-linked lists for sibling relationships
+//! - A `rank` field on each node (preparation for future phases)
 //!
 //! # References
 //!
 //! - Brodal, G. S., Lagogiannis, G., & Tarjan, R. E. (2012). "Strict Fibonacci heaps."
 //!   *Proceedings of the 44th Annual ACM Symposium on Theory of Computing (STOC)*, 1177-1184.
 //!   [ACM DL](https://dl.acm.org/doi/10.1145/2213977.2214082)
-//! - [Wikipedia: Fibonacci heap (Strict Fibonacci heap section)](https://en.wikipedia.org/wiki/Fibonacci_heap#Strict_Fibonacci_heap)
 
 use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError};
-use std::cell::RefCell;
-use std::rc::{Rc, Weak};
+use intrusive_circular_list::{container_of_mut, CircularLink, CircularListOps};
+use std::ptr::NonNull;
 
-/// Handle to an element in a Strict Fibonacci heap
+/// Handle to an element in a Strict Fibonacci heap.
 ///
-/// Uses a Weak reference to avoid preventing garbage collection.
-/// The handle becomes invalid after the element is removed from the heap.
+/// # Safety
+///
+/// The handle becomes invalid after the element is removed from the heap via `pop()`.
+/// Using an invalid handle with `decrease_key` is undefined behavior (use-after-free).
+/// Callers must ensure handles are not used after their element has been popped.
 pub struct StrictFibonacciHandle<T, P> {
-    node: Weak<RefCell<Node<T, P>>>,
+    node: Option<NonNull<Node<T, P>>>,
 }
 
 impl<T, P> Clone for StrictFibonacciHandle<T, P> {
     fn clone(&self) -> Self {
-        StrictFibonacciHandle {
-            node: self.node.clone(),
-        }
+        StrictFibonacciHandle { node: self.node }
     }
 }
 
 impl<T, P> PartialEq for StrictFibonacciHandle<T, P> {
     fn eq(&self, other: &Self) -> bool {
-        self.node.ptr_eq(&other.node)
+        self.node == other.node
     }
 }
 
@@ -66,43 +62,58 @@ impl<T, P> Eq for StrictFibonacciHandle<T, P> {}
 impl<T, P> std::fmt::Debug for StrictFibonacciHandle<T, P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StrictFibonacciHandle")
-            .field("valid", &self.node.upgrade().is_some())
+            .field("valid", &self.node.is_some())
             .finish()
     }
 }
 
 impl<T, P> Handle for StrictFibonacciHandle<T, P> {}
 
-/// Type alias for node references to reduce complexity
-type NodeRef<T, P> = Rc<RefCell<Node<T, P>>>;
-/// Type alias for weak node references
-type NodeWeak<T, P> = Weak<RefCell<Node<T, P>>>;
-
+/// A node in the Strict Fibonacci heap.
+///
+/// Uses intrusive circular linked lists for sibling relationships.
 struct Node<T, P> {
+    /// The item stored in this node.
     item: T,
+    /// The priority of this node (smaller = higher priority for min-heap).
     priority: P,
-    parent: NodeWeak<T, P>,       // Weak backlink to parent
-    children: Vec<NodeRef<T, P>>, // Strong refs to children
-    active: bool,                 // Strict Fibonacci uses "active" flag instead of "marked"
+    /// Intrusive link for the sibling circular list.
+    sibling_link: CircularLink,
+    /// Pointer to the parent node (None if this is a root).
+    parent: Option<NonNull<Node<T, P>>>,
+    /// Pointer to one child (entry point into children's circular list).
+    child: Option<NonNull<Node<T, P>>>,
+    /// The rank of this node (number of children).
+    /// In strict Fibonacci heaps, this is used for consolidation.
+    rank: usize,
+    /// Whether this node is "active" in the strict Fibonacci sense.
+    /// Active nodes are tracked specially to maintain worst-case bounds.
+    active: bool,
 }
 
 impl<T, P> Node<T, P> {
-    fn new(priority: P, item: T) -> Rc<RefCell<Self>> {
-        Rc::new(RefCell::new(Node {
+    /// Creates a new node with the given priority and item.
+    fn new(priority: P, item: T) -> Box<Node<T, P>> {
+        Box::new(Node {
             item,
             priority,
-            parent: Weak::new(),
-            children: Vec::new(),
+            sibling_link: CircularLink::new(),
+            parent: None,
+            child: None,
+            rank: 0,
             active: false,
-        }))
+        })
     }
 
-    fn degree(&self) -> usize {
-        self.children.len()
+    /// Gets a pointer to the sibling link.
+    fn sibling_link_ptr(&self) -> NonNull<CircularLink> {
+        NonNull::from(&self.sibling_link)
     }
 }
 
-/// Strict Fibonacci Heap
+/// Strict Fibonacci Heap.
+///
+/// A priority queue with efficient decrease_key operation.
 ///
 /// # Example
 ///
@@ -116,9 +127,11 @@ impl<T, P> Node<T, P> {
 /// assert_eq!(heap.peek(), Some((&1, &"item")));
 /// ```
 pub struct StrictFibonacciHeap<T, P: Ord> {
-    roots: Vec<Rc<RefCell<Node<T, P>>>>,    // Active root list
-    passive: Vec<Rc<RefCell<Node<T, P>>>>,  // Passive root list
-    min: Option<Weak<RefCell<Node<T, P>>>>, // Weak reference to minimum element
+    /// Entry point into the circular list of roots (if any).
+    roots: Option<NonNull<Node<T, P>>>,
+    /// Pointer to the minimum root.
+    min: Option<NonNull<Node<T, P>>>,
+    /// Number of elements in the heap.
     len: usize,
 }
 
@@ -128,11 +141,60 @@ impl<T, P: Ord> Default for StrictFibonacciHeap<T, P> {
     }
 }
 
+// Safety: StrictFibonacciHeap can be sent between threads if T and P can.
+// The raw pointers are owned by the heap.
+unsafe impl<T: Send, P: Ord + Send> Send for StrictFibonacciHeap<T, P> {}
+
+impl<T, P: Ord> Drop for StrictFibonacciHeap<T, P> {
+    fn drop(&mut self) {
+        // We need to deallocate all nodes.
+        // Traverse all roots and their descendants.
+        if let Some(root_ptr) = self.roots {
+            let mut to_free: Vec<NonNull<Node<T, P>>> = Vec::new();
+            let ops = CircularListOps::new();
+
+            // Collect all roots
+            unsafe {
+                let start_link = root_ptr.as_ref().sibling_link_ptr();
+                ops.for_each(start_link, |link_ptr| {
+                    let node_ptr: *mut Node<T, P> =
+                        container_of_mut!(link_ptr.as_ptr(), Node<T, P>, sibling_link);
+                    to_free.push(NonNull::new_unchecked(node_ptr));
+                });
+            }
+
+            // Process nodes, collecting children
+            let mut i = 0;
+            while i < to_free.len() {
+                let node_ptr = to_free[i];
+                unsafe {
+                    let node = node_ptr.as_ref();
+                    if let Some(child_ptr) = node.child {
+                        let start_link = child_ptr.as_ref().sibling_link_ptr();
+                        ops.for_each(start_link, |link_ptr| {
+                            let child_node_ptr: *mut Node<T, P> =
+                                container_of_mut!(link_ptr.as_ptr(), Node<T, P>, sibling_link);
+                            to_free.push(NonNull::new_unchecked(child_node_ptr));
+                        });
+                    }
+                }
+                i += 1;
+            }
+
+            // Free all nodes
+            for node_ptr in to_free {
+                unsafe {
+                    drop(Box::from_raw(node_ptr.as_ptr()));
+                }
+            }
+        }
+    }
+}
+
 impl<T, P: Ord> Heap<T, P> for StrictFibonacciHeap<T, P> {
     fn new() -> Self {
         Self {
-            roots: Vec::new(),
-            passive: Vec::new(),
+            roots: None,
             min: None,
             len: 0,
         }
@@ -151,82 +213,46 @@ impl<T, P: Ord> Heap<T, P> for StrictFibonacciHeap<T, P> {
     }
 
     fn peek(&self) -> Option<(&P, &T)> {
-        self.min.as_ref().and_then(|min_weak| {
-            min_weak.upgrade().map(|min_rc| {
-                let node = min_rc.as_ptr();
-                // Safety: We hold the only mutable reference to the heap,
-                // and we're returning immutable references. The node exists
-                // for the lifetime of the heap.
-                unsafe { (&(*node).priority, &(*node).item) }
-            })
+        self.min.map(|min_ptr| unsafe {
+            let node = min_ptr.as_ref();
+            (&node.priority, &node.item)
         })
     }
 
-    /// Removes and returns the minimum element
+    /// Removes and returns the minimum element.
     ///
-    /// **Time Complexity**: O(log n) worst-case
-    ///
-    /// **Algorithm**:
-    /// 1. Remove the minimum root from root list
-    /// 2. Collect all children of the minimum root
-    /// 3. Add children to active root list
-    /// 4. Find new minimum by scanning roots (O(log n))
-    /// 5. Consolidate all roots (O(log n))
+    /// **Time Complexity**: O(log n) amortized (target: O(log n) worst-case)
     fn pop(&mut self) -> Option<(P, T)> {
-        let min_weak = self.min.take()?;
+        let min_ptr = self.min?;
 
-        // Find the minimum in roots using the weak reference
-        let min_idx = {
-            let min_rc = min_weak.upgrade()?;
-            self.roots.iter().position(|r| Rc::ptr_eq(r, &min_rc))?
-            // min_rc is dropped here
-        };
+        // Remove min from root list
+        self.remove_from_roots(min_ptr);
 
-        // Remove the minimum root
-        let min_node = self.roots.swap_remove(min_idx);
-
-        // Extract children and add them to roots
-        let children: Vec<Rc<RefCell<Node<T, P>>>> = {
-            let mut node = min_node.borrow_mut();
-            std::mem::take(&mut node.children)
-        };
-
-        for child in children {
-            child.borrow_mut().parent = Weak::new(); // Clear parent link
-            self.roots.push(child);
+        // Add all children of min to root list
+        unsafe {
+            let min_node = min_ptr.as_ref();
+            if let Some(child_ptr) = min_node.child {
+                self.splice_children_to_roots(child_ptr);
+            }
         }
 
         self.len -= 1;
 
-        // Consolidate all roots
+        // Consolidate the heap
         self.consolidate();
 
-        // Extract item and priority from the removed node
-        // At this point min_node should be the only strong reference
-        match Rc::try_unwrap(min_node) {
-            Ok(cell) => {
-                let node = cell.into_inner();
-                Some((node.priority, node.item))
-            }
-            Err(rc) => {
-                // Fallback: clone if there are other references (shouldn't happen normally)
-                let _node = rc.borrow();
-                // We can't move out, so this case indicates a bug
-                // For now, panic to catch any issues
-                panic!("Node still has references after removal: this indicates a bug");
-            }
+        self.debug_assert_invariants();
+
+        // Extract the node's data
+        unsafe {
+            let node = Box::from_raw(min_ptr.as_ptr());
+            Some((node.priority, node.item))
         }
     }
 
-    /// Merges another heap into this heap
+    /// Merges another heap into this heap.
     ///
-    /// **Time Complexity**: O(1) worst-case for the merge itself,
-    /// but O(m) where m is the number of roots in the other heap
-    /// due to moving roots between Vecs.
-    ///
-    /// **Algorithm**:
-    /// 1. Move all roots from other heap to this heap
-    /// 2. Update minimum pointer
+    /// **Time Complexity**: O(1) amortized (target: O(1) worst-case)
     fn merge(&mut self, mut other: Self) {
         if other.is_empty() {
             return;
@@ -237,218 +263,344 @@ impl<T, P: Ord> Heap<T, P> for StrictFibonacciHeap<T, P> {
             return;
         }
 
-        // Check if other has smaller minimum before moving
-        let other_has_smaller_min = match (&self.min, &other.min) {
-            (Some(self_weak), Some(other_weak)) => {
-                match (self_weak.upgrade(), other_weak.upgrade()) {
-                    (Some(self_rc), Some(other_rc)) => {
-                        other_rc.borrow().priority < self_rc.borrow().priority
-                    }
-                    (None, Some(_)) => true,
-                    _ => false,
+        // Splice the root lists together
+        if let (Some(self_root), Some(other_root)) = (self.roots, other.roots) {
+            let ops = CircularListOps::new();
+            unsafe {
+                let self_link = self_root.as_ref().sibling_link_ptr();
+                let other_link = other_root.as_ref().sibling_link_ptr();
+                ops.splice(Some(self_link), Some(other_link));
+            }
+        }
+
+        // Update minimum
+        if let (Some(self_min), Some(other_min)) = (self.min, other.min) {
+            unsafe {
+                if other_min.as_ref().priority < self_min.as_ref().priority {
+                    self.min = Some(other_min);
                 }
             }
-            (None, Some(_)) => true,
-            _ => false,
-        };
-
-        // Append other's roots to our roots
-        self.roots.append(&mut other.roots);
-        self.roots.append(&mut other.passive);
-
-        // Update minimum if other had smaller minimum
-        if other_has_smaller_min {
-            self.min = other.min.take();
         }
 
         self.len += other.len;
 
-        // Prevent drop from running on other
-        other.len = 0;
+        // Prevent other from deallocating nodes
+        other.roots = None;
         other.min = None;
+        other.len = 0;
+
+        self.debug_assert_invariants();
     }
 }
 
 impl<T, P: Ord> DecreaseKeyHeap<T, P> for StrictFibonacciHeap<T, P> {
     type Handle = StrictFibonacciHandle<T, P>;
 
-    /// Inserts a new element into the heap
+    /// Inserts a new element into the heap.
     ///
-    /// **Time Complexity**: O(1) worst-case
-    ///
-    /// **Algorithm**:
-    /// 1. Create new single-node tree (degree 0)
-    /// 2. Add to active root list
-    /// 3. Update minimum pointer if necessary
-    /// 4. Perform conditional consolidation (worst-case O(1))
+    /// **Time Complexity**: O(1) amortized (target: O(1) worst-case)
     fn push_with_handle(&mut self, priority: P, item: T) -> Self::Handle {
         let node = Node::new(priority, item);
+        let node_ptr = NonNull::new(Box::into_raw(node)).unwrap();
+
         let handle = StrictFibonacciHandle {
-            node: Rc::downgrade(&node),
+            node: Some(node_ptr),
         };
+
+        // Add to root list
+        self.add_to_roots(node_ptr);
 
         // Update minimum if necessary
-        let should_update_min = match &self.min {
-            None => true,
-            Some(min_weak) => {
-                if let Some(min_rc) = min_weak.upgrade() {
-                    node.borrow().priority < min_rc.borrow().priority
-                } else {
-                    true // Min was deallocated, update it
-                }
-            }
-        };
-
-        if should_update_min {
-            self.min = Some(Rc::downgrade(&node));
-        }
-
-        // Add to active root list
-        self.roots.push(node);
+        self.update_min(node_ptr);
 
         self.len += 1;
 
-        // Perform consolidation if needed (worst-case O(1))
-        self.consolidate_if_needed();
+        self.debug_assert_invariants();
 
         handle
     }
 
-    /// Decreases the priority of an element
+    /// Decreases the priority of an element.
     ///
-    /// **Time Complexity**: O(1) worst-case
+    /// **Time Complexity**: O(1) amortized (target: O(1) worst-case)
     ///
-    /// **Algorithm**:
-    /// 1. Update the priority value
-    /// 2. If heap property is violated (new priority < parent priority):
-    ///    - Cut the node from its parent (O(1))
-    ///    - Add to active root list
-    /// 3. Update minimum pointer if necessary
+    /// # Safety
+    ///
+    /// Callers must ensure the handle's node has not been popped.
+    /// Using a handle after `pop()` removes its element is undefined behavior (use-after-free).
     fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) -> Result<(), HeapError> {
-        let node_rc = handle.node.upgrade().ok_or(HeapError::InvalidHandle)?;
+        let node_ptr = handle.node.ok_or(HeapError::InvalidHandle)?;
 
         // Check and update priority
-        {
-            let mut node = node_rc.borrow_mut();
+        unsafe {
+            let node = node_ptr.as_ptr();
 
-            if new_priority >= node.priority {
+            if new_priority >= (*node).priority {
                 return Err(HeapError::PriorityNotDecreased);
             }
 
-            node.priority = new_priority;
-        }
+            (*node).priority = new_priority;
 
-        // Check if we need to cut from parent
-        let needs_cut = {
-            let node = node_rc.borrow();
-            if let Some(parent_rc) = node.parent.upgrade() {
-                let parent = parent_rc.borrow();
-                node.priority < parent.priority
-            } else {
-                false // Already a root
+            // Check if we need to cut from parent
+            if let Some(parent_ptr) = (*node).parent {
+                let parent = parent_ptr.as_ref();
+                if (*node).priority < parent.priority {
+                    self.cut(node_ptr);
+                }
             }
-        };
 
-        if needs_cut {
-            self.cut(Rc::clone(&node_rc));
+            // Update minimum pointer
+            self.update_min(node_ptr);
         }
 
-        // Update minimum pointer - O(1) comparison
-        self.update_min_after_decrease(&node_rc);
+        self.debug_assert_invariants();
+        self.debug_assert_heap_property(node_ptr);
 
         Ok(())
     }
 }
 
 impl<T, P: Ord> StrictFibonacciHeap<T, P> {
-    /// Updates the minimum pointer after a decrease_key operation
+    /// Debug assertion: checks O(1) structural invariants.
     ///
-    /// **Time Complexity**: O(1)
-    ///
-    /// Simply compares the new priority with the current minimum.
-    fn update_min_after_decrease(&mut self, node_rc: &Rc<RefCell<Node<T, P>>>) {
-        let should_update = match &self.min {
-            None => true,
-            Some(min_weak) => {
-                if let Some(min_rc) = min_weak.upgrade() {
-                    node_rc.borrow().priority < min_rc.borrow().priority
-                } else {
-                    true // Min was deallocated
+    /// Invariants checked:
+    /// - `len == 0` iff `roots.is_none()` iff `min.is_none()`
+    /// - If min exists, it has no parent (is a root)
+    /// - If roots exist, the entry point has no parent
+    #[inline]
+    fn debug_assert_invariants(&self) {
+        #[cfg(debug_assertions)]
+        {
+            // Emptiness consistency
+            let roots_empty = self.roots.is_none();
+            let min_empty = self.min.is_none();
+            let len_zero = self.len == 0;
+
+            debug_assert_eq!(
+                roots_empty, len_zero,
+                "Invariant violation: roots.is_none() = {}, len == 0 = {}",
+                roots_empty, len_zero
+            );
+            debug_assert_eq!(
+                min_empty, len_zero,
+                "Invariant violation: min.is_none() = {}, len == 0 = {}",
+                min_empty, len_zero
+            );
+
+            // Min is a root (has no parent)
+            if let Some(min_ptr) = self.min {
+                unsafe {
+                    debug_assert!(
+                        min_ptr.as_ref().parent.is_none(),
+                        "Invariant violation: min node has a parent (not a root)"
+                    );
                 }
             }
+
+            // Root entry point has no parent
+            if let Some(root_ptr) = self.roots {
+                unsafe {
+                    debug_assert!(
+                        root_ptr.as_ref().parent.is_none(),
+                        "Invariant violation: root entry point has a parent"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Debug assertion: checks that a node satisfies heap property with its parent.
+    #[inline]
+    fn debug_assert_heap_property(&self, node_ptr: NonNull<Node<T, P>>) {
+        #[cfg(debug_assertions)]
+        unsafe {
+            let node = node_ptr.as_ref();
+            if let Some(parent_ptr) = node.parent {
+                let parent = parent_ptr.as_ref();
+                debug_assert!(
+                    parent.priority <= node.priority,
+                    "Heap property violation: parent priority > child priority"
+                );
+            }
+        }
+    }
+
+    /// Adds a node to the root list.
+    fn add_to_roots(&mut self, node_ptr: NonNull<Node<T, P>>) {
+        let ops = CircularListOps::new();
+
+        unsafe {
+            let node = node_ptr.as_ptr();
+            (*node).parent = None;
+
+            let node_link = (*node).sibling_link_ptr();
+
+            match self.roots {
+                None => {
+                    // First root - make it a circular list of one
+                    ops.make_circular(node_link);
+                    self.roots = Some(node_ptr);
+                }
+                Some(root_ptr) => {
+                    // Insert after the current root entry point
+                    let root_link = root_ptr.as_ref().sibling_link_ptr();
+                    ops.insert_after(root_link, node_link);
+                }
+            }
+        }
+    }
+
+    /// Removes a node from the root list.
+    fn remove_from_roots(&mut self, node_ptr: NonNull<Node<T, P>>) {
+        let ops = CircularListOps::new();
+
+        unsafe {
+            let node_link = node_ptr.as_ref().sibling_link_ptr();
+
+            // Check if this is the only root
+            let next_link = ops.next(node_link);
+            if next_link == Some(node_link) {
+                // Only one root, list becomes empty
+                ops.unlink(node_link);
+                self.roots = None;
+            } else {
+                // Multiple roots
+                // If we're removing the entry point, update it
+                if self.roots == Some(node_ptr) {
+                    // Get the next node as new entry point
+                    let next_node_ptr: *mut Node<T, P> = container_of_mut!(
+                        next_link.unwrap().as_ptr(),
+                        Node<T, P>,
+                        sibling_link
+                    );
+                    self.roots = Some(NonNull::new_unchecked(next_node_ptr));
+                }
+                ops.unlink(node_link);
+            }
+        }
+    }
+
+    /// Splices children of a node into the root list.
+    fn splice_children_to_roots(&mut self, child_ptr: NonNull<Node<T, P>>) {
+        let ops = CircularListOps::new();
+
+        // Clear parent pointers for all children
+        unsafe {
+            let start_link = child_ptr.as_ref().sibling_link_ptr();
+            ops.for_each(start_link, |link_ptr| {
+                let node_ptr: *mut Node<T, P> =
+                    container_of_mut!(link_ptr.as_ptr(), Node<T, P>, sibling_link);
+                (*node_ptr).parent = None;
+            });
+
+            // Splice with root list
+            match self.roots {
+                None => {
+                    // No roots, children become roots
+                    self.roots = Some(child_ptr);
+                }
+                Some(root_ptr) => {
+                    let root_link = root_ptr.as_ref().sibling_link_ptr();
+                    let child_link = child_ptr.as_ref().sibling_link_ptr();
+                    ops.splice(Some(root_link), Some(child_link));
+                }
+            }
+        }
+    }
+
+    /// Updates the minimum pointer if the given node has smaller priority.
+    fn update_min(&mut self, node_ptr: NonNull<Node<T, P>>) {
+        let should_update = match self.min {
+            None => true,
+            Some(min_ptr) => unsafe { node_ptr.as_ref().priority < min_ptr.as_ref().priority },
         };
 
         if should_update {
-            self.min = Some(Rc::downgrade(node_rc));
+            self.min = Some(node_ptr);
         }
     }
 
-    /// Finds the new minimum after deletion or merge
+    /// Finds and sets the new minimum by scanning all roots.
     fn find_new_min(&mut self) {
         self.min = None;
 
-        for root in &self.roots {
-            let should_update = match &self.min {
-                None => true,
-                Some(min_weak) => {
-                    if let Some(min_rc) = min_weak.upgrade() {
-                        root.borrow().priority < min_rc.borrow().priority
-                    } else {
-                        true
-                    }
-                }
-            };
+        if let Some(root_ptr) = self.roots {
+            let ops = CircularListOps::new();
 
-            if should_update {
-                self.min = Some(Rc::downgrade(root));
+            unsafe {
+                let start_link = root_ptr.as_ref().sibling_link_ptr();
+                ops.for_each(start_link, |link_ptr| {
+                    let node_ptr: *mut Node<T, P> =
+                        container_of_mut!(link_ptr.as_ptr(), Node<T, P>, sibling_link);
+                    let node_nn = NonNull::new_unchecked(node_ptr);
+
+                    let should_update = match self.min {
+                        None => true,
+                        Some(min_ptr) => (*node_ptr).priority < min_ptr.as_ref().priority,
+                    };
+
+                    if should_update {
+                        self.min = Some(node_nn);
+                    }
+                });
             }
         }
     }
 
-    /// Consolidates the heap (Strict Fibonacci version)
+    /// Consolidates the heap by linking trees of the same rank.
     ///
-    /// **Time Complexity**: O(log n) worst-case
-    ///
-    /// **Algorithm**: Similar to standard Fibonacci heap consolidation
-    /// 1. Create degree table indexed by degree (0..log n)
-    /// 2. For each root tree:
-    ///    - If table[degree] is empty, store tree there
-    ///    - If table[degree] has a tree, link them (smaller priority becomes parent)
-    ///    - This produces a tree of degree+1, which may link again
-    /// 3. Rebuild root list from degree table
+    /// This is called after pop to maintain the heap structure.
     fn consolidate(&mut self) {
-        if self.roots.is_empty() {
+        if self.roots.is_none() {
             self.min = None;
             return;
         }
 
-        // Calculate max possible degree (log base phi of n)
-        let max_degree = if self.len == 0 {
+        // Calculate max possible rank (log base phi of n)
+        let max_rank = if self.len == 0 {
             1
         } else {
             ((self.len as f64).log2() * 1.5) as usize + 2
         };
 
-        let mut degree_table: Vec<Option<NodeRef<T, P>>> = vec![None; max_degree + 1];
+        let mut rank_table: Vec<Option<NonNull<Node<T, P>>>> = vec![None; max_rank + 1];
+        let ops = CircularListOps::new();
 
-        // Take all roots for processing
-        let roots = std::mem::take(&mut self.roots);
+        // Collect all roots into a vector first
+        let mut roots_vec: Vec<NonNull<Node<T, P>>> = Vec::new();
+        unsafe {
+            let root_ptr = self.roots.unwrap();
+            let start_link = root_ptr.as_ref().sibling_link_ptr();
+            ops.for_each(start_link, |link_ptr| {
+                let node_ptr: *mut Node<T, P> =
+                    container_of_mut!(link_ptr.as_ptr(), Node<T, P>, sibling_link);
+                roots_vec.push(NonNull::new_unchecked(node_ptr));
+            });
+        }
+
+        // Unlink all roots (they'll be re-linked after consolidation)
+        for &node_ptr in &roots_vec {
+            unsafe {
+                let node_link = node_ptr.as_ref().sibling_link_ptr();
+                node_link.as_ref().force_unlink();
+            }
+        }
+        self.roots = None;
 
         // Process each root
-        for root in roots {
+        for root in roots_vec {
             let mut current = root;
 
             loop {
-                let degree = current.borrow().degree();
+                let rank = unsafe { current.as_ref().rank };
 
-                if degree >= degree_table.len() {
-                    // Extend the table if needed
-                    degree_table.resize(degree + 2, None);
+                if rank >= rank_table.len() {
+                    rank_table.resize(rank + 2, None);
                 }
 
-                match degree_table[degree].take() {
+                match rank_table[rank].take() {
                     None => {
-                        degree_table[degree] = Some(current);
+                        rank_table[rank] = Some(current);
                         break;
                     }
                     Some(other) => {
@@ -459,76 +611,103 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
             }
         }
 
-        // Rebuild roots from degree table
-        self.roots = degree_table.into_iter().flatten().collect();
+        // Rebuild root list from rank table
+        for node_ptr in rank_table.into_iter().flatten() {
+            self.add_to_roots(node_ptr);
+        }
 
         // Find new minimum
         self.find_new_min();
     }
 
-    /// Consolidates if needed (worst-case O(1))
+    /// Links two trees, making the one with larger priority a child of the other.
     ///
-    /// In a strict Fibonacci heap, we perform limited consolidation
-    /// to maintain worst-case bounds.
-    fn consolidate_if_needed(&mut self) {
-        // In Strict Fibonacci, we consolidate only when necessary
-        // to maintain worst-case bounds.
-        //
-        // This is a simplified version. A full implementation would:
-        // - Track active/passive nodes more carefully
-        // - Check for structure constraint violations
-        // - Repair at most O(1) violations immediately
-        //
-        // For now, we defer consolidation until delete_min.
-    }
+    /// Returns the root of the combined tree.
+    fn link(&mut self, a: NonNull<Node<T, P>>, b: NonNull<Node<T, P>>) -> NonNull<Node<T, P>> {
+        let ops = CircularListOps::new();
 
-    /// Links two trees, making the one with larger priority a child of the other
-    ///
-    /// Returns the root of the combined tree
-    fn link(
-        &mut self,
-        a: Rc<RefCell<Node<T, P>>>,
-        b: Rc<RefCell<Node<T, P>>>,
-    ) -> Rc<RefCell<Node<T, P>>> {
         // Determine which becomes the parent (smaller priority wins)
-        let a_is_smaller = a.borrow().priority <= b.borrow().priority;
+        let (parent_ptr, child_ptr) = unsafe {
+            if a.as_ref().priority <= b.as_ref().priority {
+                (a, b)
+            } else {
+                (b, a)
+            }
+        };
 
-        let (parent, child) = if a_is_smaller { (a, b) } else { (b, a) };
+        unsafe {
+            let parent = parent_ptr.as_ptr();
+            let child = child_ptr.as_ptr();
 
-        // Make child a child of parent
-        {
-            let mut child_mut = child.borrow_mut();
-            child_mut.parent = Rc::downgrade(&parent);
-            child_mut.active = false;
-        }
-        parent.borrow_mut().children.push(child);
+            // Set child's parent
+            (*child).parent = Some(parent_ptr);
+            (*child).active = false;
 
-        parent
-    }
+            // Add child to parent's children list
+            let child_link = (*child).sibling_link_ptr();
 
-    /// Cuts a node from its parent and adds it to the root list
-    ///
-    /// **Time Complexity**: O(1) worst-case
-    ///
-    /// In Strict Fibonacci heaps, we don't do cascading cuts.
-    fn cut(&mut self, node_rc: Rc<RefCell<Node<T, P>>>) {
-        let parent_weak = node_rc.borrow().parent.clone();
-
-        if let Some(parent_rc) = parent_weak.upgrade() {
-            // Remove from parent's children
-            {
-                let mut parent = parent_rc.borrow_mut();
-                parent.children.retain(|child| !Rc::ptr_eq(child, &node_rc));
+            match (*parent).child {
+                None => {
+                    // First child
+                    ops.make_circular(child_link);
+                    (*parent).child = Some(child_ptr);
+                }
+                Some(first_child_ptr) => {
+                    // Insert into existing children list
+                    let first_child_link = first_child_ptr.as_ref().sibling_link_ptr();
+                    ops.insert_after(first_child_link, child_link);
+                }
             }
 
+            // Increment parent's rank
+            (*parent).rank += 1;
+        }
+
+        parent_ptr
+    }
+
+    /// Cuts a node from its parent and adds it to the root list.
+    fn cut(&mut self, node_ptr: NonNull<Node<T, P>>) {
+        let ops = CircularListOps::new();
+
+        unsafe {
+            let node = node_ptr.as_ptr();
+            let parent_ptr = match (*node).parent {
+                Some(p) => p,
+                None => return, // Already a root
+            };
+            let parent = parent_ptr.as_ptr();
+
+            // Remove from parent's children list
+            let node_link = (*node).sibling_link_ptr();
+            let next_link = ops.next(node_link);
+
+            if next_link == Some(node_link) {
+                // Only child
+                (*parent).child = None;
+            } else {
+                // Update parent's child pointer if needed
+                if (*parent).child == Some(node_ptr) {
+                    let next_node_ptr: *mut Node<T, P> =
+                        container_of_mut!(next_link.unwrap().as_ptr(), Node<T, P>, sibling_link);
+                    (*parent).child = Some(NonNull::new_unchecked(next_node_ptr));
+                }
+            }
+
+            ops.unlink(node_link);
+
+            // Decrement parent's rank
+            (*parent).rank -= 1;
+
             // Clear parent link
-            node_rc.borrow_mut().parent = Weak::new();
+            (*node).parent = None;
 
             // Add to root list
-            self.roots.push(node_rc);
+            self.add_to_roots(node_ptr);
 
-            // In Strict Fibonacci, we don't cascade cuts
-            // Structure constraints prevent deep cascades
+            // Note: In a full strict Fibonacci heap, we would handle
+            // cascading cuts and active node tracking here.
+            // For now, we just do a simple cut (amortized bounds).
         }
     }
 }
@@ -620,9 +799,7 @@ mod tests {
             handles.push(heap.push_with_handle(i * 10, i));
         }
 
-        // Decrease keys of every 10th element
-        // Note: for i=0, priority 0 -> 0 should fail (not a decrease)
-        // So we start from i=10
+        // Decrease keys of every 10th element (starting from i=10 since i=0 can't decrease)
         for i in (10..1000).step_by(10) {
             let result = heap.decrease_key(&handles[i], i as i32);
             assert!(
@@ -654,5 +831,71 @@ mod tests {
         }
         // 1000 - 100 + 200 = 1100
         assert_eq!(count, 1100);
+    }
+
+    #[test]
+    fn test_pop_order() {
+        let mut heap: StrictFibonacciHeap<i32, i32> = StrictFibonacciHeap::new();
+
+        heap.push(3, 30);
+        heap.push(1, 10);
+        heap.push(4, 40);
+        heap.push(1, 11); // Duplicate priority
+        heap.push(5, 50);
+        heap.push(9, 90);
+        heap.push(2, 20);
+
+        // Pop should return in priority order
+        let mut last_priority = i32::MIN;
+        while let Some((priority, _)) = heap.pop() {
+            assert!(
+                priority >= last_priority,
+                "Out of order: {} after {}",
+                priority,
+                last_priority
+            );
+            last_priority = priority;
+        }
+    }
+
+    #[test]
+    fn test_decrease_key_to_new_min() {
+        let mut heap: StrictFibonacciHeap<&str, i32> = StrictFibonacciHeap::new();
+
+        heap.push(10, "a");
+        heap.push(20, "b");
+        let h = heap.push_with_handle(30, "c");
+
+        assert_eq!(heap.peek(), Some((&10, &"a")));
+
+        // Decrease c's priority to become new minimum
+        assert!(heap.decrease_key(&h, 5).is_ok());
+        assert_eq!(heap.peek(), Some((&5, &"c")));
+    }
+
+    #[test]
+    fn test_decrease_key_with_cut() {
+        let mut heap: StrictFibonacciHeap<i32, i32> = StrictFibonacciHeap::new();
+
+        // Build a tree structure by doing inserts and pops
+        for i in 0..10 {
+            heap.push(i, i);
+        }
+
+        // Pop to trigger consolidation, building trees
+        heap.pop();
+
+        // Store handles for remaining elements
+        let mut handles = Vec::new();
+        for i in 10..20 {
+            handles.push(heap.push_with_handle(i * 10, i));
+        }
+
+        // Decrease a key that should trigger a cut
+        if !handles.is_empty() {
+            let result = heap.decrease_key(&handles[5], 0);
+            assert!(result.is_ok());
+            assert_eq!(heap.peek().map(|(p, _)| *p), Some(0));
+        }
     }
 }
