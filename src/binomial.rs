@@ -46,7 +46,7 @@
 //! - [Wikipedia: Binomial heap](https://en.wikipedia.org/wiki/Binomial_heap)
 
 use crate::rank::Rank;
-use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError};
+use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError, MergeableHeap};
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
@@ -252,7 +252,9 @@ impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
             .into_inner();
         Some((node.priority, node.item))
     }
+}
 
+impl<T, P: Ord> MergeableHeap<T, P> for BinomialHeap<T, P> {
     /// Merges another heap into this heap
     ///
     /// **Time Complexity**: O(log n) worst-case, O(1) amortized for sequential merges

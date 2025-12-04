@@ -49,7 +49,7 @@
 //!   [ACM DL](https://dl.acm.org/doi/10.1145/28869.28874)
 //! - [Wikipedia: Fibonacci heap](https://en.wikipedia.org/wiki/Fibonacci_heap)
 
-use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError};
+use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError, MergeableHeap};
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
@@ -251,7 +251,9 @@ impl<T, P: Ord> Heap<T, P> for FibonacciHeap<T, P> {
 
         Some((node.priority, node.item))
     }
+}
 
+impl<T, P: Ord> MergeableHeap<T, P> for FibonacciHeap<T, P> {
     fn merge(&mut self, mut other: Self) {
         if other.is_empty() {
             return;
