@@ -19,6 +19,7 @@ use rust_advanced_heaps::fibonacci::FibonacciHeap;
 use rust_advanced_heaps::pairing::PairingHeap;
 use rust_advanced_heaps::rank_pairing::RankPairingHeap;
 use rust_advanced_heaps::skew_binomial::SkewBinomialHeap;
+use rust_advanced_heaps::skiplist::SkipListHeap;
 use rust_advanced_heaps::strict_fibonacci::StrictFibonacciHeap;
 use rust_advanced_heaps::twothree::TwoThreeHeap;
 use rust_advanced_heaps::{DecreaseKeyHeap, Heap};
@@ -237,13 +238,8 @@ fn test_pairing_decrease_key() {
 // ============================================================================
 
 #[test]
-#[ignore] // big-o-test complexity analysis fails: RankPairingHeap uses rank-based restructuring
-          //          // that causes the tool to mis-analyze space/time complexity. The heap maintains
-          //          // rank constraints through restructuring operations that create complex memory
-          //          // access patterns, leading to false positives in complexity detection. The actual
-          //          // complexity is O(1) amortized for insert, but the analysis tool cannot reliably
-          //          // distinguish between the restructuring operations and the core insertion logic.
 fn test_rank_pairing_insert() {
+    // O(1) amortized per insert -> O(n) batch
     test_insert_batch_complexity::<RankPairingHeap<i32, i32>>(
         "RankPairingHeap",
         BigOAlgorithmComplexity::ON,
@@ -251,22 +247,14 @@ fn test_rank_pairing_insert() {
 }
 
 #[test]
-#[ignore] // Segfault occurs during pop operations: The rank-based restructuring in delete_min
-          //          // can trigger memory safety issues under certain heap states. The rank maintenance
-          //          // operations may access invalidated pointers or create cycles in the tree structure.
-          //          // This appears to be an implementation bug in the rank-pairing heap's delete_min
-          //          // that needs investigation and fixing before complexity testing can proceed.
 fn test_rank_pairing_pop() {
+    // O(log n) amortized per pop -> O(n log n) batch
     test_pop_batch_complexity::<RankPairingHeap<i32, i32>>("RankPairingHeap");
 }
 
 #[test]
-#[ignore] // big-o-test complexity analysis fails: Similar to insert, the rank-based
-          //          // restructuring operations in decrease_key create complex control flow patterns
-          //          // that confuse the complexity analysis tool. The actual complexity is O(1)
-          //          // amortized, but the tool's analysis produces inconsistent results due to
-          //          // the rank constraint maintenance operations that may be deferred or batched.
 fn test_rank_pairing_decrease_key() {
+    // O(1) amortized per decrease_key -> O(n) batch
     test_decrease_key_batch_complexity::<RankPairingHeap<i32, i32>>(
         "RankPairingHeap",
         BigOAlgorithmComplexity::ON,
@@ -421,5 +409,32 @@ fn test_twothree_decrease_key() {
     test_decrease_key_batch_complexity::<TwoThreeHeap<i32, i32>>(
         "TwoThreeHeap",
         BigOAlgorithmComplexity::ON,
+    );
+}
+
+// ============================================================================
+// SkipList Heap Tests
+// ============================================================================
+
+#[test]
+fn test_skiplist_insert() {
+    // O(log n) per element, so batch should be O(n log n)
+    test_insert_batch_complexity::<SkipListHeap<i32, i32>>(
+        "SkipListHeap",
+        BigOAlgorithmComplexity::ONLogN,
+    );
+}
+
+#[test]
+fn test_skiplist_pop() {
+    test_pop_batch_complexity::<SkipListHeap<i32, i32>>("SkipListHeap");
+}
+
+#[test]
+fn test_skiplist_decrease_key() {
+    // O(log n) per decrease_key (remove + reinsert in sorted list) -> O(n log n) batch
+    test_decrease_key_batch_complexity::<SkipListHeap<i32, i32>>(
+        "SkipListHeap",
+        BigOAlgorithmComplexity::ONLogN,
     );
 }
