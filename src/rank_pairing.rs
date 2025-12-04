@@ -350,7 +350,7 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for RankPairingHeap<T, P> {
             parent: None,
             child: None,
             sibling: None,
-            prev: None,    // For O(1) cuts
+            prev: None, // For O(1) cuts
             // Small fields
             rank: 0,       // Leaf nodes have rank 0
             marked: false, // New nodes are unmarked
