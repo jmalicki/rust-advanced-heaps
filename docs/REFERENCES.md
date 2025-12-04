@@ -5,17 +5,17 @@ structures implemented in this crate, ordered by publication date.
 
 ## Summary
 
-| Heap             | Year | decrease-key | Notes                   |
-| ---------------- | ---- | ------------ | ----------------------- |
-| Simple Binary    | 1964 | -            | No decrease_key support |
-| Binomial         | 1978 | O(log n)     | Foundational, simple    |
-| Pairing          | 1986 | o(log n) am. | Simple, fast in practice|
-| Fibonacci        | 1987 | O(1) am.     | Optimal amortized bounds|
+| Heap             | Year | decrease-key | Notes                     |
+| ---------------- | ---- | ------------ | ------------------------- |
+| Simple Binary    | 1964 | -            | No decrease_key support   |
+| Binomial         | 1978 | O(log n)     | Foundational, simple      |
+| Pairing          | 1986 | o(log n) am. | Simple, fast in practice  |
+| Fibonacci        | 1987 | O(1) am.     | Optimal amortized bounds  |
 | Skip List        | 1990 | O(log n + m)*| Simple wrapper, good cache|
-| Skew Binomial    | 1996 | O(log n)     | O(1) insert             |
-| 2-3 Heap         | 1999 | O(1) am.     | Simpler than Fibonacci  |
-| Rank-Pairing     | 2011 | O(1) am.     | Simple + optimal bounds |
-| Strict Fibonacci | 2012 | O(1) worst   | Optimal worst-case      |
+| Skew Binomial    | 1996 | O(log n)     | O(1) insert               |
+| 2-3 Heap         | 1999 | O(1) am.     | Simpler than Fibonacci    |
+| Rank-Pairing     | 2011 | O(1) am.     | Simple + optimal bounds   |
+| Strict Fibonacci | 2012 | O(1) worst   | Optimal worst-case        |
 
 *m = duplicate (priority, id) pairs, typically 1
 
