@@ -60,6 +60,7 @@ Key methods: `push`, `pop`, `decrease_key`, `merge`
 | `strict_fibonacci.rs`  | Strict Fibonacci  | O(1) worst-case    | Worst-case variant     |
 | `twothree.rs`          | 2-3 Heap          | O(1) amortized     | Uses Rc/RefCell        |
 | `skew_binomial.rs`     | Skew Binomial     | O(log n)           | O(1) insert            |
+| `hollow.rs`            | Hollow Heap       | O(1) amortized     | Lazy deletion, simple  |
 
 ### Implementation Patterns
 
