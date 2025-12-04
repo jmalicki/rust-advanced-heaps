@@ -39,7 +39,7 @@
 //! - Hansen, T.D., Kaplan, H., Tarjan, R.E., Zwick, U. (2017). "Hollow Heaps."
 //!   *ACM Transactions on Algorithms*, 13(3), 42.
 
-use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError};
+use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError, MergeableHeap};
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
@@ -215,8 +215,10 @@ impl<T, P: Ord + Clone> Heap<T, P> for HollowHeap<T, P> {
 
         Some((priority, item))
     }
+}
 
-    fn merge(&mut self, other: Self) {
+impl<T, P: Ord + Clone> MergeableHeap<T, P> for HollowHeap<T, P> {
+    fn merge(&mut self, mut other: Self) {
         if other.is_empty() {
             return;
         }
@@ -227,11 +229,12 @@ impl<T, P: Ord + Clone> Heap<T, P> for HollowHeap<T, P> {
         }
 
         // Link the two roots
-        let other_root = other.root.unwrap();
-        let self_root = self.root.take().unwrap();
+        let other_len = other.len;
+        let other_root = other.root.take().expect("non-empty heap must have root");
+        let self_root = self.root.take().expect("non-empty heap must have root");
 
         self.root = Some(Self::link(self_root, other_root));
-        self.len += other.len;
+        self.len += other_len;
     }
 }
 

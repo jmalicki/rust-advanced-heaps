@@ -19,6 +19,9 @@ expensive_verify = []
 # Enable hardware performance counter benchmarks (Linux only)
 # The feature flag controls which measurement type is used in benchmarks
 perf-counters = []
+# Enable experimental arena-based storage using slotmap for better cache locality.
+# This provides alternative heap types with *Arena suffix (e.g., SkewBinomialHeapArena).
+arena-storage = ["slotmap"]
 
 [dependencies]
 # For stack-allocated vectors in fixed-arity heaps
@@ -29,6 +32,8 @@ rustc-hash = "2.0"
 intrusive-circular-list = { path = "crates/intrusive-circular-list" }
 # For skiplist-based heap implementation
 skiplist = "0.6"
+# For arena-based storage (experimental, enabled via "arena-storage" feature)
+slotmap = { version = "1.0", optional = true }
 
 [dev-dependencies]
 proptest = "1.4"

@@ -48,7 +48,7 @@
 //!   *Proceedings of the 44th Annual ACM Symposium on Theory of Computing (STOC)*, 1177-1184.
 //!   [ACM DL](https://dl.acm.org/doi/10.1145/2213977.2214082)
 
-use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError};
+use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError, MergeableHeap};
 use intrusive_circular_list::{container_of_mut, CircularLink, CircularListOps};
 use std::ptr::NonNull;
 
@@ -689,7 +689,9 @@ impl<T, P: Ord> Heap<T, P> for StrictFibonacciHeap<T, P> {
             Some((node.priority, node.item))
         }
     }
+}
 
+impl<T, P: Ord> MergeableHeap<T, P> for StrictFibonacciHeap<T, P> {
     /// Merges another heap into this heap.
     ///
     /// **Time Complexity**: O(1) worst-case

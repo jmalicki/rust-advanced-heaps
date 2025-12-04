@@ -1,13 +1,17 @@
 //! Common traits for heap data structures
 //!
-//! This module provides a two-tier trait hierarchy for heap/priority queue data structures:
+//! This module provides a multi-tier trait hierarchy for heap/priority queue data structures:
 //!
 //! - [`Heap`]: Base trait for simple heaps without `decrease_key` support
+//! - [`MergeableHeap`]: Extension trait for heaps that support efficient merge operations
 //! - [`DecreaseKeyHeap`]: Extended trait adding `decrease_key` and handle-based operations
 //!
 //! The base [`Heap`] trait is compatible with Rust's standard heap API patterns,
 //! while [`DecreaseKeyHeap`] adds the advanced operations needed for algorithms
 //! like Dijkstra's shortest path.
+//!
+//! The [`MergeableHeap`] trait is separate because some storage backends (like arena-based
+//! storage) cannot efficiently support merging heaps while maintaining handle validity.
 
 use std::fmt;
 
@@ -101,8 +105,34 @@ pub trait Heap<T, P: Ord> {
     /// # Time Complexity
     /// Typically O(log n) for all implementations.
     fn pop(&mut self) -> Option<(P, T)>;
+}
 
+/// Extension trait for heaps that support efficient merge operations
+///
+/// This trait is separate from [`Heap`] because some storage backends (like arena-based
+/// storage) cannot efficiently support merging heaps while maintaining handle validity.
+/// When two heaps with arena storage are merged, handles from the merged-in heap become
+/// invalid because nodes are moved to new storage locations.
+///
+/// # Example
+///
+/// ```rust
+/// use rust_advanced_heaps::{Heap, MergeableHeap};
+/// use rust_advanced_heaps::fibonacci::FibonacciHeap;
+///
+/// let mut heap1: FibonacciHeap<&str, i32> = FibonacciHeap::new();
+/// heap1.push(1, "one");
+///
+/// let mut heap2: FibonacciHeap<&str, i32> = FibonacciHeap::new();
+/// heap2.push(2, "two");
+///
+/// heap1.merge(heap2);
+/// assert_eq!(heap1.len(), 2);
+/// ```
+pub trait MergeableHeap<T, P: Ord>: Heap<T, P> {
     /// Merges another heap into this one, consuming the other heap
+    ///
+    /// After merging, `other` becomes empty and all its elements are moved to `self`.
     ///
     /// # Time Complexity
     /// Varies by implementation: O(1) for Fibonacci/Pairing heaps, O(log n) for Binomial.

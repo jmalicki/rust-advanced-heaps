@@ -34,7 +34,7 @@
 //! assert_eq!(heap.pop(), None);
 //! ```
 
-use crate::traits::Heap;
+use crate::traits::{Heap, MergeableHeap};
 
 /// A simple binary min-heap
 ///
@@ -88,7 +88,9 @@ impl<T, P: Ord> Heap<T, P> for SimpleBinaryHeap<T, P> {
 
         result
     }
+}
 
+impl<T, P: Ord> MergeableHeap<T, P> for SimpleBinaryHeap<T, P> {
     fn merge(&mut self, other: Self) {
         // Simple merge: push all elements and let sift_up handle ordering
         // This is O(n log n) but could be optimized to O(n) with heapify

@@ -84,7 +84,7 @@
 //! assert_eq!(heap.pop(), Some((5, "five")));
 //! ```
 
-use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError};
+use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError, MergeableHeap};
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -386,7 +386,9 @@ impl<T, P: RadixKey> Heap<T, P> for RadixHeap<T, P> {
         // This shouldn't happen if len > 0, but handle gracefully
         None
     }
+}
 
+impl<T, P: RadixKey> MergeableHeap<T, P> for RadixHeap<T, P> {
     fn merge(&mut self, other: Self) {
         // O(n) merge: iterate through other's buckets and insert
         for bucket in other.buckets {
