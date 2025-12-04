@@ -1549,8 +1549,12 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
             }
 
             // Cut both nodes from their parents with loss tracking
+            // Note: cut_with_loss_tracking adds nodes to root list via add_to_roots
             self.cut_with_loss_tracking(winner);
             self.cut_with_loss_tracking(loser);
+
+            // Loser will become a child of winner; remove it from the root list first
+            self.remove_from_roots(loser);
 
             // Link loser under winner as active child
             self.link_as_active_child(winner, loser);
