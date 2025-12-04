@@ -45,7 +45,7 @@
 //!   [ACM DL](https://dl.acm.org/doi/10.1145/359460.359478)
 //! - [Wikipedia: Binomial heap](https://en.wikipedia.org/wiki/Binomial_heap)
 
-use crate::traits::{Handle, Heap, HeapError};
+use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError};
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
@@ -126,11 +126,11 @@ struct Node<T, P> {
 ///
 /// ```rust
 /// use rust_advanced_heaps::binomial::BinomialHeap;
-/// use rust_advanced_heaps::Heap;
+/// use rust_advanced_heaps::{Heap, DecreaseKeyHeap};
 ///
 /// let mut heap = BinomialHeap::new();
-/// let handle = heap.push(5, "item");
-/// heap.decrease_key(&handle, 1);
+/// let handle = heap.push_with_handle(5, "item");
+/// heap.decrease_key(&handle, 1).unwrap();
 /// assert_eq!(heap.peek(), Some((&1, &"item")));
 /// ```
 pub struct BinomialHeap<T, P: Ord> {
@@ -145,8 +145,6 @@ pub struct BinomialHeap<T, P: Ord> {
 // No manual Drop needed - Rc handles cleanup automatically when strong refs go to 0
 
 impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
-    type Handle = BinomialHandle<T, P>;
-
     fn new() -> Self {
         Self {
             trees: Vec::new(),
@@ -163,73 +161,8 @@ impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
         self.len
     }
 
-    /// Inserts a new element into the heap
-    ///
-    /// **Time Complexity**: O(log n) worst-case
-    ///
-    /// **Algorithm**: This is analogous to binary addition with carry propagation
-    /// 1. Create a new single-node tree (degree 0, B₀ tree)
-    /// 2. Update minimum pointer if necessary
-    /// 3. Merge the single-node tree into the heap:
-    ///    - Start at degree 0
-    ///    - If `slot[degree]` is empty, place tree there
-    ///    - If `slot[degree]` has a tree, link them (produces degree+1 tree)
-    ///    - Continue with carry propagation (like binary addition)
-    ///
-    /// **Why O(log n)?**
-    /// - At most log₂(n) slots in the trees array (since degrees are 0..log n)
-    /// - Each link operation is O(1)
-    /// - Carry propagation may occur up to log n times
-    /// - Worst-case: all slots have trees, requiring log n links
-    ///
-    /// **Invariant**: After insert, at most one tree of each degree (maintained by
-    /// the carry propagation process, just like binary addition maintains at most
-    /// one bit per position).
-    fn push(&mut self, priority: P, item: T) -> Self::Handle {
-        // Create new single-node tree (B₀ tree, degree 0)
-        let node = Rc::new(RefCell::new(Node {
-            item,
-            priority,
-            parent: None,
-            child: None,
-            sibling: None,
-            degree: 0,
-        }));
-
-        // Create handle (weak reference) before we move node into carry propagation
-        let handle = BinomialHandle {
-            node: Rc::downgrade(&node),
-        };
-
-        // Merge this single-node tree into the heap using carry propagation
-        let mut carry: NodePtr<T, P> = Some(node);
-        let mut degree = 0;
-
-        while carry.is_some() {
-            // Ensure trees array is large enough
-            if degree >= self.trees.len() {
-                self.trees.push(None);
-            }
-
-            if self.trees[degree].is_none() {
-                // Slot is empty: place tree here
-                self.trees[degree] = carry;
-                carry = None;
-            } else {
-                // Slot is occupied: link the two trees
-                let existing = self.trees[degree].take().unwrap();
-                let new_tree = carry.unwrap();
-                carry = Some(self.link_trees(existing, new_tree));
-                degree += 1;
-            }
-        }
-
-        self.len += 1;
-
-        // Update minimum pointer AFTER carry propagation to ensure min points to a root
-        self.find_and_update_min();
-
-        handle
+    fn push(&mut self, priority: P, item: T) {
+        let _ = self.push_with_handle(priority, item);
     }
 
     fn peek(&self) -> Option<(&P, &T)> {
@@ -309,6 +242,119 @@ impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
         Some((node.priority, node.item))
     }
 
+    /// Merges another heap into this heap
+    ///
+    /// **Time Complexity**: O(log n) worst-case, O(1) amortized for sequential merges
+    ///
+    /// **Algorithm**:
+    /// 1. Merge trees from both heaps by degree
+    /// 2. Use carry propagation (like binary addition)
+    /// 3. For each degree from 0 to max:
+    ///    - Collect trees from both heaps at this degree
+    ///    - Link pairs until at most one tree remains
+    ///    - Carry the result to next degree if linking occurred
+    /// 4. Update minimum pointer
+    ///
+    /// **Why O(log n)?**
+    /// - At most O(log n) distinct degrees in each heap
+    /// - Processing each degree: O(1) per tree
+    /// - Total trees: O(log n)
+    /// - Worst-case: O(log n)
+    ///
+    /// **Why O(1) amortized for sequential merges?**
+    /// - Similar to binary addition: most merges are cheap
+    /// - Expensive merges (with many carry propagations) are rare
+    /// - Amortized analysis shows average cost is O(1) per merge
+    ///
+    /// **Invariant**: After merge, at most one tree of each degree (maintained by
+    /// carry propagation, exactly like binary addition maintains at most one bit
+    /// per position).
+    fn merge(&mut self, mut other: Self) {
+        // Merge trees from both heaps
+        self.merge_trees(&mut other);
+
+        // Update minimum pointer after merge
+        self.find_and_update_min();
+
+        // Update length
+        self.len += other.len;
+        other.min = None;
+        other.len = 0;
+    }
+}
+
+impl<T, P: Ord> DecreaseKeyHeap<T, P> for BinomialHeap<T, P> {
+    type Handle = BinomialHandle<T, P>;
+
+    /// Inserts a new element into the heap
+    ///
+    /// **Time Complexity**: O(log n) worst-case
+    ///
+    /// **Algorithm**: This is analogous to binary addition with carry propagation
+    /// 1. Create a new single-node tree (degree 0, B₀ tree)
+    /// 2. Update minimum pointer if necessary
+    /// 3. Merge the single-node tree into the heap:
+    ///    - Start at degree 0
+    ///    - If `slot[degree]` is empty, place tree there
+    ///    - If `slot[degree]` has a tree, link them (produces degree+1 tree)
+    ///    - Continue with carry propagation (like binary addition)
+    ///
+    /// **Why O(log n)?**
+    /// - At most log₂(n) slots in the trees array (since degrees are 0..log n)
+    /// - Each link operation is O(1)
+    /// - Carry propagation may occur up to log n times
+    /// - Worst-case: all slots have trees, requiring log n links
+    ///
+    /// **Invariant**: After insert, at most one tree of each degree (maintained by
+    /// the carry propagation process, just like binary addition maintains at most
+    /// one bit per position).
+    fn push_with_handle(&mut self, priority: P, item: T) -> Self::Handle {
+        // Create new single-node tree (B₀ tree, degree 0)
+        let node = Rc::new(RefCell::new(Node {
+            item,
+            priority,
+            parent: None,
+            child: None,
+            sibling: None,
+            degree: 0,
+        }));
+
+        // Create handle (weak reference) before we move node into carry propagation
+        let handle = BinomialHandle {
+            node: Rc::downgrade(&node),
+        };
+
+        // Merge this single-node tree into the heap using carry propagation
+        let mut carry: NodePtr<T, P> = Some(node);
+        let mut degree = 0;
+
+        while carry.is_some() {
+            // Ensure trees array is large enough
+            if degree >= self.trees.len() {
+                self.trees.push(None);
+            }
+
+            if self.trees[degree].is_none() {
+                // Slot is empty: place tree here
+                self.trees[degree] = carry;
+                carry = None;
+            } else {
+                // Slot is occupied: link the two trees
+                let existing = self.trees[degree].take().unwrap();
+                let new_tree = carry.unwrap();
+                carry = Some(self.link_trees(existing, new_tree));
+                degree += 1;
+            }
+        }
+
+        self.len += 1;
+
+        // Update minimum pointer AFTER carry propagation to ensure min points to a root
+        self.find_and_update_min();
+
+        handle
+    }
+
     /// Decreases the priority of an element
     ///
     /// **Time Complexity**: O(log n) worst-case
@@ -351,46 +397,6 @@ impl<T, P: Ord> Heap<T, P> for BinomialHeap<T, P> {
         self.bubble_up(node_rc);
 
         Ok(())
-    }
-
-    /// Merges another heap into this heap
-    ///
-    /// **Time Complexity**: O(log n) worst-case, O(1) amortized for sequential merges
-    ///
-    /// **Algorithm**:
-    /// 1. Merge trees from both heaps by degree
-    /// 2. Use carry propagation (like binary addition)
-    /// 3. For each degree from 0 to max:
-    ///    - Collect trees from both heaps at this degree
-    ///    - Link pairs until at most one tree remains
-    ///    - Carry the result to next degree if linking occurred
-    /// 4. Update minimum pointer
-    ///
-    /// **Why O(log n)?**
-    /// - At most O(log n) distinct degrees in each heap
-    /// - Processing each degree: O(1) per tree
-    /// - Total trees: O(log n)
-    /// - Worst-case: O(log n)
-    ///
-    /// **Why O(1) amortized for sequential merges?**
-    /// - Similar to binary addition: most merges are cheap
-    /// - Expensive merges (with many carry propagations) are rare
-    /// - Amortized analysis shows average cost is O(1) per merge
-    ///
-    /// **Invariant**: After merge, at most one tree of each degree (maintained by
-    /// carry propagation, exactly like binary addition maintains at most one bit
-    /// per position).
-    fn merge(&mut self, mut other: Self) {
-        // Merge trees from both heaps
-        self.merge_trees(&mut other);
-
-        // Update minimum pointer after merge
-        self.find_and_update_min();
-
-        // Update length
-        self.len += other.len;
-        other.min = None;
-        other.len = 0;
     }
 }
 
@@ -923,12 +929,13 @@ mod tests {
 
     #[test]
     fn test_decrease_key_min_update() {
+        use crate::DecreaseKeyHeap;
         let mut heap: BinomialHeap<i32, i32> = BinomialHeap::new();
         let mut handles = Vec::new();
 
         // Insert 16 zeros
         for i in 0..16 {
-            handles.push(heap.push(0, i));
+            handles.push(heap.push_with_handle(0, i));
         }
         println!("After 16 pushes, min: {:?}", heap.peek());
         println!(
@@ -969,6 +976,7 @@ mod tests {
 
     #[test]
     fn test_complex_operations_failure() {
+        use crate::DecreaseKeyHeap;
         // Simplified test case focusing on the issue
         let mut heap: BinomialHeap<i32, i32> = BinomialHeap::new();
         let mut handles = Vec::new();
@@ -976,7 +984,7 @@ mod tests {
         // Insert: [54, -34, 48, 55, 19, 8, 23, 87]
         let initial = [54i32, -34, 48, 55, 19, 8, 23, 87];
         for (i, priority) in initial.iter().enumerate() {
-            handles.push(heap.push(*priority, i as i32));
+            handles.push(heap.push_with_handle(*priority, i as i32));
         }
         println!("After initial inserts, min: {:?}", heap.peek());
         assert_eq!(heap.peek().map(|(p, _)| *p), Some(-34));
@@ -989,9 +997,9 @@ mod tests {
         assert_eq!(heap.peek().map(|(p, _)| *p), Some(-34));
 
         // Push a few more items
-        handles.push(heap.push(71, 8)); // idx 8
-        handles.push(heap.push(94, 9)); // idx 9
-        handles.push(heap.push(-87, 10)); // idx 10
+        handles.push(heap.push_with_handle(71, 8)); // idx 8
+        handles.push(heap.push_with_handle(94, 9)); // idx 9
+        handles.push(heap.push_with_handle(-87, 10)); // idx 10
         println!("After pushes, min: {:?}", heap.peek());
         assert_eq!(heap.peek().map(|(p, _)| *p), Some(-87)); // -87 is now min
 
@@ -1036,6 +1044,7 @@ mod tests {
 
     #[test]
     fn test_failing_input_from_proptest() {
+        use crate::DecreaseKeyHeap;
         use std::collections::HashMap;
 
         let mut heap: BinomialHeap<i32, i32> = BinomialHeap::new();
@@ -1048,7 +1057,7 @@ mod tests {
         ];
 
         for (i, priority) in initial.iter().enumerate() {
-            handles.push(heap.push(*priority, i as i32));
+            handles.push(heap.push_with_handle(*priority, i as i32));
             priorities.insert(i, *priority);
         }
 

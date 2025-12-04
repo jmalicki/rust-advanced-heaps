@@ -7,7 +7,7 @@ use rust_advanced_heaps::binomial::BinomialHeap;
 use rust_advanced_heaps::fibonacci::FibonacciHeap;
 use rust_advanced_heaps::pairing::PairingHeap;
 use rust_advanced_heaps::rank_pairing::RankPairingHeap;
-use rust_advanced_heaps::Heap;
+use rust_advanced_heaps::{DecreaseKeyHeap, Heap};
 
 /// Test massive numbers of inserts and pops
 fn test_massive_operations<H: Heap<i32, i32>>() {
@@ -30,13 +30,13 @@ fn test_massive_operations<H: Heap<i32, i32>>() {
 }
 
 /// Test many decrease_key operations
-fn test_many_decrease_keys<H: Heap<i32, i32>>() {
+fn test_many_decrease_keys<H: DecreaseKeyHeap<i32, i32>>() {
     let mut heap = H::new();
     let mut handles = Vec::new();
 
     // Insert elements with high priorities
     for i in 0..500 {
-        handles.push(heap.push(10000 + i, i));
+        handles.push(heap.push_with_handle(10000 + i, i));
     }
 
     // Decrease all keys
@@ -94,13 +94,13 @@ fn test_large_merge<H: Heap<i32, i32>>() {
 }
 
 /// Test decrease_key on already popped element (should handle gracefully)
-fn test_decrease_on_many_operations<H: Heap<i32, i32>>() {
+fn test_decrease_on_many_operations<H: DecreaseKeyHeap<i32, i32>>() {
     let mut heap = H::new();
     let mut handles = Vec::new();
 
     // Insert many elements
     for i in 0..300 {
-        handles.push(heap.push(i * 10, i));
+        handles.push(heap.push_with_handle(i * 10, i));
     }
 
     // Pop some
@@ -134,13 +134,13 @@ fn test_large_priorities<H: Heap<i32, i64>>() {
 }
 
 /// Test rapid-fire operations
-fn test_rapid_fire<H: Heap<i32, i32>>() {
+fn test_rapid_fire<H: DecreaseKeyHeap<i32, i32>>() {
     let mut heap = H::new();
     let mut handles = Vec::new();
 
     // Rapid insert
     for i in 0..200 {
-        handles.push(heap.push(i, i));
+        handles.push(heap.push_with_handle(i, i));
     }
 
     // Rapid decrease keys

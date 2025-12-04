@@ -10,13 +10,16 @@
 //! 1. **Generic test functions**: Each test function is parameterized over heap type
 //!    and verifies a specific invariant (heap property, length, completeness, etc.)
 //!
-//! 2. **Automatic generation**: A macro creates test modules for each heap, applying
+//! 2. **Automatic generation**: Macros create test modules for each heap, applying
 //!    all test functions to each implementation
 //!
-//! 3. **Comprehensive coverage**: We test all major operations (push, pop, merge,
+//! 3. **Two-tier testing**: Base `Heap` tests apply to all heaps, while
+//!    `DecreaseKeyHeap` tests only apply to heaps with decrease_key support
+//!
+//! 4. **Comprehensive coverage**: We test all major operations (push, pop, merge,
 //!    decrease_key, peek) and their interactions
 //!
-//! 4. **Edge cases**: Special attention to duplicates, complex sequences, and
+//! 5. **Edge cases**: Special attention to duplicates, complex sequences, and
 //!    idempotency properties
 //!
 //! This approach scales well: adding a new heap type requires one line, and adding
@@ -27,12 +30,17 @@ use rust_advanced_heaps::binomial::BinomialHeap;
 use rust_advanced_heaps::fibonacci::FibonacciHeap;
 use rust_advanced_heaps::pairing::PairingHeap;
 use rust_advanced_heaps::rank_pairing::RankPairingHeap;
+use rust_advanced_heaps::simple_binary::SimpleBinaryHeap;
 use rust_advanced_heaps::skew_binomial::SkewBinomialHeap;
 use rust_advanced_heaps::strict_fibonacci::StrictFibonacciHeap;
 use rust_advanced_heaps::twothree::TwoThreeHeap;
-use rust_advanced_heaps::Heap;
+use rust_advanced_heaps::{DecreaseKeyHeap, Heap};
 
 use std::collections::HashMap;
+
+// ============================================================================
+// Base Heap trait tests - work with any Heap implementation
+// ============================================================================
 
 /// Test that push and pop maintain heap property
 ///
@@ -68,55 +76,6 @@ fn test_push_pop_invariant<H: Heap<i32, i32>>(ops: Vec<(bool, i32)>) -> Result<(
         popped.push(priority);
     }
     let mut expected = inserted;
-    popped.sort();
-    expected.sort();
-    prop_assert_eq!(popped, expected);
-
-    Ok(())
-}
-
-/// Test that decrease_key maintains heap property
-///
-/// Decrease_key is the most complex operation in many heap implementations. This test
-/// verifies that after decreasing a key, the heap property is maintained and the minimum
-/// is correctly updated if we decreased the minimum element.
-///
-/// This is particularly important for fibonacci/pairing heaps which use cut operations
-/// that can alter the tree structure significantly. Bugs here can corrupt the entire heap.
-fn test_decrease_key_invariant<H: Heap<i32, i32>>(
-    initial: Vec<i32>,
-    decreases: Vec<(usize, i32)>,
-) -> Result<(), TestCaseError> {
-    let mut heap = H::new();
-    let mut handles = Vec::new();
-    let mut priorities: HashMap<usize, i32> = HashMap::new();
-
-    // Insert initial values
-    for (i, priority) in initial.iter().enumerate() {
-        let handle = heap.push(*priority, *priority);
-        handles.push(handle);
-        priorities.insert(i, *priority);
-    }
-
-    // Apply decrease_key operations
-    for (handle_idx, new_priority) in decreases {
-        if handle_idx < handles.len() {
-            let old_priority = priorities[&handle_idx];
-            if new_priority < old_priority {
-                prop_assert!(heap
-                    .decrease_key(&handles[handle_idx], new_priority)
-                    .is_ok());
-                priorities.insert(handle_idx, new_priority);
-            }
-        }
-    }
-
-    // Verify final heap contents via pop sequence
-    let mut popped = Vec::new();
-    while let Some((priority, _item)) = heap.pop() {
-        popped.push(priority);
-    }
-    let mut expected: Vec<i32> = priorities.values().copied().collect();
     popped.sort();
     expected.sort();
     prop_assert_eq!(popped, expected);
@@ -261,95 +220,6 @@ fn test_pop_maintains_property<H: Heap<i32, i32>>(values: Vec<i32>) -> Result<()
     Ok(())
 }
 
-/// Test complex sequences with mixed operations
-///
-/// Real-world usage involves interleaved push/pop/decrease_key/peek operations. This test
-/// generates random sequences of these operations to find bugs that only appear when
-/// operations are combined in specific ways.
-///
-/// This is particularly important for finding state management bugs where operations
-/// interfere with each other, or when temporary invariants are broken during complex
-/// restructuring operations.
-fn test_complex_operations<H: Heap<i32, i32>>(
-    initial: Vec<i32>,
-    ops: Vec<(u8, i32)>,
-) -> Result<(), TestCaseError> {
-    let mut heap = H::new();
-    let mut handles = Vec::new();
-    // Track current priority for each handle index
-    // Use handle index as the item value for unique identification
-    let mut priorities: HashMap<usize, i32> = HashMap::new();
-
-    // Insert initial values with unique item (the index)
-    for (i, priority) in initial.iter().enumerate() {
-        let handle = heap.push(*priority, i as i32);
-        handles.push(handle);
-        priorities.insert(i, *priority);
-    }
-
-    // Apply operations: 0=push, 1=pop, 2=decrease_key, 3=peek
-    for (op_type, value) in ops {
-        match op_type % 4 {
-            0 => {
-                // Push with unique item (the index)
-                let idx = handles.len();
-                let handle = heap.push(value, idx as i32);
-                handles.push(handle);
-                priorities.insert(idx, value);
-            }
-            1 => {
-                // Pop
-                if !heap.is_empty() {
-                    let popped = heap.pop();
-                    if let Some((_priority, item)) = popped {
-                        // Item is the handle index, so we can directly identify which was popped
-                        let idx = item as usize;
-                        priorities.remove(&idx);
-                    }
-                }
-            }
-            2 => {
-                // Decrease_key - only if we have valid handles and priorities
-                if !handles.is_empty() && !priorities.is_empty() {
-                    // Pick from valid indices only
-                    let valid_indices: Vec<usize> = priorities.keys().copied().collect();
-                    if !valid_indices.is_empty() {
-                        let idx = valid_indices[(value as usize) % valid_indices.len()];
-                        let old_priority = priorities[&idx];
-                        let new_priority = if value < old_priority {
-                            value
-                        } else {
-                            old_priority - 1
-                        };
-                        prop_assert!(heap.decrease_key(&handles[idx], new_priority).is_ok());
-                        priorities.insert(idx, new_priority);
-                    }
-                }
-            }
-            3 => {
-                // Skip inline peek checks; peek is covered by dedicated tests
-            }
-            _ => {}
-        }
-
-        // Verify length invariants after each operation
-        prop_assert_eq!(heap.len(), priorities.len());
-        prop_assert_eq!(heap.is_empty(), priorities.is_empty());
-    }
-
-    // Verify final heap contents via pop sequence
-    let mut popped = Vec::new();
-    while let Some((_priority, item)) = heap.pop() {
-        popped.push(item as usize);
-    }
-    let mut expected: Vec<usize> = priorities.keys().copied().collect();
-    popped.sort();
-    expected.sort();
-    prop_assert_eq!(popped, expected);
-
-    Ok(())
-}
-
 /// Test that multiple merges preserve heap property
 ///
 /// This tests merging many heaps together in sequence, which exercises the merge operation
@@ -445,42 +315,6 @@ fn test_completeness<H: Heap<i32, i32>>(values: Vec<i32>) -> Result<(), TestCase
     Ok(())
 }
 
-/// Test decrease_key with edge cases
-///
-/// This test decreases every key in the heap to very small values, which often triggers
-/// cut operations in fibonacci/pairing heaps. When many keys are decreased at once,
-/// restructuring bugs become more apparent.
-///
-/// This is critical for verifying that decrease_key correctly handles cascading cuts
-/// or other restructuring operations without corrupting the heap structure.
-fn test_decrease_key_edge_cases<H: Heap<i32, i32>>(values: Vec<i32>) -> Result<(), TestCaseError> {
-    if values.is_empty() {
-        return Ok(());
-    }
-
-    let mut heap = H::new();
-    let mut handles = Vec::new();
-
-    // Insert values
-    for val in &values {
-        let handle = heap.push(*val, *val);
-        handles.push(handle);
-    }
-
-    // Try decreasing each key to various smaller values
-    for (idx, &val) in values.iter().enumerate() {
-        let new_priority = val - 100;
-        prop_assert!(heap.decrease_key(&handles[idx], new_priority).is_ok());
-
-        // Verify min is now this value or something smaller using peek
-        if let Some((min, _)) = heap.peek() {
-            prop_assert!(*min <= new_priority);
-        }
-    }
-
-    Ok(())
-}
-
 /// Test behavior when repeatedly pushing and popping the same element
 ///
 /// Duplicate priorities are a common edge case in heap implementations. This test verifies
@@ -511,19 +345,193 @@ fn test_duplicate_operations<H: Heap<i32, i32>>(
     Ok(())
 }
 
-/// Macro to generate property tests for each heap implementation
+// ============================================================================
+// DecreaseKeyHeap trait tests - only for heaps with decrease_key support
+// ============================================================================
+
+/// Test that decrease_key maintains heap property
 ///
-/// This macro creates a cartesian product of all test functions across all heap types.
-/// It generates a separate module for each heap with all the property tests, allowing
-/// us to test all 8 heap implementations with all 11 test types efficiently.
+/// Decrease_key is the most complex operation in many heap implementations. This test
+/// verifies that after decreasing a key, the heap property is maintained and the minimum
+/// is correctly updated if we decreased the minimum element.
 ///
-/// Benefits:
-/// - DRY: Define test logic once, reuse for all implementations
-/// - Easy to add new heaps: just add one macro invocation
-/// - Easy to add new tests: they automatically apply to all heaps
-/// - Clear test organization: each heap has its own module
-macro_rules! create_heap_tests {
-    ($heap_name:ident => $heap_type:ty, $ops_size:expr, $initial_size:expr, $decreases_size:expr, $values_size:expr) => {
+/// This is particularly important for fibonacci/pairing heaps which use cut operations
+/// that can alter the tree structure significantly. Bugs here can corrupt the entire heap.
+fn test_decrease_key_invariant<H: DecreaseKeyHeap<i32, i32>>(
+    initial: Vec<i32>,
+    decreases: Vec<(usize, i32)>,
+) -> Result<(), TestCaseError> {
+    let mut heap = H::new();
+    let mut handles = Vec::new();
+    let mut priorities: HashMap<usize, i32> = HashMap::new();
+
+    // Insert initial values
+    for (i, priority) in initial.iter().enumerate() {
+        let handle = heap.push_with_handle(*priority, *priority);
+        handles.push(handle);
+        priorities.insert(i, *priority);
+    }
+
+    // Apply decrease_key operations
+    for (handle_idx, new_priority) in decreases {
+        if handle_idx < handles.len() {
+            let old_priority = priorities[&handle_idx];
+            if new_priority < old_priority {
+                prop_assert!(heap
+                    .decrease_key(&handles[handle_idx], new_priority)
+                    .is_ok());
+                priorities.insert(handle_idx, new_priority);
+            }
+        }
+    }
+
+    // Verify final heap contents via pop sequence
+    let mut popped = Vec::new();
+    while let Some((priority, _item)) = heap.pop() {
+        popped.push(priority);
+    }
+    let mut expected: Vec<i32> = priorities.values().copied().collect();
+    popped.sort();
+    expected.sort();
+    prop_assert_eq!(popped, expected);
+
+    Ok(())
+}
+
+/// Test complex sequences with mixed operations
+///
+/// Real-world usage involves interleaved push/pop/decrease_key/peek operations. This test
+/// generates random sequences of these operations to find bugs that only appear when
+/// operations are combined in specific ways.
+///
+/// This is particularly important for finding state management bugs where operations
+/// interfere with each other, or when temporary invariants are broken during complex
+/// restructuring operations.
+fn test_complex_operations<H: DecreaseKeyHeap<i32, i32>>(
+    initial: Vec<i32>,
+    ops: Vec<(u8, i32)>,
+) -> Result<(), TestCaseError> {
+    let mut heap = H::new();
+    let mut handles = Vec::new();
+    // Track current priority for each handle index
+    // Use handle index as the item value for unique identification
+    let mut priorities: HashMap<usize, i32> = HashMap::new();
+
+    // Insert initial values with unique item (the index)
+    for (i, priority) in initial.iter().enumerate() {
+        let handle = heap.push_with_handle(*priority, i as i32);
+        handles.push(handle);
+        priorities.insert(i, *priority);
+    }
+
+    // Apply operations: 0=push, 1=pop, 2=decrease_key, 3=peek
+    for (op_type, value) in ops {
+        match op_type % 4 {
+            0 => {
+                // Push with unique item (the index)
+                let idx = handles.len();
+                let handle = heap.push_with_handle(value, idx as i32);
+                handles.push(handle);
+                priorities.insert(idx, value);
+            }
+            1 => {
+                // Pop
+                if !heap.is_empty() {
+                    let popped = heap.pop();
+                    if let Some((_priority, item)) = popped {
+                        // Item is the handle index, so we can directly identify which was popped
+                        let idx = item as usize;
+                        priorities.remove(&idx);
+                    }
+                }
+            }
+            2 => {
+                // Decrease_key - only if we have valid handles and priorities
+                if !handles.is_empty() && !priorities.is_empty() {
+                    // Pick from valid indices only
+                    let valid_indices: Vec<usize> = priorities.keys().copied().collect();
+                    if !valid_indices.is_empty() {
+                        let idx = valid_indices[(value as usize) % valid_indices.len()];
+                        let old_priority = priorities[&idx];
+                        let new_priority = if value < old_priority {
+                            value
+                        } else {
+                            old_priority - 1
+                        };
+                        prop_assert!(heap.decrease_key(&handles[idx], new_priority).is_ok());
+                        priorities.insert(idx, new_priority);
+                    }
+                }
+            }
+            3 => {
+                // Skip inline peek checks; peek is covered by dedicated tests
+            }
+            _ => {}
+        }
+
+        // Verify length invariants after each operation
+        prop_assert_eq!(heap.len(), priorities.len());
+        prop_assert_eq!(heap.is_empty(), priorities.is_empty());
+    }
+
+    // Verify final heap contents via pop sequence
+    let mut popped = Vec::new();
+    while let Some((_priority, item)) = heap.pop() {
+        popped.push(item as usize);
+    }
+    let mut expected: Vec<usize> = priorities.keys().copied().collect();
+    popped.sort();
+    expected.sort();
+    prop_assert_eq!(popped, expected);
+
+    Ok(())
+}
+
+/// Test decrease_key with edge cases
+///
+/// This test decreases every key in the heap to very small values, which often triggers
+/// cut operations in fibonacci/pairing heaps. When many keys are decreased at once,
+/// restructuring bugs become more apparent.
+///
+/// This is critical for verifying that decrease_key correctly handles cascading cuts
+/// or other restructuring operations without corrupting the heap structure.
+fn test_decrease_key_edge_cases<H: DecreaseKeyHeap<i32, i32>>(
+    values: Vec<i32>,
+) -> Result<(), TestCaseError> {
+    if values.is_empty() {
+        return Ok(());
+    }
+
+    let mut heap = H::new();
+    let mut handles = Vec::new();
+
+    // Insert values
+    for val in &values {
+        let handle = heap.push_with_handle(*val, *val);
+        handles.push(handle);
+    }
+
+    // Try decreasing each key to various smaller values
+    for (idx, &val) in values.iter().enumerate() {
+        let new_priority = val - 100;
+        prop_assert!(heap.decrease_key(&handles[idx], new_priority).is_ok());
+
+        // Verify min is now this value or something smaller using peek
+        if let Some((min, _)) = heap.peek() {
+            prop_assert!(*min <= new_priority);
+        }
+    }
+
+    Ok(())
+}
+
+// ============================================================================
+// Macro to generate base Heap tests for a heap type
+// ============================================================================
+
+/// Macro to generate base property tests for heaps implementing only `Heap` trait
+macro_rules! base_heap_tests {
+    ($heap_name:ident, $heap_type:ty, $ops_size:expr, $values_size:expr) => {
         mod $heap_name {
             use super::*;
 
@@ -531,14 +539,6 @@ macro_rules! create_heap_tests {
                 #[test]
                 fn push_pop_invariant(ops in prop::collection::vec((prop::bool::ANY, -100i32..100), $ops_size)) {
                     test_push_pop_invariant::<$heap_type>(ops)?;
-                }
-
-                #[test]
-                fn decrease_key_invariant(
-                    initial in prop::collection::vec(-100i32..100, $initial_size),
-                    decreases in prop::collection::vec((0usize..50, -100i32..100), $decreases_size)
-                ) {
-                    test_decrease_key_invariant::<$heap_type>(initial, decreases)?;
                 }
 
                 #[test]
@@ -565,14 +565,6 @@ macro_rules! create_heap_tests {
                 }
 
                 #[test]
-                fn complex_operations(
-                    initial in prop::collection::vec(-100i32..100, 1..20),
-                    ops in prop::collection::vec((0u8..4, -100i32..100), 0..50)
-                ) {
-                    test_complex_operations::<$heap_type>(initial, ops)?;
-                }
-
-                #[test]
                 fn multiple_merges(heaps in prop::collection::vec(prop::collection::vec(-100i32..100, 0..20), 0..10)) {
                     test_multiple_merges::<$heap_type>(heaps)?;
                 }
@@ -580,11 +572,6 @@ macro_rules! create_heap_tests {
                 #[test]
                 fn completeness(values in prop::collection::vec(-100i32..100, 1..100)) {
                     test_completeness::<$heap_type>(values)?;
-                }
-
-                #[test]
-                fn decrease_key_edge_cases(values in prop::collection::vec(-100i32..100, 1..30)) {
-                    test_decrease_key_edge_cases::<$heap_type>(values)?;
                 }
 
                 #[test]
@@ -596,38 +583,69 @@ macro_rules! create_heap_tests {
     };
 }
 
+/// Macro to generate DecreaseKeyHeap-specific property tests
+macro_rules! decrease_key_heap_tests {
+    ($heap_name:ident, $heap_type:ty, $initial_size:expr, $decreases_size:expr) => {
+        mod $heap_name {
+            use super::*;
+
+            proptest::proptest! {
+                #[test]
+                fn decrease_key_invariant(
+                    initial in prop::collection::vec(-100i32..100, $initial_size),
+                    decreases in prop::collection::vec((0usize..50, -100i32..100), $decreases_size)
+                ) {
+                    test_decrease_key_invariant::<$heap_type>(initial, decreases)?;
+                }
+
+                #[test]
+                fn complex_operations(
+                    initial in prop::collection::vec(-100i32..100, 1..20),
+                    ops in prop::collection::vec((0u8..4, -100i32..100), 0..50)
+                ) {
+                    test_complex_operations::<$heap_type>(initial, ops)?;
+                }
+
+                #[test]
+                fn decrease_key_edge_cases(values in prop::collection::vec(-100i32..100, 1..30)) {
+                    test_decrease_key_edge_cases::<$heap_type>(values)?;
+                }
+            }
+        }
+    };
+}
+
+// ============================================================================
 // Generate tests for all heap implementations
-create_heap_tests!(
-    fibonacci_tests => FibonacciHeap<i32, i32>,
-    0..100, 1..50, 0..20, 1..100
-);
+// ============================================================================
 
-create_heap_tests!(
-    pairing_tests => PairingHeap<i32, i32>,
-    0..100, 1..50, 0..20, 1..100
-);
+// SimpleBinaryHeap - base Heap only (no decrease_key)
+base_heap_tests!(simple_binary_tests, SimpleBinaryHeap<i32, i32>, 0..100, 1..100);
 
-create_heap_tests!(
-    rank_pairing_tests => RankPairingHeap<i32, i32>,
-    0..100, 1..50, 0..20, 1..100
-);
+// Fibonacci Heap - base + decrease_key tests
+base_heap_tests!(fibonacci_tests, FibonacciHeap<i32, i32>, 0..100, 1..100);
+decrease_key_heap_tests!(fibonacci_decrease_tests, FibonacciHeap<i32, i32>, 1..50, 0..20);
 
-create_heap_tests!(
-    binomial_tests => BinomialHeap<i32, i32>,
-    0..100, 1..50, 0..20, 1..100
-);
+// Pairing Heap
+base_heap_tests!(pairing_tests, PairingHeap<i32, i32>, 0..100, 1..100);
+decrease_key_heap_tests!(pairing_decrease_tests, PairingHeap<i32, i32>, 1..50, 0..20);
 
-create_heap_tests!(
-    strict_fibonacci_tests => StrictFibonacciHeap<i32, i32>,
-    0..100, 1..50, 0..20, 1..100
-);
+// Rank-Pairing Heap
+base_heap_tests!(rank_pairing_tests, RankPairingHeap<i32, i32>, 0..100, 1..100);
+decrease_key_heap_tests!(rank_pairing_decrease_tests, RankPairingHeap<i32, i32>, 1..50, 0..20);
 
-create_heap_tests!(
-    twothree_tests => TwoThreeHeap<i32, i32>,
-    0..100, 1..50, 0..20, 1..100
-);
+// Binomial Heap
+base_heap_tests!(binomial_tests, BinomialHeap<i32, i32>, 0..100, 1..100);
+decrease_key_heap_tests!(binomial_decrease_tests, BinomialHeap<i32, i32>, 1..50, 0..20);
 
-create_heap_tests!(
-    skew_binomial_tests => SkewBinomialHeap<i32, i32>,
-    0..100, 1..50, 0..20, 1..100
-);
+// Strict Fibonacci Heap
+base_heap_tests!(strict_fibonacci_tests, StrictFibonacciHeap<i32, i32>, 0..100, 1..100);
+decrease_key_heap_tests!(strict_fibonacci_decrease_tests, StrictFibonacciHeap<i32, i32>, 1..50, 0..20);
+
+// 2-3 Heap
+base_heap_tests!(twothree_tests, TwoThreeHeap<i32, i32>, 0..100, 1..100);
+decrease_key_heap_tests!(twothree_decrease_tests, TwoThreeHeap<i32, i32>, 1..50, 0..20);
+
+// Skew Binomial Heap
+base_heap_tests!(skew_binomial_tests, SkewBinomialHeap<i32, i32>, 0..100, 1..100);
+decrease_key_heap_tests!(skew_binomial_decrease_tests, SkewBinomialHeap<i32, i32>, 1..50, 0..20);

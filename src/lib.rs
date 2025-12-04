@@ -5,26 +5,51 @@
 //! This crate provides implementations of various advanced heap/priority queue data structures
 //! with efficient `decrease_key` support, as described in computer science literature.
 //!
-//! # Features
+//! # Trait Hierarchy
 //!
-//! - **Fibonacci Heap**: O(1) amortized insert, decrease_key, and merge; O(log n) amortized delete-min
-//! - **Pairing Heap**: O(1) amortized insert and merge; O(log n) amortized delete-min; o(log n) amortized decrease_key
-//! - **Rank-Pairing Heap**: O(1) amortized insert, decrease_key, and merge; O(log n) amortized delete-min
-//! - **Binomial Heap**: O(log n) insert and delete-min; O(log n) decrease_key; O(1) amortized merge
-//! - **Strict Fibonacci Heap**: O(1) worst-case insert, decrease_key, and merge; O(log n) worst-case delete-min
-//! - **2-3 Heap**: O(1) amortized insert and decrease_key; O(log n) amortized delete-min
-//! - **Skew Binomial Heap**: O(1) insert and merge; O(log n) delete-min and decrease_key
+//! This crate provides a two-tier trait design:
 //!
-//! # Example
+//! - [`Heap`]: Base trait for simple heaps (push, pop, peek, merge)
+//! - [`DecreaseKeyHeap`]: Extended trait adding `decrease_key` and handle-based operations
+//!
+//! This allows algorithms to be generic over heaps at the appropriate level.
+//!
+//! # Implementations
+//!
+//! | Heap | push | pop | decrease_key | Trait |
+//! |------|------|-----|--------------|-------|
+//! | [`simple_binary::SimpleBinaryHeap`] | O(log n) | O(log n) | - | `Heap` only |
+//! | [`fibonacci::FibonacciHeap`] | O(1) am. | O(log n) am. | O(1) am. | `DecreaseKeyHeap` |
+//! | [`pairing::PairingHeap`] | O(1) am. | O(log n) am. | o(log n) am. | `DecreaseKeyHeap` |
+//! | [`rank_pairing::RankPairingHeap`] | O(1) am. | O(log n) am. | O(1) am. | `DecreaseKeyHeap` |
+//! | [`binomial::BinomialHeap`] | O(log n) | O(log n) | O(log n) | `DecreaseKeyHeap` |
+//! | [`strict_fibonacci::StrictFibonacciHeap`] | O(1) worst | O(log n) worst | O(1) worst | `DecreaseKeyHeap` |
+//! | [`twothree::TwoThreeHeap`] | O(1) am. | O(log n) am. | O(1) am. | `DecreaseKeyHeap` |
+//! | [`skew_binomial::SkewBinomialHeap`] | O(1) | O(log n) | O(log n) | `DecreaseKeyHeap` |
+//!
+//! # Basic Example
 //!
 //! ```rust
-//! use rust_advanced_heaps::fibonacci::FibonacciHeap;
 //! use rust_advanced_heaps::Heap;
+//! use rust_advanced_heaps::simple_binary::SimpleBinaryHeap;
+//!
+//! let mut heap = SimpleBinaryHeap::new();
+//! heap.push(3, "three");
+//! heap.push(1, "one");
+//! assert_eq!(heap.peek(), Some((&1, &"one")));
+//! assert_eq!(heap.pop(), Some((1, "one")));
+//! ```
+//!
+//! # Example with decrease_key
+//!
+//! ```rust
+//! use rust_advanced_heaps::{Heap, DecreaseKeyHeap};
+//! use rust_advanced_heaps::fibonacci::FibonacciHeap;
 //!
 //! let mut heap = FibonacciHeap::new();
-//! let handle1 = heap.push(5, "item1");
-//! let handle2 = heap.push(3, "item2");
-//! heap.decrease_key(&handle1, 1);
+//! let handle1 = heap.push_with_handle(5, "item1");
+//! let _handle2 = heap.push_with_handle(3, "item2");
+//! heap.decrease_key(&handle1, 1).unwrap();
 //! assert_eq!(heap.peek(), Some((&1, &"item1")));
 //! ```
 
@@ -32,11 +57,12 @@ pub mod binomial;
 pub mod fibonacci;
 pub mod pairing;
 pub mod rank_pairing;
+pub mod simple_binary;
 pub mod skew_binomial;
 pub mod stdlib_compat;
 pub mod strict_fibonacci;
 pub mod traits;
 pub mod twothree;
 
-// Re-export the main trait for convenience
-pub use traits::Heap;
+// Re-export the main traits for convenience
+pub use traits::{DecreaseKeyHeap, Heap};

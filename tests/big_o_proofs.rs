@@ -21,7 +21,7 @@ use rust_advanced_heaps::rank_pairing::RankPairingHeap;
 use rust_advanced_heaps::skew_binomial::SkewBinomialHeap;
 use rust_advanced_heaps::strict_fibonacci::StrictFibonacciHeap;
 use rust_advanced_heaps::twothree::TwoThreeHeap;
-use rust_advanced_heaps::Heap;
+use rust_advanced_heaps::{DecreaseKeyHeap, Heap};
 
 use ctor::ctor;
 use parking_lot::RwLock;
@@ -123,7 +123,7 @@ fn test_pop_batch_complexity<H: Heap<i32, i32>>(heap_name: &str) {
 /// - O(1) worst-case: Brodal -> O(n) batch
 /// - o(log n) amortized: Pairing -> O(n) batch (sub-logarithmic, better than O(log n))
 /// - O(log n) worst-case: Binomial, SkewBinomial -> O(n log n) batch
-fn test_decrease_key_batch_complexity<H: Heap<i32, i32>>(
+fn test_decrease_key_batch_complexity<H: DecreaseKeyHeap<i32, i32>>(
     heap_name: &str,
     batch_expected: BigOAlgorithmComplexity,
 ) {
@@ -148,7 +148,7 @@ fn test_decrease_key_batch_complexity<H: Heap<i32, i32>>(
                 let mut h = heap1.write();
                 // Insert elements with high priorities
                 for i in 0..1000 {
-                    handles.push(h.push(i + 10000, i));
+                    handles.push(h.push_with_handle(i + 10000, i));
                 }
             }
 
@@ -165,7 +165,7 @@ fn test_decrease_key_batch_complexity<H: Heap<i32, i32>>(
             {
                 let mut h = heap2.write();
                 for i in 0..2000 {
-                    handles.push(h.push(i + 20000, i));
+                    handles.push(h.push_with_handle(i + 20000, i));
                 }
             }
 
