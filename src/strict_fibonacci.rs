@@ -1233,6 +1233,14 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
             // Remove node from fix-list before modifying state
             self.fix_list_remove(node);
 
+            // Remove parent from fix-list BEFORE cut modifies its loss.
+            // This is critical: cut_with_loss_tracking increments parent's loss,
+            // so fix_list_remove must happen while parent is still in its old group.
+            let parent_was_fixed = (*parent_ptr.as_ptr()).is_fixed();
+            if parent_was_fixed {
+                self.fix_list_remove(parent_ptr);
+            }
+
             // Perform the cut - this also handles parent loss increment
             self.cut_with_loss_tracking(node);
 
@@ -1245,14 +1253,8 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
             // Update minimum pointer - the cut node may have smaller priority
             self.update_min(node);
 
-            // Check if parent needs fix-list update due to loss increment
-            // This is handled by cut_with_loss_tracking, but we need to
-            // update fix-list if parent moved to a different loss group
-            if (*parent_ptr.as_ptr()).is_fixed() {
-                // Parent was already in fix-list; its loss was incremented
-                // so it may need to move to a different group.
-                // For now, just update by re-adding (fix_list_add handles groups)
-                self.fix_list_remove(parent_ptr);
+            // Re-add parent to fix-list in correct group after loss increment
+            if parent_was_fixed {
                 self.fix_list_add(parent_ptr);
             }
         }
@@ -1322,13 +1324,36 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
                 (second, first)
             };
 
-            // Remove both from fix-list before modifying state
+            // Remove both nodes from fix-list before modifying state
             self.fix_list_remove(winner);
             self.fix_list_remove(loser);
 
             // Get parent pointers for both (for loss increment tracking)
             let winner_parent = (*winner.as_ptr()).parent;
             let loser_parent = (*loser.as_ptr()).parent;
+
+            // Remove parents from fix-list BEFORE cuts modify their loss.
+            // This is critical: cut_with_loss_tracking increments parent's loss,
+            // so fix_list_remove must happen while parent is still in its old group.
+            let winner_parent_was_fixed = winner_parent
+                .map(|p| (*p.as_ptr()).is_fixed())
+                .unwrap_or(false);
+            if winner_parent_was_fixed {
+                self.fix_list_remove(winner_parent.unwrap());
+            }
+
+            // Only remove loser's parent if different from winner's parent
+            let loser_parent_was_fixed = loser_parent
+                .map(|p| (*p.as_ptr()).is_fixed())
+                .unwrap_or(false);
+            let loser_parent_differs = match (loser_parent, winner_parent) {
+                (Some(lp), Some(wp)) => lp != wp,
+                (Some(_), None) => true,
+                _ => false,
+            };
+            if loser_parent_was_fixed && loser_parent_differs {
+                self.fix_list_remove(loser_parent.unwrap());
+            }
 
             // Cut both nodes from their parents with loss tracking
             self.cut_with_loss_tracking(winner);
@@ -1351,24 +1376,12 @@ impl<T, P: Ord> StrictFibonacciHeap<T, P> {
             // Update minimum pointer - the winner may have smaller priority than current min
             self.update_min(winner);
 
-            // Update parents' fix-list membership if needed
-            if let Some(parent_ptr) = winner_parent {
-                if (*parent_ptr.as_ptr()).is_fixed() {
-                    self.fix_list_remove(parent_ptr);
-                    self.fix_list_add(parent_ptr);
-                }
+            // Re-add parents to fix-list in correct groups after loss increment
+            if winner_parent_was_fixed {
+                self.fix_list_add(winner_parent.unwrap());
             }
-            // Only update loser's parent if it's different from winner's parent
-            // and is a fixed node
-            if let Some(loser_parent_ptr) = loser_parent {
-                let should_update = match winner_parent {
-                    Some(winner_parent_ptr) => loser_parent_ptr != winner_parent_ptr,
-                    None => true, // winner had no parent, so loser's parent is different
-                };
-                if should_update && (*loser_parent_ptr.as_ptr()).is_fixed() {
-                    self.fix_list_remove(loser_parent_ptr);
-                    self.fix_list_add(loser_parent_ptr);
-                }
+            if loser_parent_was_fixed && loser_parent_differs {
+                self.fix_list_add(loser_parent.unwrap());
             }
         }
 
