@@ -19,6 +19,7 @@
 //! | Heap | push | pop | decrease_key | Trait |
 //! |------|------|-----|--------------|-------|
 //! | [`simple_binary::SimpleBinaryHeap`] | O(log n) | O(log n) | - | `Heap` only |
+//! | [`skiplist::SkipListHeap`] | O(log n) | O(log n) | O(log n + m)* | `DecreaseKeyHeap` |
 //! | [`fibonacci::FibonacciHeap`] | O(1) am. | O(log n) am. | O(1) am. | `DecreaseKeyHeap` |
 //! | [`pairing::PairingHeap`] | O(1) am. | O(log n) am. | o(log n) am. | `DecreaseKeyHeap` |
 //! | [`rank_pairing::RankPairingHeap`] | O(1) am. | O(log n) am. | O(1) am. | `DecreaseKeyHeap` |
@@ -26,6 +27,9 @@
 //! | [`strict_fibonacci::StrictFibonacciHeap`] | O(1) worst | O(log n) worst | O(1) worst | `DecreaseKeyHeap` |
 //! | [`twothree::TwoThreeHeap`] | O(1) am. | O(log n) am. | O(1) am. | `DecreaseKeyHeap` |
 //! | [`skew_binomial::SkewBinomialHeap`] | O(1) | O(log n) | O(log n) | `DecreaseKeyHeap` |
+//!
+//! *SkipListHeap: m = duplicate (priority,id) pairs (typically 1).
+//! Requires `P: Copy`, `T: Default` for `decrease_key`.
 //!
 //! # Basic Example
 //!
@@ -59,6 +63,7 @@ pub mod pairing;
 pub mod rank_pairing;
 pub mod simple_binary;
 pub mod skew_binomial;
+pub mod skiplist;
 pub mod stdlib_compat;
 pub mod strict_fibonacci;
 pub mod traits;

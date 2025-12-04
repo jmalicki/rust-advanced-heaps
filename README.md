@@ -15,6 +15,7 @@ science literature that provide better amortized bounds:
 - **Binomial Heap** (1978): O(log n) `decrease_key` - foundational, simple
 - **Pairing Heap** (1986): o(log n) amortized `decrease_key` - simple, fast
 - **Fibonacci Heap** (1987): O(1) amortized `decrease_key` - optimal amortized
+- **Skip List Heap** (1990): O(log n) `decrease_key` - simple wrapper, good cache
 - **Skew Binomial Heap** (1996): O(1) insert, O(log n) `decrease_key`
 - **2-3 Heap** (1999): O(1) amortized `decrease_key` - simpler than Fibonacci
 - **Rank-Pairing Heap** (2011): O(1) amortized `decrease_key` - simple + optimal
@@ -39,10 +40,13 @@ This allows algorithms to be generic over heaps at the appropriate level of abst
 | **Binomial** | 1978 | O(log n) | O(log n) | O(log n) | O(log n) |
 | **Pairing** | 1986 | O(1) am. | O(log n) am. | **o(log n) am.** | O(1) |
 | **Fibonacci** | 1987 | O(1) am. | O(log n) am. | **O(1) am.** | O(1) |
+| **Skip List** | 1990 | O(log n) | O(log n) | O(log n + m)* | O(n log n) |
 | **Skew Binomial** | 1996 | O(1) | O(log n) | O(log n) | O(log n) |
 | **2-3 Heap** | 1999 | O(1) am. | O(log n) am. | **O(1) am.** | O(1) am. |
 | **Rank-Pairing** | 2011 | O(1) am. | O(log n) am. | **O(1) am.** | O(1) |
 | **Strict Fibonacci** | 2012 | O(1) worst | O(log n) worst | **O(1) worst** | O(1) worst |
+
+*m = duplicate (priority, id) pairs after merge, typically 1. Requires `T: Default`.
 
 All times are amortized (am.) where applicable. See the [Wikipedia
 comparison table](https://en.wikipedia.org/wiki/Fibonacci_heap#Summary_of_running_times)
@@ -150,6 +154,7 @@ pub trait DecreaseKeyHeap<T, P: Ord>: Heap<T, P> {
 - ✅ Binomial Heap (1978)
 - ✅ Pairing Heap (1986)
 - ✅ Fibonacci Heap (1987)
+- ✅ Skip List Heap (1990) - requires `T: Default` for `decrease_key`
 - ✅ Skew Binomial Heap (1996)
 - ✅ 2-3 Heap (1999)
 - ✅ Rank-Pairing Heap (2011)
@@ -192,5 +197,6 @@ Quick links:
 - [Fibonacci Heap - Wikipedia](https://en.wikipedia.org/wiki/Fibonacci_heap)
 - [Pairing Heap - Wikipedia](https://en.wikipedia.org/wiki/Pairing_heap)
 - [Binomial Heap - Wikipedia](https://en.wikipedia.org/wiki/Binomial_heap)
+- [Skip List - Wikipedia](https://en.wikipedia.org/wiki/Skip_list)
 - [Rank-Pairing Heap - Wikipedia](https://en.wikipedia.org/wiki/Rank-pairing_heap)
 - [Skew Binomial Heap - Wikipedia](https://en.wikipedia.org/wiki/Skew_binomial_heap)
