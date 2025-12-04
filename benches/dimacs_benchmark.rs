@@ -1065,6 +1065,98 @@ fn benchmark_all_heaps_by_rank(c: &mut Criterion) {
     group.finish();
 }
 
+/// Large-scale benchmark on California road network (1.9M nodes).
+///
+/// Tests high Dijkstra ranks (2^16, 2^17, 2^18, 2^19, 2^20) to stress-test heaps
+/// and determine if O(1) amortized decrease_key provides practical benefit at scale.
+/// This is the "galactic algorithm" test - do Fibonacci/Pairing heaps ever catch up?
+fn benchmark_california_high_rank(c: &mut Criterion) {
+    let path = "data/USA-road-d.CAL.gr";
+
+    if !Path::new(path).exists() {
+        eprintln!("California dataset not found. Download with: ./scripts/download-dimacs.sh CAL");
+        return;
+    }
+
+    eprintln!("Loading California graph (1.9M nodes, 4.7M edges)...");
+    let graph = match DimacsGraph::from_file(path) {
+        Ok(g) => Arc::new(g),
+        Err(e) => {
+            eprintln!("Failed to load California graph: {}", e);
+            return;
+        }
+    };
+    eprintln!(
+        "Graph loaded: {} nodes, {} edges",
+        graph.num_nodes, graph.num_edges
+    );
+
+    let mut group = c.benchmark_group("california_high_rank");
+    group.sample_size(10);
+
+    // High Dijkstra ranks: 2^16 (65K), 2^17 (131K), 2^18 (262K), 2^19 (524K), 2^20 (1M)
+    // With 1.9M nodes, we can test up to 2^20 comfortably
+    let rank_levels = [16, 17, 18, 19, 20];
+
+    for &log_rank in &rank_levels {
+        eprintln!("Generating queries for rank 2^{}...", log_rank);
+        let queries = generate_queries_for_rank(&graph, log_rank, 10, 11111 + log_rank as u64);
+
+        if queries.len() < 3 {
+            eprintln!("Not enough queries for rank 2^{}, skipping", log_rank);
+            continue;
+        }
+        eprintln!(
+            "Generated {} queries for rank 2^{}",
+            queries.len(),
+            log_rank
+        );
+
+        let rank_label = format!("2^{}", log_rank);
+
+        // Optimized (decrease_key) implementations - the ones that should shine at scale
+        group.bench_with_input(
+            BenchmarkId::new("fibonacci_opt", &rank_label),
+            &queries,
+            |b, qs| b.iter(|| black_box(run_queries_fibonacci_opt(&graph, qs))),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("pairing_opt", &rank_label),
+            &queries,
+            |b, qs| b.iter(|| black_box(run_queries_pairing_opt(&graph, qs))),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("strict_fibonacci_opt", &rank_label),
+            &queries,
+            |b, qs| b.iter(|| black_box(run_queries_strict_fibonacci_opt(&graph, qs))),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("twothree_opt", &rank_label),
+            &queries,
+            |b, qs| b.iter(|| black_box(run_queries_twothree_opt(&graph, qs))),
+        );
+
+        // Lazy implementations - simpler, but O(log n) per relaxation
+        group.bench_with_input(
+            BenchmarkId::new("simple_binary_lazy", &rank_label),
+            &queries,
+            |b, qs| b.iter(|| black_box(run_queries_simple_binary_lazy(&graph, qs))),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("fibonacci_lazy", &rank_label),
+            &queries,
+            |b, qs| b.iter(|| black_box(run_queries_fibonacci_lazy(&graph, qs))),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("pairing_lazy", &rank_label),
+            &queries,
+            |b, qs| b.iter(|| black_box(run_queries_pairing_lazy(&graph, qs))),
+        );
+    }
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     benchmark_random_queries,
@@ -1074,6 +1166,7 @@ criterion_group!(
     benchmark_real_dimacs_by_rank,
     benchmark_correctness_check,
     benchmark_all_heaps_by_rank,
+    benchmark_california_high_rank,
 );
 
 criterion_main!(benches);
