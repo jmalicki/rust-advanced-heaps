@@ -85,8 +85,8 @@ download_dataset() {
 list_datasets() {
     echo "Available DIMACS datasets:"
     echo ""
-    printf "  %-6s %-20s %s\n" "Name" "Size" "Description"
-    printf "  %-6s %-20s %s\n" "----" "----" "-----------"
+    printf "  %-6s %-25s %s\n" "Name" "Size" "Description"
+    printf "  %-6s %-25s %s\n" "----" "----" "-----------"
     printf "  %-6s %-25s %s\n" "NY" "264K nodes, 730K edges" "New York (default)"
     printf "  %-6s %-25s %s\n" "BAY" "321K nodes, 800K edges" "San Francisco Bay"
     printf "  %-6s %-25s %s\n" "COL" "436K nodes, 1M edges" "Colorado"

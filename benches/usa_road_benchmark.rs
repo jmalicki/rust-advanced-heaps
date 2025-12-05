@@ -125,7 +125,8 @@ mod usa_benchmark {
                             let to: u32 = parts[2].parse().unwrap_or(0);
                             let weight: u32 = parts[3].parse().unwrap_or(1);
 
-                            if from > 0 && from <= num_nodes {
+                            if from > 0 && from <= num_nodes && to > 0 && (to as usize) <= num_nodes
+                            {
                                 adjacency[from].push((to, weight));
                             }
                         }
@@ -759,7 +760,9 @@ mod usa_benchmark {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
-    // Skip benchmark harness args
+    // Skip benchmark harness args.
+    // cargo bench passes additional arguments before our "--" separator,
+    // so we skip until we find our known commands or the separator.
     let args: Vec<&str> = args
         .iter()
         .map(|s| s.as_str())
