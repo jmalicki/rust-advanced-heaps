@@ -937,6 +937,512 @@ impl<T, P: Ord> BinomialHeap<T, P> {
     }
 }
 
+// ============================================================================
+// SlotMap-based implementation (experimental)
+// ============================================================================
+
+#[cfg(feature = "arena-storage")]
+mod arena {
+    use super::*;
+    use crate::storage::{NodeStorage, SlotMapNodeKey, SlotMapStorage, SlotMapWeakKey};
+
+    /// Node type for SlotMap-based Binomial Heap
+    pub struct ArenaNode<T, P> {
+        /// Priority for heap ordering
+        pub(crate) priority: P,
+        /// Parent node - weak reference to avoid cycles
+        pub(crate) parent: Option<SlotMapWeakKey>,
+        /// First child in child list (None if leaf)
+        pub(crate) child: Option<SlotMapNodeKey>,
+        /// Next sibling in parent's child list (None if last child)
+        pub(crate) sibling: Option<SlotMapNodeKey>,
+        /// Degree: number of children
+        pub(crate) degree: Rank,
+        /// The item stored in the heap
+        pub(crate) item: T,
+    }
+
+    /// Handle to an element in a Binomial heap (arena-based)
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct BinomialHandleArena {
+        node: SlotMapWeakKey,
+    }
+
+    impl Handle for BinomialHandleArena {}
+
+    /// Binomial Heap with SlotMap-based arena storage (experimental)
+    ///
+    /// This implementation uses `slotmap` for contiguous node storage,
+    /// providing better cache locality at the cost of manual lifetime management.
+    ///
+    /// # Feature Flag
+    /// Requires the `arena-storage` feature to be enabled.
+    pub struct BinomialHeapArena<T, P: Ord> {
+        storage: SlotMapStorage<ArenaNode<T, P>>,
+        trees: Vec<Option<SlotMapNodeKey>>,
+        min: Option<SlotMapWeakKey>,
+        len: usize,
+    }
+
+    impl<T, P: Ord> Heap<T, P> for BinomialHeapArena<T, P> {
+        fn new() -> Self {
+            Self {
+                storage: SlotMapStorage::default(),
+                trees: Vec::new(),
+                min: None,
+                len: 0,
+            }
+        }
+
+        fn is_empty(&self) -> bool {
+            self.len == 0
+        }
+
+        fn len(&self) -> usize {
+            self.len
+        }
+
+        fn push(&mut self, priority: P, item: T) {
+            let _ = self.push_with_handle(priority, item);
+        }
+
+        fn peek(&self) -> Option<(&P, &T)> {
+            let min_weak = self.min.as_ref()?;
+            let min_key = self.storage.upgrade(min_weak)?;
+            let node = self.storage.get(&min_key)?;
+            Some((&node.priority, &node.item))
+        }
+
+        fn pop(&mut self) -> Option<(P, T)> {
+            let min_weak = self.min.take()?;
+            let min_key = self.storage.upgrade(&min_weak)?;
+
+            // Remove minimum tree from trees array
+            for i in 0..self.trees.len() {
+                if let Some(tree_key) = self.trees[i] {
+                    if SlotMapStorage::<ArenaNode<T, P>>::keys_eq(&tree_key, &min_key) {
+                        self.trees[i] = None;
+                        break;
+                    }
+                }
+            }
+
+            // Collect all children (kept in self.storage, just like SkewBinomialHeapArena)
+            let first_child = self
+                .storage
+                .get_mut(&min_key)
+                .expect("min_key must be valid")
+                .child
+                .take();
+            let mut children_to_insert: Vec<SlotMapNodeKey> = Vec::new();
+
+            if let Some(first) = first_child {
+                let mut current = Some(first);
+                while let Some(curr) = current {
+                    let curr_node = self
+                        .storage
+                        .get_mut(&curr)
+                        .expect("child key must be valid");
+                    let next = curr_node.sibling.take();
+                    curr_node.parent = None;
+                    children_to_insert.push(curr);
+                    current = next;
+                }
+            }
+
+            // Remove the min node from storage and extract priority/item
+            let node = self.storage.remove(min_key).expect("min_key must be valid");
+            let priority = node.priority;
+            let item = node.item;
+
+            // Reinsert each child tree using carry propagation
+            for child in children_to_insert {
+                self.insert_tree(child);
+            }
+
+            // Find new minimum
+            self.find_and_update_min();
+            self.len -= 1;
+
+            Some((priority, item))
+        }
+
+        // Note: BinomialHeapArena does NOT implement MergeableHeap.
+        // Arena storage cannot efficiently support merging while maintaining handle validity,
+        // because handles from the merged-in heap would become invalid when nodes are moved
+        // to a different storage arena.
+    }
+
+    impl<T, P: Ord> DecreaseKeyHeap<T, P> for BinomialHeapArena<T, P> {
+        type Handle = BinomialHandleArena;
+
+        fn push_with_handle(&mut self, priority: P, item: T) -> Self::Handle {
+            let node_key = self.storage.insert(ArenaNode {
+                priority,
+                parent: None,
+                child: None,
+                sibling: None,
+                degree: 0,
+                item,
+            });
+
+            let handle = BinomialHandleArena {
+                node: self.storage.downgrade(&node_key),
+            };
+
+            // Merge this single-node tree into the heap using carry propagation
+            let mut carry: Option<SlotMapNodeKey> = Some(node_key);
+            let mut degree = 0;
+
+            while carry.is_some() {
+                if degree >= self.trees.len() {
+                    self.trees.push(None);
+                }
+
+                if self.trees[degree].is_none() {
+                    self.trees[degree] = carry;
+                    carry = None;
+                } else {
+                    let existing = self.trees[degree].take().unwrap();
+                    let new_tree = carry.unwrap();
+                    carry = Some(self.link_trees(existing, new_tree));
+                    degree += 1;
+                }
+            }
+
+            self.len += 1;
+            self.find_and_update_min();
+
+            handle
+        }
+
+        fn decrease_key(
+            &mut self,
+            handle: &Self::Handle,
+            new_priority: P,
+        ) -> Result<(), HeapError> {
+            let node_key = self
+                .storage
+                .upgrade(&handle.node)
+                .ok_or(HeapError::PriorityNotDecreased)?;
+
+            // Check: new priority must actually be less
+            {
+                let node = self
+                    .storage
+                    .get(&node_key)
+                    .ok_or(HeapError::InvalidHandle)?;
+                if new_priority >= node.priority {
+                    return Err(HeapError::PriorityNotDecreased);
+                }
+            }
+
+            // Update the priority
+            self.storage.get_mut(&node_key).unwrap().priority = new_priority;
+
+            // Bubble up to restore heap property
+            self.bubble_up(node_key);
+
+            Ok(())
+        }
+    }
+
+    impl<T, P: Ord> BinomialHeapArena<T, P> {
+        /// Inserts a tree into the heap using carry propagation
+        fn insert_tree(&mut self, mut tree_key: SlotMapNodeKey) {
+            loop {
+                let degree = self.storage.get(&tree_key).unwrap().degree as usize;
+
+                while self.trees.len() <= degree {
+                    self.trees.push(None);
+                }
+
+                if self.trees[degree].is_some() {
+                    let existing_key = self.trees[degree].take().unwrap();
+                    tree_key = self.link_trees(existing_key, tree_key);
+                } else {
+                    self.trees[degree] = Some(tree_key);
+                    break;
+                }
+            }
+        }
+
+        /// Links two binomial trees of the same degree into one tree of degree+1
+        fn link_trees(&mut self, a_key: SlotMapNodeKey, b_key: SlotMapNodeKey) -> SlotMapNodeKey {
+            let a_priority_le_b = {
+                let a = self.storage.get(&a_key).unwrap();
+                let b = self.storage.get(&b_key).unwrap();
+                a.priority <= b.priority
+            };
+
+            let (parent_key, child_key) = if a_priority_le_b {
+                (a_key, b_key)
+            } else {
+                (b_key, a_key)
+            };
+
+            // Link child as a new first child of parent
+            let parent_old_child = self.storage.get(&parent_key).unwrap().child;
+            let parent_weak = self.storage.downgrade(&parent_key);
+
+            {
+                let child = self.storage.get_mut(&child_key).unwrap();
+                child.parent = Some(parent_weak);
+                child.sibling = parent_old_child;
+            }
+
+            {
+                let parent = self.storage.get_mut(&parent_key).unwrap();
+                parent.child = Some(child_key);
+                parent.degree += 1;
+            }
+
+            parent_key
+        }
+
+        /// Bubbles up a node to maintain heap property
+        fn bubble_up(&mut self, node_key: SlotMapNodeKey) {
+            let current_key = node_key;
+            let mut did_swap = false;
+
+            loop {
+                // Get parent weak ref
+                let parent_weak = {
+                    let node = self.storage.get(&current_key).unwrap();
+                    match &node.parent {
+                        Some(p) => *p,
+                        None => break, // Reached root
+                    }
+                };
+
+                // Upgrade to strong key
+                let parent_key = match self.storage.upgrade(&parent_weak) {
+                    Some(p) => p,
+                    None => break, // Parent gone
+                };
+
+                // Check if we should swap
+                let should_swap = {
+                    let current = self.storage.get(&current_key).unwrap();
+                    let parent = self.storage.get(&parent_key).unwrap();
+                    current.priority < parent.priority
+                };
+
+                if !should_swap {
+                    break;
+                }
+
+                // Swap node positions
+                self.swap_node_with_parent(current_key, parent_key);
+                did_swap = true;
+            }
+
+            // If we did swaps and current is now a root, fix the tree slot
+            if did_swap {
+                let is_root = self.storage.get(&current_key).unwrap().parent.is_none();
+                if is_root {
+                    let current_degree = self.storage.get(&current_key).unwrap().degree as usize;
+
+                    // Find and remove current from its old slot
+                    let mut old_slot = None;
+                    for i in 0..self.trees.len() {
+                        if let Some(tree_key) = self.trees[i] {
+                            if SlotMapStorage::<ArenaNode<T, P>>::keys_eq(&tree_key, &current_key) {
+                                old_slot = Some(i);
+                                break;
+                            }
+                        }
+                    }
+
+                    if let Some(old_i) = old_slot {
+                        if old_i != current_degree {
+                            self.trees[old_i] = None;
+
+                            let mut tree_to_place = current_key;
+                            let mut target_degree = current_degree;
+
+                            while self.trees.len() <= target_degree {
+                                self.trees.push(None);
+                            }
+
+                            loop {
+                                if let Some(existing) = self.trees[target_degree].take() {
+                                    tree_to_place = self.link_trees(tree_to_place, existing);
+                                    target_degree =
+                                        self.storage.get(&tree_to_place).unwrap().degree as usize;
+                                    while self.trees.len() <= target_degree {
+                                        self.trees.push(None);
+                                    }
+                                } else {
+                                    self.trees[target_degree] = Some(tree_to_place);
+                                    break;
+                                }
+                            }
+
+                            self.find_and_update_min();
+                            return;
+                        }
+                    }
+                }
+            }
+
+            self.update_min_if_needed(current_key);
+        }
+
+        /// Swaps a child node with its parent
+        fn swap_node_with_parent(&mut self, child_key: SlotMapNodeKey, parent_key: SlotMapNodeKey) {
+            // Step 1: Remove child from parent's child list
+            let child_sibling = self.storage.get(&child_key).unwrap().sibling;
+            {
+                let parent = self.storage.get_mut(&parent_key).unwrap();
+                if let Some(first_child_key) = parent.child {
+                    if SlotMapStorage::<ArenaNode<T, P>>::keys_eq(&first_child_key, &child_key) {
+                        parent.child = child_sibling;
+                    } else {
+                        // Find and remove from sibling chain
+                        let mut prev_key = first_child_key;
+                        loop {
+                            let next = self.storage.get(&prev_key).unwrap().sibling;
+                            match next {
+                                Some(next_key)
+                                    if SlotMapStorage::<ArenaNode<T, P>>::keys_eq(
+                                        &next_key, &child_key,
+                                    ) =>
+                                {
+                                    self.storage.get_mut(&prev_key).unwrap().sibling =
+                                        child_sibling;
+                                    break;
+                                }
+                                Some(next_key) => prev_key = next_key,
+                                None => break,
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Step 2: Save parent's old position info
+            let grandparent_weak = self.storage.get(&parent_key).unwrap().parent;
+            let parent_sibling = self.storage.get(&parent_key).unwrap().sibling;
+
+            // Step 3: Child takes parent's position
+            {
+                let child = self.storage.get_mut(&child_key).unwrap();
+                child.parent = grandparent_weak;
+                child.sibling = parent_sibling;
+            }
+
+            // Step 4: Update grandparent's child pointer (or trees array if parent was root)
+            if let Some(ref gp_weak) = grandparent_weak {
+                if let Some(gp_key) = self.storage.upgrade(gp_weak) {
+                    let gp = self.storage.get_mut(&gp_key).unwrap();
+                    if let Some(first_key) = gp.child {
+                        if SlotMapStorage::<ArenaNode<T, P>>::keys_eq(&first_key, &parent_key) {
+                            gp.child = Some(child_key);
+                        } else {
+                            // Find parent in sibling chain and replace
+                            let mut prev_key = first_key;
+                            loop {
+                                let next = self.storage.get(&prev_key).unwrap().sibling;
+                                match next {
+                                    Some(next_key)
+                                        if SlotMapStorage::<ArenaNode<T, P>>::keys_eq(
+                                            &next_key,
+                                            &parent_key,
+                                        ) =>
+                                    {
+                                        self.storage.get_mut(&prev_key).unwrap().sibling =
+                                            Some(child_key);
+                                        break;
+                                    }
+                                    Some(next_key) => prev_key = next_key,
+                                    None => break,
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Parent was a root - update trees array
+                for i in 0..self.trees.len() {
+                    if let Some(tree_key) = self.trees[i] {
+                        if SlotMapStorage::<ArenaNode<T, P>>::keys_eq(&tree_key, &parent_key) {
+                            self.trees[i] = Some(child_key);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Step 5: Parent becomes a child of child
+            let child_old_children = self.storage.get_mut(&child_key).unwrap().child.take();
+            let child_weak = self.storage.downgrade(&child_key);
+            {
+                let parent = self.storage.get_mut(&parent_key).unwrap();
+                parent.sibling = child_old_children;
+                parent.parent = Some(child_weak);
+            }
+            self.storage.get_mut(&child_key).unwrap().child = Some(parent_key);
+
+            // Step 6: Update degrees
+            self.storage.get_mut(&child_key).unwrap().degree += 1;
+            let parent = self.storage.get_mut(&parent_key).unwrap();
+            if parent.degree > 0 {
+                parent.degree -= 1;
+            }
+        }
+
+        /// Updates the minimum pointer if the given node has a smaller priority
+        fn update_min_if_needed(&mut self, node_key: SlotMapNodeKey) {
+            let node_priority = &self.storage.get(&node_key).unwrap().priority;
+
+            let should_update = match &self.min {
+                Some(min_weak) => {
+                    if let Some(min_key) = self.storage.upgrade(min_weak) {
+                        node_priority < &self.storage.get(&min_key).unwrap().priority
+                    } else {
+                        true
+                    }
+                }
+                None => true,
+            };
+
+            if should_update {
+                self.min = Some(self.storage.downgrade(&node_key));
+            }
+        }
+
+        /// Finds and updates the minimum pointer by scanning all roots
+        fn find_and_update_min(&mut self) {
+            self.min = None;
+            let mut min_priority: Option<&P> = None;
+
+            for root_key in self.trees.iter().flatten() {
+                if let Some(node) = self.storage.get(root_key) {
+                    let should_update = match min_priority {
+                        None => true,
+                        Some(mp) => node.priority < *mp,
+                    };
+                    if should_update {
+                        min_priority = Some(&node.priority);
+                        self.min = Some(self.storage.downgrade(root_key));
+                    }
+                }
+            }
+        }
+    }
+
+    impl<T, P: Ord> Default for BinomialHeapArena<T, P> {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+}
+
+// Re-export arena types when feature is enabled
+#[cfg(feature = "arena-storage")]
+pub use arena::{BinomialHandleArena, BinomialHeapArena};
+
 // Note: Most tests are in tests/generic_heap_tests.rs which provides comprehensive
 // test coverage for all heap implementations.
 
