@@ -232,13 +232,13 @@ BENCH_PIN_CPU=0 cargo bench --features perf-counters --bench usa_road_benchmark 
 | --- | --- |
 | `generate` | Generate queries and save to `data/usa_queries.json` |
 | `run-parallel` | Run all heaps in parallel on separate CPUs |
-| `run <heap>` | Run a single heap (use with `BENCH_PIN_CPU=N`) |
+| `run <heap> [heap2 ...]` | Run one or more heaps (use with `BENCH_PIN_CPU=N`) |
 | `list` | List available heap implementations |
 | `help` | Show usage information |
 
 ### Available Heaps
 
-The benchmark includes 11 heap implementations:
+The benchmark includes 11 heap implementations (13 with `arena-storage` feature):
 
 | Heap | Algorithm | Description |
 | --- | --- | --- |
@@ -253,6 +253,8 @@ The benchmark includes 11 heap implementations:
 | `strict_fib_opt` | optimized | Strict Fibonacci heap |
 | `binomial_opt` | optimized | Binomial heap |
 | `skew_binomial_opt` | optimized | Skew binomial heap |
+| `binomial_arena` | optimized | Binomial heap with arena storage (requires `arena-storage` feature) |
+| `skew_binomial_arena` | optimized | Skew binomial heap with arena storage (requires `arena-storage` feature) |
 
 ### Output Format
 
