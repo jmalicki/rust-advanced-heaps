@@ -44,6 +44,8 @@
 mod usa_benchmark {
     use perf_event::{events::Hardware, Builder, Group};
     use rust_advanced_heaps::binomial::BinomialHeap;
+    #[cfg(feature = "arena-storage")]
+    use rust_advanced_heaps::binomial::BinomialHeapArena;
     use rust_advanced_heaps::fibonacci::FibonacciHeap;
     use rust_advanced_heaps::hollow::HollowHeap;
     use rust_advanced_heaps::pairing::PairingHeap;
@@ -51,6 +53,8 @@ mod usa_benchmark {
     use rust_advanced_heaps::rank_pairing::RankPairingHeap;
     use rust_advanced_heaps::simple_binary::SimpleBinaryHeap;
     use rust_advanced_heaps::skew_binomial::SkewBinomialHeap;
+    #[cfg(feature = "arena-storage")]
+    use rust_advanced_heaps::skew_binomial::SkewBinomialHeapArena;
     use rust_advanced_heaps::strict_fibonacci::StrictFibonacciHeap;
     use rust_advanced_heaps::twothree::TwoThreeHeap;
     use std::collections::HashMap;
@@ -508,6 +512,16 @@ mod usa_benchmark {
                     let start = DimacsNode::new(query.source, query.target, Arc::clone(graph));
                     shortest_path::<_, SkewBinomialHeap<usize, _>>(&start).is_some()
                 }),
+                #[cfg(feature = "arena-storage")]
+                "binomial_arena" => measure_query(|| {
+                    let start = DimacsNode::new(query.source, query.target, Arc::clone(graph));
+                    shortest_path::<_, BinomialHeapArena<usize, _>>(&start).is_some()
+                }),
+                #[cfg(feature = "arena-storage")]
+                "skew_binomial_arena" => measure_query(|| {
+                    let start = DimacsNode::new(query.source, query.target, Arc::clone(graph));
+                    shortest_path::<_, SkewBinomialHeapArena<usize, _>>(&start).is_some()
+                }),
                 _ => {
                     eprintln!("Unknown heap: {}", heap_name);
                     continue;
@@ -564,7 +578,7 @@ mod usa_benchmark {
     // Parallel execution
     // ========================================================================
 
-    const ALL_HEAPS: &[&str] = &[
+    const BASE_HEAPS: &[&str] = &[
         "simple_binary",
         "pairing_lazy",
         "pairing_opt",
@@ -578,19 +592,28 @@ mod usa_benchmark {
         "skew_binomial_opt",
     ];
 
+    #[cfg(feature = "arena-storage")]
+    const ARENA_HEAPS: &[&str] = &["binomial_arena", "skew_binomial_arena"];
+
+    fn all_heaps() -> Vec<&'static str> {
+        let mut heaps: Vec<&str> = BASE_HEAPS.to_vec();
+        #[cfg(feature = "arena-storage")]
+        heaps.extend_from_slice(ARENA_HEAPS);
+        heaps
+    }
+
     pub fn run_parallel() {
+        let heaps = all_heaps();
+
         // Get the path to the current executable
         let exe = std::env::current_exe().expect("Failed to get current executable");
 
-        eprintln!(
-            "Launching {} heap benchmarks in parallel...",
-            ALL_HEAPS.len()
-        );
+        eprintln!("Launching {} heap benchmarks in parallel...", heaps.len());
         eprintln!("Executable: {:?}", exe);
 
         let mut children = Vec::new();
 
-        for (cpu, heap_name) in ALL_HEAPS.iter().enumerate() {
+        for (cpu, heap_name) in heaps.iter().enumerate() {
             eprintln!("  Starting {} on CPU {}", heap_name, cpu);
 
             // The benchmark binary is already compiled - we just need to pass the right args
@@ -743,14 +766,14 @@ mod usa_benchmark {
         eprintln!("  BENCH_PIN_CPU=N   Pin to CPU N (used by run command)");
         eprintln!();
         eprintln!("Available heaps:");
-        for heap in ALL_HEAPS {
+        for heap in all_heaps() {
             eprintln!("  {}", heap);
         }
     }
 
     pub fn cmd_list() {
         eprintln!("Available heap implementations:");
-        for (i, heap) in ALL_HEAPS.iter().enumerate() {
+        for (i, heap) in all_heaps().iter().enumerate() {
             eprintln!("  {:2}. {}", i, heap);
         }
     }
