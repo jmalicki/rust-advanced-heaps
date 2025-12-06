@@ -43,6 +43,9 @@ ctor = "0.2"
 parking_lot = "0.12"
 # CPU pinning for more stable benchmarks
 core_affinity = "0.8"
+# JSON serialization for benchmark queries
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
 # Hardware performance counters for benchmarks (Linux only)
 # Use with: cargo bench --features perf-counters
@@ -60,6 +63,10 @@ harness = false
 
 [[bench]]
 name = "perf_table"
+harness = false
+
+[[bench]]
+name = "usa_road_benchmark"
 harness = false
 
 # Commands for cargo-cmd (install with: cargo install cargo-cmd)
