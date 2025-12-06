@@ -211,9 +211,11 @@ sudo sysctl kernel.perf_event_paranoid=1
 The benchmark runs in two phases:
 
 ```bash
-# Step 1: Generate queries across Dijkstra rank buckets (2^10, 2^12, 2^14, 2^16, 2^18)
-# Queries are saved to data/usa_queries.json for reproducibility
-cargo bench --features perf-counters --bench usa_road_benchmark -- generate
+# Step 1: Generate queries across Dijkstra rank buckets
+# Default: 2^10 to 2^16, or specify max rank (e.g., 20 for 2^20, max 24)
+cargo bench --features perf-counters --bench usa_road_benchmark -- generate      # default: up to 2^16
+cargo bench --features perf-counters --bench usa_road_benchmark -- generate 20   # up to 2^20
+cargo bench --features perf-counters --bench usa_road_benchmark -- generate 24   # up to 2^24 (maximum)
 
 # Step 2: Run all heaps in parallel on separate pinned CPUs
 cargo bench --features perf-counters --bench usa_road_benchmark -- run-parallel
@@ -230,7 +232,7 @@ BENCH_PIN_CPU=0 cargo bench --features perf-counters --bench usa_road_benchmark 
 
 | Command | Description |
 | --- | --- |
-| `generate` | Generate queries and save to `data/usa_queries.json` |
+| `generate [MAX_RANK]` | Generate queries up to 2^MAX_RANK (default: 16, max: 24) |
 | `run-parallel` | Run all heaps in parallel on separate CPUs |
 | `run <heap> [heap2 ...]` | Run one or more heaps (use with `BENCH_PIN_CPU=N`) |
 | `list` | List available heap implementations |

@@ -74,13 +74,22 @@ mod usa_benchmark {
     const QUERIES_PATH: &str = "data/usa_queries.json";
     const RESULTS_DIR: &str = "data";
 
-    /// Dijkstra rank buckets: 2^10, 2^12, 2^14, 2^16, 2^18
-    /// (skip 2^8 as local queries are rare on large graphs)
-    /// (skip 2^20+ as finding queries with exact rank is too slow)
-    const RANK_BUCKETS: &[u32] = &[10, 12, 14, 16, 18];
+    /// Default max rank (2^16 = 65536 nodes settled)
+    pub const DEFAULT_MAX_RANK: u32 = 16;
+
+    /// Minimum rank bucket (2^10 = 1024 nodes settled)
+    const MIN_RANK: u32 = 10;
+
+    /// Maximum allowed rank (2^24 = 16M nodes settled)
+    const MAX_RANK: u32 = 24;
 
     /// Number of queries per rank bucket
     const QUERIES_PER_BUCKET: usize = 2;
+
+    /// Get rank buckets from min to max (inclusive), stepping by 2
+    fn rank_buckets(max_rank: u32) -> Vec<u32> {
+        (MIN_RANK..=max_rank).step_by(2).collect()
+    }
 
     // ========================================================================
     // Graph parsing
@@ -191,15 +200,16 @@ mod usa_benchmark {
     }
 
     /// Generate queries for each rank bucket
-    pub fn generate_queries(graph: &DimacsGraph, seed: u64) -> QuerySet {
+    pub fn generate_queries(graph: &DimacsGraph, seed: u64, max_rank: u32) -> QuerySet {
         use std::cmp::Reverse;
         use std::collections::BinaryHeap;
 
         let mut rng = Lcg::new(seed);
         let mut queries = Vec::new();
         let mut query_id = 0;
+        let buckets = rank_buckets(max_rank);
 
-        for &target_log_rank in RANK_BUCKETS {
+        for &target_log_rank in &buckets {
             let target_rank_min = 1u32 << target_log_rank;
             let target_rank_max = 1u32 << (target_log_rank + 1);
 
@@ -596,10 +606,16 @@ mod usa_benchmark {
     const ARENA_HEAPS: &[&str] = &["binomial_arena", "skew_binomial_arena"];
 
     fn all_heaps() -> Vec<&'static str> {
-        let mut heaps: Vec<&str> = BASE_HEAPS.to_vec();
         #[cfg(feature = "arena-storage")]
-        heaps.extend_from_slice(ARENA_HEAPS);
-        heaps
+        {
+            let mut heaps: Vec<&str> = BASE_HEAPS.to_vec();
+            heaps.extend_from_slice(ARENA_HEAPS);
+            heaps
+        }
+        #[cfg(not(feature = "arena-storage"))]
+        {
+            BASE_HEAPS.to_vec()
+        }
     }
 
     pub fn run_parallel() {
@@ -676,12 +692,15 @@ mod usa_benchmark {
     // Main entry points
     // ========================================================================
 
-    pub fn cmd_generate() {
+    pub fn cmd_generate(max_rank: u32) {
         if !Path::new(GRAPH_PATH).exists() {
             eprintln!("ERROR: USA road network data not found at {}", GRAPH_PATH);
             eprintln!("Download with: ./scripts/download-dimacs.sh USA");
             std::process::exit(1);
         }
+
+        let max_rank = max_rank.clamp(MIN_RANK, MAX_RANK);
+        let buckets = rank_buckets(max_rank);
 
         eprintln!("Loading graph...");
         let start = Instant::now();
@@ -694,10 +713,12 @@ mod usa_benchmark {
         );
 
         eprintln!(
-            "\nGenerating queries across {} rank buckets...",
-            RANK_BUCKETS.len()
+            "\nGenerating queries across {} rank buckets (2^{} to 2^{})...",
+            buckets.len(),
+            MIN_RANK,
+            max_rank
         );
-        let query_set = generate_queries(&graph, 42);
+        let query_set = generate_queries(&graph, 42, max_rank);
 
         eprintln!(
             "\nSaving {} queries to {}...",
@@ -756,11 +777,22 @@ mod usa_benchmark {
         eprintln!("  cargo bench --features perf-counters --bench usa_road_benchmark -- <command>");
         eprintln!();
         eprintln!("Commands:");
-        eprintln!("  generate      Generate queries across Dijkstra rank buckets");
-        eprintln!("  run <heap>    Run benchmark for a specific heap");
-        eprintln!("  run-parallel  Run all heaps in parallel on separate CPUs");
-        eprintln!("  list          List available heap implementations");
-        eprintln!("  help          Show this help");
+        eprintln!(
+            "  generate [MAX_RANK]  Generate queries (default: 2^{}, max: 2^{})",
+            DEFAULT_MAX_RANK, MAX_RANK
+        );
+        eprintln!("  run <heap> [heap2..] Run benchmark for one or more heaps");
+        eprintln!("  run-parallel         Run all heaps in parallel on separate CPUs");
+        eprintln!("  list                 List available heap implementations");
+        eprintln!("  help                 Show this help");
+        eprintln!();
+        eprintln!("Examples:");
+        eprintln!(
+            "  ... -- generate         Generate queries up to 2^{} (default)",
+            DEFAULT_MAX_RANK
+        );
+        eprintln!("  ... -- generate 20      Generate queries up to 2^20");
+        eprintln!("  ... -- generate 24      Generate queries up to 2^24 (maximum)");
         eprintln!();
         eprintln!("Environment:");
         eprintln!("  BENCH_PIN_CPU=N   Pin to CPU N (used by run command)");
@@ -800,16 +832,25 @@ fn main() {
         .collect();
 
     match args.first().copied() {
-        Some("generate") => usa_benchmark::cmd_generate(),
+        Some("generate") => {
+            let max_rank = args
+                .get(1)
+                .and_then(|s| s.parse::<u32>().ok())
+                .unwrap_or(usa_benchmark::DEFAULT_MAX_RANK);
+            usa_benchmark::cmd_generate(max_rank);
+        }
         Some("run-parallel") => usa_benchmark::cmd_run_parallel(),
         Some("run") => {
-            if let Some(heap_name) = args.get(1) {
-                usa_benchmark::cmd_run(heap_name);
-            } else {
+            let heaps: Vec<_> = args.iter().skip(1).collect();
+            if heaps.is_empty() {
                 eprintln!("ERROR: Missing heap name");
-                eprintln!("Usage: ... -- run <heap_name>");
+                eprintln!("Usage: ... -- run <heap_name> [heap2 ...]");
                 usa_benchmark::cmd_list();
                 std::process::exit(1);
+            }
+            // Support multiple heaps: run heap1 heap2 heap3
+            for heap in heaps {
+                usa_benchmark::cmd_run(heap);
             }
         }
         Some("list") => usa_benchmark::cmd_list(),
