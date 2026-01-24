@@ -95,23 +95,34 @@ impl<T, P> Handle for FibonacciHandle<T, P> {}
 /// Internal node structure for Fibonacci heap
 ///
 /// Each node maintains:
-/// - `item` and `priority`: The data stored in the heap
+/// - `priority`: The priority value (compared frequently during consolidation)
+/// - `marked`: Flag used in cascading cuts (see decrease_key)
 /// - `parent`: Weak reference to parent node (empty if root)
 /// - `children`: Vec of strong references to children
-/// - `marked`: Flag used in cascading cuts (see decrease_key)
+/// - `item`: The data stored in the heap (only accessed on pop)
+///
+/// Fields are ordered by access frequency for cache efficiency:
+/// - HOT fields first (priority, marked) - accessed during consolidation & decrease_key
+/// - Medium fields next (parent, children) - structure pointers for traversal
+/// - COLD field last (item) - only accessed when extracting from heap
 ///
 /// Children are stored in a Vec rather than a circular linked list.
 /// This simplifies the implementation while maintaining the same
 /// asymptotic complexity (degree is O(log n)).
 struct Node<T, P> {
-    item: T,
+    // HOT fields - accessed during consolidation & decrease_key
     priority: P,
+    /// Marked flag: true if this node has lost a child (used in cascading cuts)
+    marked: bool,
+
+    // Medium fields - structure pointers
     /// Weak reference to parent node (empty if this is a root)
     parent: Weak<RefCell<Node<T, P>>>,
     /// Strong references to children
     children: Vec<Rc<RefCell<Node<T, P>>>>,
-    /// Marked flag: true if this node has lost a child (used in cascading cuts)
-    marked: bool,
+
+    // COLD field - only accessed on pop
+    item: T,
 }
 
 /// Type alias for a reference-counted node pointer
@@ -120,11 +131,14 @@ type NodeRef<T, P> = Rc<RefCell<Node<T, P>>>;
 impl<T, P> Node<T, P> {
     fn new(item: T, priority: P) -> Self {
         Node {
-            item,
+            // HOT fields
             priority,
+            marked: false,
+            // Medium fields
             parent: Weak::new(),
             children: Vec::new(),
-            marked: false,
+            // COLD field
+            item,
         }
     }
 
