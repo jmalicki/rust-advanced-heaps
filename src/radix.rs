@@ -85,6 +85,9 @@
 //! ```
 
 use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError};
+#[cfg(feature = "access_tracking")]
+#[allow(unused_imports)]
+use crate::{track, track_op};
 use std::cell::Cell;
 use std::rc::Rc;
 

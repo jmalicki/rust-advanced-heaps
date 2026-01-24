@@ -16,6 +16,9 @@ categories = ["data-structures", "algorithms"]
 # Enable expensive O(n) invariant verification checks. Only use for debugging specific issues.
 # These checks significantly slow down all heap operations.
 expensive_verify = []
+# Enable access pattern tracking for cache efficiency analysis.
+# Adds instrumentation overhead - use only for profiling, not production.
+access_tracking = []
 
 [dependencies]
 # For stack-allocated vectors in fixed-arity heaps
@@ -37,6 +40,15 @@ parking_lot = "0.12"
 [[bench]]
 name = "dimacs_benchmark"
 harness = false
+
+[[bin]]
+name = "cache_profile"
+path = "src/bin/cache_profile.rs"
+
+[[bin]]
+name = "access_analyzer"
+path = "src/bin/access_analyzer.rs"
+required-features = ["access_tracking"]
 
 # Commands for cargo-cmd (install with: cargo install cargo-cmd)
 [package.metadata.commands]

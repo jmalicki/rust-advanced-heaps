@@ -51,6 +51,8 @@
 //! - [Wikipedia: Pairing heap](https://en.wikipedia.org/wiki/Pairing_heap)
 
 use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError};
+#[cfg(feature = "access_tracking")]
+use crate::{track, track_op};
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
@@ -197,9 +199,17 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
     /// - Two passes ensure logarithmic height in the amortized sense
     /// - Right-to-left merge in second pass balances the tree better
     fn pop(&mut self) -> Option<(P, T)> {
+        #[cfg(feature = "access_tracking")]
+        let _guard = track_op!("pop");
+
         let root = self.root.take()?;
 
+        #[cfg(feature = "access_tracking")]
+        track!(node);
+
         // Get the first child before we consume the root
+        #[cfg(feature = "access_tracking")]
+        track!(read ChildPtr);
         let first_child = root.borrow_mut().child.take();
 
         // The root has been deleted, so we need to rebuild from its children
@@ -207,6 +217,12 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
         // Otherwise, we merge all children using two-pass pairing
         if let Some(child) = first_child {
             // Clear the child's prev pointer (it was pointing to the old root)
+            #[cfg(feature = "access_tracking")]
+            {
+                track!(chase);
+                track!(node);
+                track!(write ParentPtr);
+            }
             child.borrow_mut().prev = None;
             // Two-pass pairing: merge children efficiently
             // This is the core operation that achieves O(log n) amortized bounds
@@ -237,6 +253,11 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
             )
         });
         let node = cell.into_inner();
+        #[cfg(feature = "access_tracking")]
+        {
+            track!(read Priority);
+            track!(read Item);
+        }
         Some((node.priority, node.item))
     }
 
@@ -322,6 +343,9 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for PairingHeap<T, P> {
     /// - Tree structure preserved: parent-child relationships correctly linked
     /// - Root always points to minimum: updated if new element is smaller
     fn push_with_handle(&mut self, priority: P, item: T) -> Self::Handle {
+        #[cfg(feature = "access_tracking")]
+        let _guard = track_op!("push");
+
         // Create new node with no children or siblings yet
         let node = Rc::new(RefCell::new(Node {
             item,
@@ -331,12 +355,29 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for PairingHeap<T, P> {
             prev: None,
         }));
 
+        #[cfg(feature = "access_tracking")]
+        {
+            track!(node);
+            track!(write Priority);
+            track!(write Item);
+        }
+
         // Link new node into the tree structure
         if let Some(ref root) = self.root {
+            #[cfg(feature = "access_tracking")]
+            {
+                track!(read Priority);
+                track!(read Priority);
+            }
             if node.borrow().priority < root.borrow().priority {
                 // Case 1: New node has smaller priority
                 // Make new node the root, old root becomes its only child
                 // This maintains the heap property (parent <= child)
+                #[cfg(feature = "access_tracking")]
+                {
+                    track!(write ChildPtr);
+                    track!(write ParentPtr);
+                }
                 node.borrow_mut().child = Some(Rc::clone(root));
                 root.borrow_mut().prev = Some(Rc::downgrade(&node));
                 self.root = Some(Rc::clone(&node));
@@ -344,10 +385,19 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for PairingHeap<T, P> {
                 // Case 2: Current root has smaller or equal priority
                 // Add new node as the first child of root
                 // This maintains heap property (new node >= root)
+                #[cfg(feature = "access_tracking")]
+                {
+                    track!(read ChildPtr);
+                    track!(write SiblingPtr);
+                    track!(write ParentPtr);
+                    track!(write ChildPtr);
+                }
                 let root_child = root.borrow().child.clone();
                 node.borrow_mut().sibling = root_child.clone();
                 node.borrow_mut().prev = Some(Rc::downgrade(root));
                 if let Some(ref child) = root_child {
+                    #[cfg(feature = "access_tracking")]
+                    track!(write ParentPtr);
                     child.borrow_mut().prev = Some(Rc::downgrade(&node));
                 }
                 root.borrow_mut().child = Some(Rc::clone(&node));
@@ -390,6 +440,9 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for PairingHeap<T, P> {
     /// maintain prev pointers, this is O(1). We then add it as a child of the
     /// root (or make it root if it's smaller). This maintains heap property.
     fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) -> Result<(), HeapError> {
+        #[cfg(feature = "access_tracking")]
+        let _guard = track_op!("decrease_key");
+
         // Upgrade the weak reference to get the node
         // If the upgrade fails, the node was already removed from the heap
         let node = handle
@@ -397,12 +450,19 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for PairingHeap<T, P> {
             .upgrade()
             .ok_or(HeapError::PriorityNotDecreased)?;
 
+        #[cfg(feature = "access_tracking")]
+        track!(node);
+
         // Safety check: new priority must actually be less
+        #[cfg(feature = "access_tracking")]
+        track!(read Priority);
         if new_priority >= node.borrow().priority {
             return Err(HeapError::PriorityNotDecreased);
         }
 
         // Update the priority value
+        #[cfg(feature = "access_tracking")]
+        track!(write Priority);
         node.borrow_mut().priority = new_priority;
 
         // Check if the node is already the root
@@ -523,6 +583,8 @@ impl<T, P: Ord> PairingHeap<T, P> {
     /// - Amortized analysis shows total is O(log n)
     fn merge_pairs(&self, first: NodeRef<T, P>) -> NodeRef<T, P> {
         // Base case: only one child, no pairing needed
+        #[cfg(feature = "access_tracking")]
+        track!(read SiblingPtr);
         if first.borrow().sibling.is_none() {
             return first;
         }
@@ -545,11 +607,26 @@ impl<T, P: Ord> PairingHeap<T, P> {
         let mut current = Some(first);
 
         while let Some(node) = current {
+            #[cfg(feature = "access_tracking")]
+            {
+                track!(node);
+                track!(read SiblingPtr);
+                track!(write SiblingPtr);
+                track!(write ParentPtr);
+            }
             // Get and disconnect sibling before modifying node
             let sibling = node.borrow_mut().sibling.take();
             node.borrow_mut().prev = None;
 
             if let Some(sib) = sibling {
+                #[cfg(feature = "access_tracking")]
+                {
+                    track!(chase);
+                    track!(node);
+                    track!(read SiblingPtr);
+                    track!(write SiblingPtr);
+                    track!(write ParentPtr);
+                }
                 // We have a pair: node and its sibling
                 // Get the next node before we disconnect
                 let next = sib.borrow_mut().sibling.take();
@@ -627,15 +704,29 @@ impl<T, P: Ord> PairingHeap<T, P> {
     /// **Invariant**: After merge, the returned node is the root of a heap-ordered tree
     /// containing both original nodes and their descendants.
     fn merge_nodes(&self, a: NodeRef<T, P>, b: NodeRef<T, P>) -> NodeRef<T, P> {
+        #[cfg(feature = "access_tracking")]
+        {
+            track!(read Priority);
+            track!(read Priority);
+        }
         if a.borrow().priority < b.borrow().priority {
             // Node a has smaller priority: it becomes parent
             // Node b becomes a child of a
+            #[cfg(feature = "access_tracking")]
+            {
+                track!(read ChildPtr);
+                track!(write SiblingPtr);
+                track!(write ParentPtr);
+                track!(write ChildPtr);
+            }
             let a_child = a.borrow().child.clone();
             // Make b the first child of a (b's sibling is a's old first child)
             b.borrow_mut().sibling = a_child.clone();
             b.borrow_mut().prev = Some(Rc::downgrade(&a)); // b's parent is a
             if let Some(ref child) = a_child {
                 // Update a's old first child to point back to b
+                #[cfg(feature = "access_tracking")]
+                track!(write ParentPtr);
                 child.borrow_mut().prev = Some(Rc::downgrade(&b));
             }
             a.borrow_mut().child = Some(b); // a's first child is now b
@@ -643,12 +734,21 @@ impl<T, P: Ord> PairingHeap<T, P> {
         } else {
             // Node b has smaller or equal priority: it becomes parent
             // Node a becomes a child of b
+            #[cfg(feature = "access_tracking")]
+            {
+                track!(read ChildPtr);
+                track!(write SiblingPtr);
+                track!(write ParentPtr);
+                track!(write ChildPtr);
+            }
             let b_child = b.borrow().child.clone();
             // Make a the first child of b (a's sibling is b's old first child)
             a.borrow_mut().sibling = b_child.clone();
             a.borrow_mut().prev = Some(Rc::downgrade(&b)); // a's parent is b
             if let Some(ref child) = b_child {
                 // Update b's old first child to point back to a
+                #[cfg(feature = "access_tracking")]
+                track!(write ParentPtr);
                 child.borrow_mut().prev = Some(Rc::downgrade(&a));
             }
             b.borrow_mut().child = Some(a); // b's first child is now a
@@ -676,6 +776,8 @@ impl<T, P: Ord> PairingHeap<T, P> {
     /// - If false, node is not first child (prev is previous sibling)
     fn cut_node(&mut self, node: &NodeRef<T, P>) {
         // Get the prev reference (parent or previous sibling)
+        #[cfg(feature = "access_tracking")]
+        track!(read ParentPtr);
         let prev_weak = match node.borrow().prev.clone() {
             Some(p) => p,
             None => return, // Node has no parent (already root or orphaned)
@@ -686,11 +788,21 @@ impl<T, P: Ord> PairingHeap<T, P> {
             None => return, // Prev node was already dropped
         };
 
+        #[cfg(feature = "access_tracking")]
+        {
+            track!(chase);
+            track!(node);
+        }
+
         // Get node's sibling before we modify things
+        #[cfg(feature = "access_tracking")]
+        track!(read SiblingPtr);
         let node_sibling = node.borrow().sibling.clone();
 
         // Determine if prev is the parent or a sibling
         // Check: if prev's first child is this node, then prev is the parent
+        #[cfg(feature = "access_tracking")]
+        track!(read ChildPtr);
         let is_first_child = prev
             .borrow()
             .child
@@ -702,23 +814,36 @@ impl<T, P: Ord> PairingHeap<T, P> {
             // Case 1: Node is the first child (prev is the parent)
             // Remove node from parent's child list
             // Parent's first child becomes node's sibling
+            #[cfg(feature = "access_tracking")]
+            track!(write ChildPtr);
             prev.borrow_mut().child = node_sibling.clone();
             if let Some(ref sibling) = node_sibling {
                 // Update sibling's prev pointer (now points to parent)
+                #[cfg(feature = "access_tracking")]
+                track!(write ParentPtr);
                 sibling.borrow_mut().prev = Some(Rc::downgrade(&prev));
             }
         } else {
             // Case 2: Node is not the first child (prev is previous sibling)
             // Remove node from sibling list
             // Previous sibling's next sibling becomes node's sibling
+            #[cfg(feature = "access_tracking")]
+            track!(write SiblingPtr);
             prev.borrow_mut().sibling = node_sibling.clone();
             if let Some(ref sibling) = node_sibling {
                 // Update next sibling's prev pointer (now points to previous sibling)
+                #[cfg(feature = "access_tracking")]
+                track!(write ParentPtr);
                 sibling.borrow_mut().prev = Some(Rc::downgrade(&prev));
             }
         }
 
         // Clear node's links (it's now disconnected from the tree)
+        #[cfg(feature = "access_tracking")]
+        {
+            track!(write SiblingPtr);
+            track!(write ParentPtr);
+        }
         node.borrow_mut().sibling = None;
         node.borrow_mut().prev = None;
     }

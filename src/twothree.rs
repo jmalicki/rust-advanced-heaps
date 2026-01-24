@@ -34,6 +34,9 @@
 //!   LNCS 1627, 41-50. [Springer](https://link.springer.com/chapter/10.1007/3-540-48686-0_4)
 
 use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError};
+#[cfg(feature = "access_tracking")]
+#[allow(unused_imports)]
+use crate::{track, track_op};
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 

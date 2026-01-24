@@ -46,6 +46,9 @@
 //! - [Wikipedia: Binomial heap](https://en.wikipedia.org/wiki/Binomial_heap)
 
 use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError};
+#[cfg(feature = "access_tracking")]
+#[allow(unused_imports)]
+use crate::{track, track_op};
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 

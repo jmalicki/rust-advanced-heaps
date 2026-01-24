@@ -30,6 +30,9 @@
 //! - [Wikipedia: Skew binomial heap](https://en.wikipedia.org/wiki/Skew_binomial_heap)
 
 use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError};
+#[cfg(feature = "access_tracking")]
+#[allow(unused_imports)]
+use crate::{track, track_op};
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
