@@ -841,7 +841,12 @@ fn main() {
         }
         Some("run-parallel") => usa_benchmark::cmd_run_parallel(),
         Some("run") => {
-            let heaps: Vec<_> = args.iter().skip(1).collect();
+            // Filter out benchmark harness flags (e.g., --bench passed by cargo)
+            let heaps: Vec<_> = args
+                .iter()
+                .skip(1)
+                .filter(|s| !s.starts_with('-'))
+                .collect();
             if heaps.is_empty() {
                 eprintln!("ERROR: Missing heap name");
                 eprintln!("Usage: ... -- run <heap_name> [heap2 ...]");
