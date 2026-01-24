@@ -217,12 +217,10 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
         track!(node);
 
         // Get the first child before we consume the root
+        // Borrow will succeed since we have exclusive ownership after take()
         #[cfg(feature = "access_tracking")]
         track!(read ChildPtr);
-        let first_child = {
-            let mut root_borrowed = root.try_borrow_mut().ok()?;
-            root_borrowed.child.take()
-        };
+        let first_child = root.try_borrow_mut().unwrap().child.take();
 
         // The root has been deleted, so we need to rebuild from its children
         // If there are no children, the heap becomes empty
@@ -301,14 +299,11 @@ impl<T, P: Ord> MergeableHeap<T, P> for PairingHeap<T, P> {
         let other_root = other.root.take().unwrap();
 
         // Compare roots: smaller priority becomes parent (heap property)
-        // Use try_borrow_mut for both comparison and modification
+        // Since we own both roots exclusively after take(), borrows will succeed
         let other_is_smaller = {
-            let self_borrow = self_root.try_borrow_mut().ok();
-            let other_borrow = other_root.try_borrow_mut().ok();
-            match (self_borrow, other_borrow) {
-                (Some(s), Some(o)) => o.priority < s.priority,
-                _ => false,
-            }
+            let self_borrow = self_root.try_borrow_mut().unwrap();
+            let other_borrow = other_root.try_borrow_mut().unwrap();
+            other_borrow.priority < self_borrow.priority
         };
 
         if other_is_smaller {
@@ -555,23 +550,20 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for PairingHeap<T, P> {
         // Get node pointer for comparisons
         let node_ptr = handle.node.as_ptr();
 
-        // Safety check: new priority must actually be less
+        // Safety check and update: new priority must actually be less
         #[cfg(feature = "access_tracking")]
         track!(read Priority);
         {
-            let node_borrow = handle
+            let mut node_borrow = handle
                 .node
                 .try_borrow_mut()
                 .map_err(|_| HeapError::PriorityNotDecreased)?;
             if new_priority >= node_borrow.priority {
                 return Err(HeapError::PriorityNotDecreased);
             }
-        }
-
-        // Update the priority value
-        #[cfg(feature = "access_tracking")]
-        track!(write Priority);
-        if let Ok(mut node_borrow) = handle.node.try_borrow_mut() {
+            // Update the priority value in the same borrow
+            #[cfg(feature = "access_tracking")]
+            track!(write Priority);
             node_borrow.priority = new_priority;
         }
 

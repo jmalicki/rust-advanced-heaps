@@ -56,13 +56,12 @@ use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError, MergeableHeap};
 #[cfg(feature = "access_tracking")]
 #[allow(unused_imports)]
 use crate::{track, track_op};
-use std::cell::RefCell;
-use std::rc::{Rc, Weak};
+use refbox::{RefBox, Weak};
 
 /// Type alias for strong reference to a node
-type NodeRef<T, P> = Rc<RefCell<Node<T, P>>>;
+type NodeRef<T, P> = RefBox<Node<T, P>>;
 /// Type alias for weak reference to a node (used for backlinks and handles)
-type NodeWeak<T, P> = Weak<RefCell<Node<T, P>>>;
+type NodeWeak<T, P> = Weak<Node<T, P>>;
 
 /// Handle to an element in a Rank-pairing heap
 ///
@@ -84,7 +83,7 @@ impl<T, P> Clone for RankPairingHandle<T, P> {
 
 impl<T, P> PartialEq for RankPairingHandle<T, P> {
     fn eq(&self, other: &Self) -> bool {
-        self.node.ptr_eq(&other.node)
+        self.node.as_ptr() == other.node.as_ptr()
     }
 }
 
@@ -262,15 +261,8 @@ impl<T, P: Ord> Heap<T, P> for RankPairingHeap<T, P> {
             );
         }
 
-        // Extract item and priority from the root node
-        // At this point, root should be the only strong reference, so we can unwrap
-        let cell = Rc::try_unwrap(root).unwrap_or_else(|rc| {
-            panic!(
-                "BUG: root node has {} strong references during delete_min (expected 1)",
-                Rc::strong_count(&rc)
-            )
-        });
-        let node = cell.into_inner();
+        // Extract item and priority from the root node using RefBox::take()
+        let node = RefBox::take(root);
         Some((node.priority, node.item))
     }
 }
@@ -307,15 +299,21 @@ impl<T, P: Ord> MergeableHeap<T, P> for RankPairingHeap<T, P> {
         let other_root = other.root.take().unwrap();
 
         // Compare roots: smaller priority becomes parent (heap property)
-        if other_root.borrow().priority < self_root.borrow().priority {
+        let other_is_smaller = {
+            let other_ref = other_root.try_borrow_mut().unwrap();
+            let self_ref = self_root.try_borrow_mut().unwrap();
+            other_ref.priority < self_ref.priority
+        };
+
+        if other_is_smaller {
             // Other root has smaller priority: it becomes the new root
             // Self root becomes a child of other root
-            Self::make_child(&other_root, &self_root);
+            Self::make_child(&other_root, self_root);
             self.root = Some(other_root);
         } else {
             // Self root has smaller or equal priority: it stays root
             // Other root becomes a child of self root
-            Self::make_child(&self_root, &other_root);
+            Self::make_child(&self_root, other_root);
             self.root = Some(self_root);
         }
 
@@ -348,7 +346,7 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for RankPairingHeap<T, P> {
     /// - Rank constraints: ranks updated to satisfy rank(v) ≤ rank(w₁) + 1 and rank(v) ≤ rank(w₂) + 1
     fn push_with_handle(&mut self, priority: P, item: T) -> Self::Handle {
         // Create new node with rank 0 (leaf node, no children)
-        let node = Rc::new(RefCell::new(Node {
+        let node = RefBox::new(Node {
             // Hot path first
             priority,
             // Traversal fields
@@ -361,33 +359,42 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for RankPairingHeap<T, P> {
             marked: false, // New nodes are unmarked
             // Cold path last
             item,
-        }));
+        });
+
+        // Get handle before potentially moving node
+        let handle = RankPairingHandle {
+            node: node.downgrade(),
+        };
 
         // Link new node into the tree structure
         if let Some(ref root) = self.root {
-            if node.borrow().priority < root.borrow().priority {
+            let node_priority_less = {
+                let node_ref = node.try_borrow_mut().unwrap();
+                let root_ref = root.try_borrow_mut().unwrap();
+                node_ref.priority < root_ref.priority
+            };
+            if node_priority_less {
                 // Case 1: New node has smaller priority
                 // Make new node the root, old root becomes its child
                 // This maintains heap property: parent <= child
-                Self::make_child(&node, root);
+                let old_root = self.root.take().unwrap();
+                Self::make_child(&node, old_root);
                 // Update root pointer to new minimum
-                self.root = Some(Rc::clone(&node));
+                self.root = Some(node);
             } else {
                 // Case 2: Current root has smaller or equal priority
                 // Add new node as a child of the root
                 // Heap property maintained: new node >= root
-                Self::make_child(root, &node);
-                // Root stays the same
+                Self::make_child(root, node);
+                // Root stays the same, node is now a child
             }
         } else {
             // Empty heap: new node becomes root
-            self.root = Some(Rc::clone(&node));
+            self.root = Some(node);
         }
 
         self.len += 1;
-        RankPairingHandle {
-            node: Rc::downgrade(&node),
-        }
+        handle
     }
 
     /// Decreases the priority of an element
@@ -416,26 +423,30 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for RankPairingHeap<T, P> {
     /// - Cascading cuts are bounded: each node can be cut at most once
     /// - Amortized analysis shows average cost is O(1)
     fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) -> Result<(), HeapError> {
-        // Upgrade the weak reference to get the node
-        // If the upgrade fails, the node was already removed from the heap
-        let node = handle
-            .node
-            .upgrade()
-            .ok_or(HeapError::PriorityNotDecreased)?;
-
-        // Safety check: new priority must actually be less
-        if new_priority >= node.borrow().priority {
+        // Check if the node is still alive
+        if !handle.node.is_alive() {
             return Err(HeapError::PriorityNotDecreased);
         }
 
+        // Safety check: new priority must actually be less
+        {
+            let node_ref = handle.node.try_borrow_mut().unwrap();
+            if new_priority >= node_ref.priority {
+                return Err(HeapError::PriorityNotDecreased);
+            }
+        }
+
         // Update the priority value
-        node.borrow_mut().priority = new_priority;
+        handle.node.try_borrow_mut().unwrap().priority = new_priority;
+
+        // Get the node pointer for comparisons
+        let node_ptr = handle.node.as_ptr();
 
         // Check if the node is already the root
         let is_root = self
             .root
             .as_ref()
-            .map(|r| Rc::ptr_eq(r, &node))
+            .map(|r| r.as_ptr() == node_ptr)
             .unwrap_or(false);
 
         if is_root {
@@ -445,10 +456,11 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for RankPairingHeap<T, P> {
 
         // Node is not root, check if heap property is violated
         let needs_cut = {
-            let node_ref = node.borrow();
+            let node_ref = handle.node.try_borrow_mut().unwrap();
             if let Some(ref parent_weak) = node_ref.parent {
-                if let Some(parent) = parent_weak.upgrade() {
-                    node_ref.priority < parent.borrow().priority
+                if parent_weak.is_alive() {
+                    let parent_ref = parent_weak.try_borrow_mut().unwrap();
+                    node_ref.priority < parent_ref.priority
                 } else {
                     false
                 }
@@ -461,19 +473,25 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for RankPairingHeap<T, P> {
             // Heap property violated: cut node from parent
             // This operation may trigger cascading cuts if parent was marked
             // Returns all cut nodes (including cascaded parents)
-            let cut_nodes = self.cut(&node);
+            let cut_nodes = self.cut_via_weak(&handle.node);
 
             // Merge all cut nodes with root
             // Each cut node (including cascaded parents) needs to be added
             for cut_node in cut_nodes {
                 if let Some(ref root) = self.root {
-                    if cut_node.borrow().priority < root.borrow().priority {
+                    let cut_is_smaller = {
+                        let cut_ref = cut_node.try_borrow_mut().unwrap();
+                        let root_ref = root.try_borrow_mut().unwrap();
+                        cut_ref.priority < root_ref.priority
+                    };
+                    if cut_is_smaller {
                         // Cut node has smaller priority: make it the new root
-                        Self::make_child(&cut_node, root);
+                        let old_root = self.root.take().unwrap();
+                        Self::make_child(&cut_node, old_root);
                         self.root = Some(cut_node);
                     } else {
                         // Current root has smaller priority: add cut node as child
-                        Self::make_child(root, &cut_node);
+                        Self::make_child(root, cut_node);
                     }
                 } else {
                     // Heap is empty (shouldn't happen, but handle gracefully)
@@ -500,36 +518,65 @@ impl<T, P: Ord> RankPairingHeap<T, P> {
     }
 
     #[cfg(feature = "expensive_verify")]
-    fn verify_subtree(node: &NodeRef<T, P>, parent_priority: Option<&P>) -> usize {
-        let node_ref = node.borrow();
-        let node_priority = &node_ref.priority;
+    fn verify_subtree(node: &NodeRef<T, P>, parent_priority: Option<*const P>) -> usize {
+        // Use raw pointers for safe verification traversal
+        let node_ptr = node.as_ptr();
 
-        // Verify heap property: node priority >= parent priority
+        // Safety: We're only reading through these pointers during verification
+        // The heap structure is not modified during verification
+        unsafe {
+            let node_priority_ptr = &(*node_ptr).priority as *const P;
+
+            // Verify heap property: node priority >= parent priority
+            if let Some(parent_p) = parent_priority {
+                assert!(
+                    *node_priority_ptr >= *parent_p,
+                    "Heap property violated: child priority < parent priority"
+                );
+            }
+
+            let mut count = 1;
+
+            // Walk children using raw pointers
+            let mut child_ptr = (*node_ptr).child.as_ref().map(|c| c.as_ptr());
+
+            while let Some(cp) = child_ptr {
+                // Recursively verify this child
+                // We need to access the child through the RefBox to get a proper reference
+                // But we can count using raw pointer traversal
+                count += Self::verify_subtree_ptr(cp, Some(node_priority_ptr));
+
+                // Move to sibling
+                child_ptr = (*cp).sibling.as_ref().map(|s| s.as_ptr());
+            }
+
+            count
+        }
+    }
+
+    #[cfg(feature = "expensive_verify")]
+    unsafe fn verify_subtree_ptr(
+        node_ptr: *const Node<T, P>,
+        parent_priority: Option<*const P>,
+    ) -> usize {
+        let node_priority_ptr = &(*node_ptr).priority as *const P;
+
+        // Verify heap property
         if let Some(parent_p) = parent_priority {
             assert!(
-                node_priority >= parent_p,
+                *node_priority_ptr >= *parent_p,
                 "Heap property violated: child priority < parent priority"
             );
         }
 
         let mut count = 1;
 
-        // Collect children first to avoid borrow conflicts
-        let mut children = Vec::new();
-        {
-            let mut child_opt = node_ref.child.clone();
-            while let Some(child) = child_opt {
-                children.push(child.clone());
-                child_opt = child.borrow().sibling.clone();
-            }
-        }
-        drop(node_ref); // Release borrow before recursive calls
+        // Walk children
+        let mut child_ptr = (*node_ptr).child.as_ref().map(|c| c.as_ptr());
 
-        // Verify all children
-        for child in children {
-            // Use unsafe to get a stable reference to parent's priority
-            let priority_ref = unsafe { &*(&node.borrow().priority as *const P) };
-            count += Self::verify_subtree(&child, Some(priority_ref));
+        while let Some(cp) = child_ptr {
+            count += Self::verify_subtree_ptr(cp, Some(node_priority_ptr));
+            child_ptr = (*cp).sibling.as_ref().map(|s| s.as_ptr());
         }
 
         count
@@ -551,27 +598,35 @@ impl<T, P: Ord> RankPairingHeap<T, P> {
     ///
     /// **Invariant**: This operation maintains the heap property (parent <= child)
     /// and updates ranks to maintain rank constraints.
-    fn make_child(x: &NodeRef<T, P>, y: &NodeRef<T, P>) {
+    fn make_child(x: &NodeRef<T, P>, y: NodeRef<T, P>) {
+        // Get weak reference to y before moving it
+        let y_weak = y.downgrade();
+
         // Get the old first child (if any)
-        let old_first_child = x.borrow().child.clone();
+        let old_first_child = x.try_borrow_mut().unwrap().child.take();
 
         // Set y's parent to x (for cascading cuts)
-        y.borrow_mut().parent = Some(Rc::downgrade(x));
-
         // Set y's prev to x (y is becoming the first child, so prev points to parent)
-        y.borrow_mut().prev = Some(Rc::downgrade(x));
-
         // Set y's sibling to the old first child
-        y.borrow_mut().sibling = old_first_child.clone();
+        {
+            let mut y_ref = y.try_borrow_mut().unwrap();
+            y_ref.parent = Some(x.downgrade());
+            y_ref.prev = Some(x.downgrade());
+            y_ref.sibling = old_first_child;
+        }
 
         // Update the old first child's prev to point to y (its new previous sibling)
-        // Note: The old first child's parent stays pointing to x
-        if let Some(ref old_child) = old_first_child {
-            old_child.borrow_mut().prev = Some(Rc::downgrade(y));
+        // We need to access y's sibling, but y will be moved, so we access via the weak ref
+        // Actually, we can access it now before moving y
+        {
+            let y_ref = y.try_borrow_mut().unwrap();
+            if let Some(ref old_child) = y_ref.sibling {
+                old_child.try_borrow_mut().unwrap().prev = Some(y_weak.clone());
+            }
         }
 
         // Make y the first child of x
-        x.borrow_mut().child = Some(Rc::clone(y));
+        x.try_borrow_mut().unwrap().child = Some(y);
 
         // Update rank: x's rank must be recomputed based on its children
         // Rank formula: rank(x) = min(rank(w₁), rank(w₂)) + 1
@@ -601,136 +656,127 @@ impl<T, P: Ord> RankPairingHeap<T, P> {
     /// - No children: rank = 0 (leaf node)
     /// - With children: rank = max(current_rank, first_child_rank + 1)
     fn update_rank(node: &NodeRef<T, P>) {
-        let child_opt = node.borrow().child.clone();
+        let node_ref = node.try_borrow_mut().unwrap();
+        let child_rank_opt = node_ref
+            .child
+            .as_ref()
+            .map(|c| c.try_borrow_mut().unwrap().rank);
+        let current_rank = node_ref.rank;
+        drop(node_ref);
 
-        if let Some(child) = child_opt {
+        if let Some(child_rank) = child_rank_opt {
             // O(1): Only look at the first child's rank
-            let child_rank = child.borrow().rank;
-            let current_rank = node.borrow().rank;
             // The new rank is the maximum of current rank and first_child_rank + 1
             // This ensures rank(parent) >= rank(child) + 1 for the new child
             let new_rank = current_rank.max(child_rank + 1);
-            node.borrow_mut().rank = new_rank;
+            node.try_borrow_mut().unwrap().rank = new_rank;
         } else {
             // Leaf node: rank is 0
-            node.borrow_mut().rank = 0;
+            node.try_borrow_mut().unwrap().rank = 0;
         }
     }
 
-    /// Cuts a node from its parent and collects all cascaded nodes
+    /// Cuts a node from its parent using O(1) prev pointer access
     ///
     /// **Time Complexity**: O(1) amortized (cascading cuts amortized to O(1))
     ///
-    /// **Algorithm (Type-A Cascading Cuts)**:
-    /// 1. Remove node from parent's child list using prev pointer (O(1))
-    /// 2. Clear node's prev and sibling pointers
-    /// 3. **Marking rule**: If parent is not marked, mark it
-    /// 4. **Cascading**: If parent is already marked, cut it too (cascade upward)
-    /// 5. Return all cut nodes so they can be merged with the root
-    ///
-    /// **O(1) Cut Using Prev Pointer**:
-    /// The prev pointer enables O(1) removal from the sibling list:
-    /// - If prev.child == node, then node is first child (prev is parent)
-    /// - Otherwise, prev.sibling == node (prev is previous sibling)
-    ///
-    /// **Marking Rule (Type-A)**:
-    /// - A node can lose at most one child before being cut
-    /// - Unmarked: no child lost yet
-    /// - Marked: one child lost (next loss triggers cut)
-    /// - This maintains rank constraints and bounds tree height
-    ///
-    /// **Why O(1) amortized?**
-    /// - Each cut operation is O(1) using the prev pointer
-    /// - Cascading cuts are bounded: each node can be cut at most once
-    /// - Amortized analysis shows average cascade depth is O(1)
+    /// Uses the node's prev pointer to directly locate and extract it from the tree.
+    /// The prev pointer enables O(1) removal from the sibling list.
     ///
     /// Returns a vector of all cut nodes (including cascaded parents) that need
     /// to be merged with the root.
     #[allow(clippy::only_used_in_recursion)]
-    fn cut(&mut self, node: &NodeRef<T, P>) -> Vec<NodeRef<T, P>> {
-        // Get prev node (if none, node is already root or orphaned)
-        let prev = {
-            let node_ref = node.borrow();
-            match &node_ref.prev {
-                Some(prev_weak) => prev_weak.upgrade(),
-                None => return Vec::new(),
-            }
-        };
-
-        let prev = match prev {
-            Some(p) => p,
-            None => return Vec::new(), // Prev node was already dropped
-        };
-
-        // Get parent directly (O(1) - no need to search)
-        let parent = {
-            let node_ref = node.borrow();
-            match &node_ref.parent {
-                Some(parent_weak) => parent_weak.upgrade(),
-                None => return Vec::new(),
-            }
-        };
-
-        let parent = match parent {
-            Some(p) => p,
-            None => return Vec::new(), // Parent was already dropped
-        };
-
-        // Get node's sibling (the next node in the sibling chain)
-        let node_sibling = node.borrow().sibling.clone();
-
-        // Check if prev is the parent (node is first child) or previous sibling
-        // By checking if prev.child == node
-        let is_first_child = prev
-            .borrow()
-            .child
-            .as_ref()
-            .map(|c| Rc::ptr_eq(c, node))
-            .unwrap_or(false);
-
-        // Step 1: Remove node from the sibling list (O(1) using prev pointer)
-        if is_first_child {
-            // Node is first child: parent's first child becomes node's sibling
-            prev.borrow_mut().child = node_sibling.clone();
-            // Update the new first child's prev to point to parent
-            if let Some(ref sibling) = node_sibling {
-                sibling.borrow_mut().prev = Some(Rc::downgrade(&prev));
-            }
-        } else {
-            // Node is not first child: prev is the previous sibling
-            // Update prev's sibling to skip over node
-            prev.borrow_mut().sibling = node_sibling.clone();
-            // Update the next sibling's prev to point to prev
-            if let Some(ref sibling) = node_sibling {
-                sibling.borrow_mut().prev = Some(Rc::downgrade(&prev));
-            }
+    fn cut_via_weak(&mut self, node_weak: &NodeWeak<T, P>) -> Vec<NodeRef<T, P>> {
+        if !node_weak.is_alive() {
+            return Vec::new();
         }
 
-        // Step 2: Clear node's parent, prev and sibling pointers (it's now a root)
-        node.borrow_mut().parent = None;
-        node.borrow_mut().prev = None;
-        node.borrow_mut().sibling = None;
-        node.borrow_mut().marked = false; // Reset mark when cut
+        // Get prev and parent weak refs from the target node
+        let (prev_weak, parent_weak) = {
+            let node_ref = node_weak.try_borrow_mut().unwrap();
+            (node_ref.prev.clone(), node_ref.parent.clone())
+        };
 
-        // Collect all cut nodes that need to be merged with root
-        let mut cut_nodes = vec![Rc::clone(node)];
+        let prev_weak = match prev_weak {
+            Some(pw) => pw,
+            None => return Vec::new(), // No prev means orphaned or root
+        };
 
-        // Step 3: Apply marking rule (Type-A rank-pairing heap)
-        // This maintains the constraint that no node loses more than one child
-        let parent_was_marked = parent.borrow().marked;
+        if !prev_weak.is_alive() {
+            return Vec::new();
+        }
+
+        let parent_weak = match parent_weak {
+            Some(pw) => pw,
+            None => return Vec::new(), // No parent means root
+        };
+
+        if !parent_weak.is_alive() {
+            return Vec::new();
+        }
+
+        let node_ptr = node_weak.as_ptr();
+
+        // Check if prev.child == node (node is first child of parent)
+        let is_first_child = {
+            let prev_ref = prev_weak.try_borrow_mut().unwrap();
+            prev_ref
+                .child
+                .as_ref()
+                .map(|c| c.as_ptr() == node_ptr)
+                .unwrap_or(false)
+        };
+
+        // Extract the node from the tree
+        let extracted: NodeRef<T, P>;
+
+        if is_first_child {
+            // Node is first child: take from prev.child
+            let mut prev_mut = prev_weak.try_borrow_mut().unwrap();
+            extracted = prev_mut.child.take().expect("Node should be in prev.child");
+
+            // Get sibling and update
+            let sibling = extracted.try_borrow_mut().unwrap().sibling.take();
+            if let Some(ref sib) = sibling {
+                sib.try_borrow_mut().unwrap().prev = Some(prev_weak.clone());
+            }
+            prev_mut.child = sibling;
+        } else {
+            // Node is not first child: prev.sibling == node
+            let mut prev_mut = prev_weak.try_borrow_mut().unwrap();
+            extracted = prev_mut
+                .sibling
+                .take()
+                .expect("Node should be in prev.sibling");
+
+            // Get sibling and update
+            let sibling = extracted.try_borrow_mut().unwrap().sibling.take();
+            if let Some(ref sib) = sibling {
+                sib.try_borrow_mut().unwrap().prev = Some(prev_weak.clone());
+            }
+            prev_mut.sibling = sibling;
+        }
+
+        // Clear the extracted node's pointers
+        {
+            let mut node_mut = extracted.try_borrow_mut().unwrap();
+            node_mut.parent = None;
+            node_mut.prev = None;
+            node_mut.sibling = None;
+            node_mut.marked = false;
+        }
+
+        let mut cut_nodes = vec![extracted];
+
+        // Check if parent was marked for cascading cut
+        let parent_was_marked = parent_weak.try_borrow_mut().unwrap().marked;
 
         if !parent_was_marked {
-            // Parent hasn't lost a child yet: mark it
-            // Next time it loses a child, it will be cut (cascading)
-            parent.borrow_mut().marked = true;
-            // Note: We don't update rank here. The marking mechanism handles
-            // rank violations - a node can have at most one rank violation
-            // before being cut, which maintains the amortized bounds.
+            // Mark the parent
+            parent_weak.try_borrow_mut().unwrap().marked = true;
         } else {
-            // Parent already marked (has lost one child): cut it now (cascading)
-            // This prevents nodes from losing too many children
-            // Recursive cut collects all cascaded nodes
-            let cascaded = self.cut(&parent);
+            // Parent was marked: cascade cut
+            let cascaded = self.cut_via_weak(&parent_weak);
             cut_nodes.extend(cascaded);
         }
 
@@ -740,20 +786,20 @@ impl<T, P: Ord> RankPairingHeap<T, P> {
     /// Collects all children of a node into a vector
     fn collect_children(parent: &NodeRef<T, P>) -> Vec<NodeRef<T, P>> {
         let mut children = Vec::new();
-        let mut current = parent.borrow().child.clone();
+        let mut current = parent.try_borrow_mut().unwrap().child.take();
 
         while let Some(curr) = current {
-            let next = curr.borrow().sibling.clone();
+            let next = curr.try_borrow_mut().unwrap().sibling.take();
             // Clear parent, prev and sibling pointers (each child becomes a root)
-            curr.borrow_mut().parent = None;
-            curr.borrow_mut().prev = None;
-            curr.borrow_mut().sibling = None;
+            {
+                let mut curr_ref = curr.try_borrow_mut().unwrap();
+                curr_ref.parent = None;
+                curr_ref.prev = None;
+                curr_ref.sibling = None;
+            }
             children.push(curr);
             current = next;
         }
-
-        // Clear parent's child pointer since we've taken all children
-        parent.borrow_mut().child = None;
 
         children
     }
@@ -765,34 +811,37 @@ impl<T, P: Ord> RankPairingHeap<T, P> {
         }
 
         // Simple pairing approach: repeatedly pair adjacent trees
-        // This is a simplified version; a full implementation would use
-        // rank-based grouping for optimal bounds
+        // With RefBox we need to handle ownership carefully
         while children.len() > 1 {
             let mut next = Vec::new();
-            let mut i = 0;
 
-            while i < children.len() {
-                if i + 1 < children.len() {
-                    // Pair two trees
-                    let a = &children[i];
-                    let b = &children[i + 1];
-                    let merged = if a.borrow().priority < b.borrow().priority {
-                        Self::make_child(a, b);
-                        Self::update_rank(a);
-                        Rc::clone(a)
-                    } else {
-                        Self::make_child(b, a);
-                        Self::update_rank(b);
-                        Rc::clone(b)
-                    };
-                    next.push(merged);
-                    i += 2;
+            while children.len() >= 2 {
+                let b = children.pop().unwrap();
+                let a = children.pop().unwrap();
+
+                // Compare priorities
+                let a_is_smaller = {
+                    let a_ref = a.try_borrow_mut().unwrap();
+                    let b_ref = b.try_borrow_mut().unwrap();
+                    a_ref.priority < b_ref.priority
+                };
+
+                if a_is_smaller {
+                    Self::make_child(&a, b);
+                    Self::update_rank(&a);
+                    next.push(a);
                 } else {
-                    // Single tree left, add it to next round
-                    next.push(Rc::clone(&children[i]));
-                    i += 1;
+                    Self::make_child(&b, a);
+                    Self::update_rank(&b);
+                    next.push(b);
                 }
             }
+
+            // If odd number, move the remaining one to next
+            if !children.is_empty() {
+                next.push(children.pop().unwrap());
+            }
+
             children = next;
         }
 
@@ -801,20 +850,26 @@ impl<T, P: Ord> RankPairingHeap<T, P> {
 
     /// Links two trees of the same rank
     #[allow(dead_code)]
-    fn link_same_rank(a: &NodeRef<T, P>, b: &NodeRef<T, P>) -> NodeRef<T, P> {
-        if a.borrow().priority < b.borrow().priority {
-            Self::make_child(a, b);
-            Self::update_rank(a);
-            Rc::clone(a)
+    fn link_same_rank(a: NodeRef<T, P>, b: NodeRef<T, P>) -> NodeRef<T, P> {
+        let a_is_smaller = {
+            let a_ref = a.try_borrow_mut().unwrap();
+            let b_ref = b.try_borrow_mut().unwrap();
+            a_ref.priority < b_ref.priority
+        };
+
+        if a_is_smaller {
+            Self::make_child(&a, b);
+            Self::update_rank(&a);
+            a
         } else {
-            Self::make_child(b, a);
-            Self::update_rank(b);
-            Rc::clone(b)
+            Self::make_child(&b, a);
+            Self::update_rank(&b);
+            b
         }
     }
 
-    // Note: No free_node function needed - Rc handles cleanup automatically.
-    // When a node's Rc refcount reaches zero, it and all its children are dropped.
+    // Note: No free_node function needed - RefBox handles cleanup automatically.
+    // When a node's RefBox is dropped, it and all its children are dropped.
 }
 
 // Note: Most tests are in tests/generic_heap_tests.rs which provides comprehensive
