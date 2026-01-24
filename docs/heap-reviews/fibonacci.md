@@ -7,7 +7,7 @@
 ## Summary Table
 
 | Aspect | Rating (1-5) | Notes |
-|--------|--------------|-------|
+| ------ | ------------ | ----- |
 | Fidelity to Paper | 4 | Faithful implementation with minor differences |
 | Memory Safety | 5 | Safe Rc/Weak pattern with minimal unsafe |
 | Cache Efficiency | 3.5 | Pointer-heavy but field-reordered for locality |
@@ -22,7 +22,7 @@ and their uses in improved network optimization algorithms."
 ### Operation-by-Operation Comparison
 
 | Operation | Paper Specification | Implementation | Match |
-|-----------|---------------------|----------------|-------|
+| --------- | ------------------- | -------------- | ----- |
 | **Insert** | O(1) - add to root list | `Rc::new()`, add to `roots` | Yes |
 | **Delete-Min** | O(log n) - consolidate | Remove min, consolidate | Yes |
 | **Decrease-Key** | O(1) - cascading cut | `cut()` then `cascading_cut()` | Yes |
@@ -65,7 +65,7 @@ and their uses in improved network optimization algorithms."
 ### Unsafe Block Inventory
 
 | Location | Lines | Purpose | Safety Justification |
-|----------|-------|---------|----------------------|
+| -------- | ----- | ------- | -------------------- |
 | `peek()` | 191-194 | Return refs to node data | Rc keeps alive, read-only |
 
 **Analysis**: The single unsafe block is a common pattern for returning
@@ -141,7 +141,7 @@ struct FibonacciHeap<T, P: Ord> {
 ### Memory Access Patterns per Operation
 
 | Operation | Access Pattern | Cache Impact |
-|-----------|----------------|--------------|
+| --------- | -------------- | ------------ |
 | **push** | Allocate, compare min | 2 misses typical |
 | **peek** | Follow min weak ref | 1-2 misses |
 | **pop** | Find min, iterate, consolidate | O(log n) misses |
@@ -200,20 +200,20 @@ Measured using `valgrind --tool=cachegrind` with Dijkstra-like workloads.
 
 ##### Test: 100,000 elements
 
-| Metric            | Before    | After     | Change     |
-|-------------------|-----------|-----------|------------|
-| D1 misses (total) | 1,346,711 | 1,287,446 | **-4.4%**  |
-| D1 read misses    | 985,575   | 868,223   | **-11.9%** |
-| D1 write misses   | 361,136   | 419,223   | +16.1%     |
+| Metric | Before | After | Change |
+| ------ | ------ | ----- | ------ |
+| D1 misses (total) | 1,346,711 | 1,287,446 | **-4.4%** |
+| D1 read misses | 985,575 | 868,223 | **-11.9%** |
+| D1 write misses | 361,136 | 419,223 | +16.1% |
 
 ##### Test: 500,000 elements
 
-| Metric            | Before    | After     | Change    |
-|-------------------|-----------|-----------|-----------|
+| Metric | Before | After | Change |
+| ------ | ------ | ----- | ------ |
 | D1 misses (total) | 5,537,801 | 5,473,842 | **-1.2%** |
-| D1 read misses    | 4,080,531 | 3,945,120 | **-3.3%** |
-| D1 write misses   | 1,457,270 | 1,528,722 | +4.9%     |
-| LL misses         | 1,143,158 | 1,143,158 | 0%        |
+| D1 read misses | 4,080,531 | 3,945,120 | **-3.3%** |
+| D1 write misses | 1,457,270 | 1,528,722 | +4.9% |
+| LL misses | 1,143,158 | 1,143,158 | 0% |
 
 ##### Analysis
 
@@ -253,7 +253,7 @@ Measured using `valgrind --tool=cachegrind` with Dijkstra-like workloads.
 ### Test Coverage by Category
 
 | Test Suite | Test Count | Coverage Type |
-|------------|------------|---------------|
+| ---------- | ---------- | ------------- |
 | `generic_heap_tests.rs` (fibonacci_base) | 17 | Base heap operations |
 | `generic_heap_tests.rs` (fibonacci_decrease) | 16 | Decrease-key ops |
 | `property_tests.rs` | 2 modules | Proptest-based invariant checking |
@@ -264,7 +264,7 @@ Measured using `valgrind --tool=cachegrind` with Dijkstra-like workloads.
 ### Edge Case Coverage
 
 | Edge Case | Covered? | Test Location |
-|-----------|----------|---------------|
+| --------- | -------- | ------------- |
 | Empty heap | Yes | `test_empty_heap` |
 | Single element | Yes | `test_single_element_decrease` |
 | Duplicate priorities | Yes | `test_duplicate_priorities` |
