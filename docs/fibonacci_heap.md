@@ -147,7 +147,8 @@ distinct degrees!
 
 ## Amortized Analysis
 
-The amortized analysis uses a **potential function** that charges credits based on:
+The amortized analysis uses a **potential function** that charges credits
+based on:
 
 1. Number of trees in root list
 2. Number of marked nodes

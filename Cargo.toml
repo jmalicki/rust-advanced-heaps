@@ -22,6 +22,9 @@ perf-counters = []
 # Enable experimental arena-based storage using slotmap for better cache locality.
 # This provides alternative heap types with *Arena suffix (e.g., SkewBinomialHeapArena).
 arena-storage = ["slotmap"]
+# Enable access pattern tracking for cache efficiency analysis.
+# Adds instrumentation overhead - use only for profiling, not production.
+access_tracking = []
 
 [dependencies]
 # For stack-allocated vectors in fixed-arity heaps
@@ -61,6 +64,11 @@ harness = false
 [[bench]]
 name = "perf_table"
 harness = false
+
+[[bin]]
+name = "access_analyzer"
+path = "src/bin/access_analyzer.rs"
+required-features = ["access_tracking"]
 
 # Commands for cargo-cmd (install with: cargo install cargo-cmd)
 [package.metadata.commands]

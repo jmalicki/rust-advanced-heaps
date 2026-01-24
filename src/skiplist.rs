@@ -40,6 +40,9 @@
 //! ```
 
 use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError, MergeableHeap};
+#[cfg(feature = "access_tracking")]
+#[allow(unused_imports)]
+use crate::{track, track_op};
 use skiplist::OrderedSkipList;
 use std::cell::Cell;
 use std::cmp::Ordering;
