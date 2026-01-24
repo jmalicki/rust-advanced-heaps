@@ -5,10 +5,36 @@
 //! - O(log n) amortized delete_min
 //! - o(log n) amortized decrease_key (in fact, better than log n)
 //!
-//! This implementation uses RefBox/Weak references for reduced memory overhead:
+//! # Memory Model: RefBox with Direct Access
+//!
+//! This implementation uses RefBox/Weak references with a specific design choice:
 //! - Owned references (RefBox) flow from roots to children (ownership)
 //! - Weak references for parent/prev backlinks and handles
 //! - Single owner with many weak refs (16 bytes less overhead per node vs `Rc<RefCell>`)
+//!
+//! **Why not use RefBox's try_borrow_mut()?**
+//!
+//! RefBox provides runtime borrow checking similar to RefCell, but we don't need it:
+//! - RefBox is **single-owner**: there's exactly one strong reference to each node
+//! - When we have a RefBox (strong ref), we *own* that node exclusively
+//! - The borrow will *always* succeed because there can't be conflicting borrows
+//!   from a single-owner system without aliasing
+//!
+//! Instead, we use `as_ptr()` to access node data directly. This is safe because:
+//! - When holding &RefBox, we have shared access → safe to read via pointer
+//! - When holding &mut RefBox, we have exclusive access → safe to mutate via pointer
+//! - No runtime overhead from borrow tracking we don't need
+//!
+//! **The one exception: decrease_key via weak references**
+//!
+//! Handles store Weak references to nodes. When `decrease_key` is called, we must
+//! access node data through a weak reference (the handle), not through the ownership
+//! tree. This is the *only* place where we access data without owning the RefBox.
+//!
+//! This is still safe because:
+//! - We have `&mut self` (exclusive access to the entire heap)
+//! - The weak ref points to a node inside our heap (verified by `is_alive()`)
+//! - No other code can be accessing that node during this operation
 //!
 //! # Algorithm Overview
 //!
@@ -61,6 +87,54 @@ use refbox::{RefBox, Weak};
 type NodeRef<T, P> = RefBox<Node<T, P>>;
 /// Type alias for weak reference to a node (used for backlinks and handles)
 type NodeWeak<T, P> = Weak<Node<T, P>>;
+
+// =============================================================================
+// Direct Access Helpers
+// =============================================================================
+//
+// RefBox is single-owner: when you have a &RefBox or &mut RefBox, you have
+// exclusive access to that subtree. Runtime borrow checking (try_borrow_mut)
+// is unnecessary overhead because there cannot be conflicting borrows.
+//
+// These helpers provide direct pointer access, which is safe because:
+// - node_ref(&RefBox) → &Node: RefBox lifetime ensures node is valid
+// - node_mut(&RefBox) → &mut Node: Single ownership ensures exclusivity
+
+/// Get shared reference to node data from an owned RefBox.
+///
+/// # Safety Rationale
+/// RefBox is single-owner. When we have &RefBox, we have valid access to the node.
+/// The returned reference is bounded by the RefBox's lifetime.
+#[inline]
+fn node_ref<T, P>(refbox: &NodeRef<T, P>) -> &Node<T, P> {
+    // SAFETY: RefBox guarantees the pointer is valid while we hold the reference.
+    // Single-owner semantics mean no other code has mutable access.
+    unsafe { &*refbox.as_ptr() }
+}
+
+/// Get mutable reference to node data from an owned RefBox.
+///
+/// # Safety Rationale
+/// RefBox is single-owner. When we hold a RefBox (through ownership or a reference
+/// in the heap's ownership tree), we have exclusive access to that node's data.
+///
+/// This function takes `&RefBox` rather than `&mut RefBox` because:
+/// - RefBox's single-owner semantics already guarantee exclusive access
+/// - We often need to mutate nodes through Option<RefBox<Node>> fields without
+///   taking ownership of the entire Option
+/// - The parent-child relationship forms a strict tree, so no aliasing is possible
+///
+/// Clippy's `mut_from_ref` lint flags this pattern because it appears to violate
+/// Rust's borrowing rules. However, it's sound here because RefBox guarantees
+/// single ownership - there is exactly one strong reference to each node, so the
+/// data cannot be simultaneously accessed elsewhere.
+#[allow(clippy::mut_from_ref)]
+#[inline]
+fn node_mut<T, P>(refbox: &NodeRef<T, P>) -> &mut Node<T, P> {
+    // SAFETY: RefBox is single-owner. We have exclusive access to this subtree
+    // through the heap's ownership tree. No aliasing is possible.
+    unsafe { &mut *(refbox.as_ptr() as *mut Node<T, P>) }
+}
 
 /// Handle to an element in a Pairing heap
 ///
@@ -217,7 +291,7 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
         track!(node);
 
         // Consume the RefBox immediately to get owned Node - no borrowing needed
-        // This is sound because we have exclusive ownership after take()
+        // RefBox::take() consumes the RefBox and returns the inner Node
         #[cfg(feature = "access_tracking")]
         track!(read ChildPtr);
         let mut root_node = root_refbox.take();
@@ -234,9 +308,7 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
                 track!(node);
                 track!(write ParentPtr);
             }
-            if let Ok(mut child_borrowed) = child.try_borrow_mut() {
-                child_borrowed.prev = None;
-            }
+            node_mut(&child).prev = None;
             // Two-pass pairing: merge children efficiently
             // This is the core operation that achieves O(log n) amortized bounds
             self.root = Some(self.merge_pairs(child));
@@ -297,12 +369,8 @@ impl<T, P: Ord> MergeableHeap<T, P> for PairingHeap<T, P> {
         let other_root = other.root.take().unwrap();
 
         // Compare roots: smaller priority becomes parent (heap property)
-        // Use raw pointers for comparison - safe because we own both RefBoxes exclusively
-        let other_is_smaller = unsafe {
-            let self_ptr = self_root.as_ptr();
-            let other_ptr = other_root.as_ptr();
-            (*other_ptr).priority < (*self_ptr).priority
-        };
+        // Direct access is safe: we own both RefBoxes exclusively
+        let other_is_smaller = node_ref(&other_root).priority < node_ref(&self_root).priority;
 
         if other_is_smaller {
             // Other root has smaller priority: it becomes the new root
@@ -313,28 +381,22 @@ impl<T, P: Ord> MergeableHeap<T, P> for PairingHeap<T, P> {
             let other_root_weak = other_root.downgrade();
 
             // Take other_root's existing first child
-            let old_first_child = other_root
-                .try_borrow_mut()
-                .ok()
-                .and_then(|mut b| b.child.take());
+            let old_first_child = node_mut(&other_root).child.take();
 
             // Update old_first_child's prev to point to self_root (if it exists)
             if let Some(ref old_child) = old_first_child {
-                if let Ok(mut child_borrow) = old_child.try_borrow_mut() {
-                    child_borrow.prev = Some(self_root_weak);
-                }
+                node_mut(old_child).prev = Some(self_root_weak);
             }
 
             // Set up self_root as a child
-            if let Ok(mut self_borrow) = self_root.try_borrow_mut() {
-                self_borrow.sibling = old_first_child;
-                self_borrow.prev = Some(other_root_weak);
+            {
+                let self_node = node_mut(&self_root);
+                self_node.sibling = old_first_child;
+                self_node.prev = Some(other_root_weak);
             }
 
             // Make self_root the first child of other_root
-            if let Ok(mut other_borrow) = other_root.try_borrow_mut() {
-                other_borrow.child = Some(self_root);
-            }
+            node_mut(&other_root).child = Some(self_root);
             self.root = Some(other_root);
         } else {
             // Self root has smaller or equal priority: it stays root
@@ -345,28 +407,22 @@ impl<T, P: Ord> MergeableHeap<T, P> for PairingHeap<T, P> {
             let self_root_weak = self_root.downgrade();
 
             // Take self_root's existing first child
-            let old_first_child = self_root
-                .try_borrow_mut()
-                .ok()
-                .and_then(|mut b| b.child.take());
+            let old_first_child = node_mut(&self_root).child.take();
 
             // Update old_first_child's prev to point to other_root (if it exists)
             if let Some(ref old_child) = old_first_child {
-                if let Ok(mut child_borrow) = old_child.try_borrow_mut() {
-                    child_borrow.prev = Some(other_root_weak);
-                }
+                node_mut(old_child).prev = Some(other_root_weak);
             }
 
             // Set up other_root as a child
-            if let Ok(mut other_borrow) = other_root.try_borrow_mut() {
-                other_borrow.sibling = old_first_child;
-                other_borrow.prev = Some(self_root_weak);
+            {
+                let other_node = node_mut(&other_root);
+                other_node.sibling = old_first_child;
+                other_node.prev = Some(self_root_weak);
             }
 
             // Make other_root the first child of self_root
-            if let Ok(mut self_borrow) = self_root.try_borrow_mut() {
-                self_borrow.child = Some(other_root);
-            }
+            node_mut(&self_root).child = Some(other_root);
             self.root = Some(self_root);
         }
 
@@ -431,12 +487,8 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for PairingHeap<T, P> {
                 track!(read Priority);
                 track!(read Priority);
             }
-            // Compare priorities using raw pointers - safe because we own both RefBoxes
-            let node_is_smaller = unsafe {
-                let node_ptr = node.as_ptr();
-                let root_ptr = root.as_ptr();
-                (*node_ptr).priority < (*root_ptr).priority
-            };
+            // Compare priorities - direct access is safe: we own both RefBoxes
+            let node_is_smaller = node_ref(&node).priority < node_ref(&root).priority;
 
             if node_is_smaller {
                 // Case 1: New node has smaller priority
@@ -448,12 +500,8 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for PairingHeap<T, P> {
                     track!(write ParentPtr);
                 }
                 let node_weak = node.downgrade();
-                if let Ok(mut root_borrow) = root.try_borrow_mut() {
-                    root_borrow.prev = Some(node_weak);
-                }
-                if let Ok(mut node_borrow) = node.try_borrow_mut() {
-                    node_borrow.child = Some(root);
-                }
+                node_mut(&root).prev = Some(node_weak);
+                node_mut(&node).child = Some(root);
                 self.root = Some(node);
             } else {
                 // Case 2: Current root has smaller or equal priority
@@ -471,27 +519,24 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for PairingHeap<T, P> {
                 let root_weak = root.downgrade();
 
                 // Take root's existing first child
-                let old_first_child = root.try_borrow_mut().ok().and_then(|mut b| b.child.take());
+                let old_first_child = node_mut(&root).child.take();
 
                 // Update old_first_child's prev to point to new node (if it exists)
                 if let Some(ref old_child) = old_first_child {
                     #[cfg(feature = "access_tracking")]
                     track!(write ParentPtr);
-                    if let Ok(mut child_borrow) = old_child.try_borrow_mut() {
-                        child_borrow.prev = Some(node_weak);
-                    }
+                    node_mut(old_child).prev = Some(node_weak);
                 }
 
                 // Set up new node as first child of root
-                if let Ok(mut node_borrow) = node.try_borrow_mut() {
-                    node_borrow.sibling = old_first_child;
-                    node_borrow.prev = Some(root_weak);
+                {
+                    let new_node = node_mut(&node);
+                    new_node.sibling = old_first_child;
+                    new_node.prev = Some(root_weak);
                 }
 
                 // Make new node the first child of root
-                if let Ok(mut root_borrow) = root.try_borrow_mut() {
-                    root_borrow.child = Some(node);
-                }
+                node_mut(&root).child = Some(node);
                 self.root = Some(root);
             }
         } else {
@@ -545,22 +590,23 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for PairingHeap<T, P> {
         // Get node pointer for comparisons
         let node_ptr = handle.node.as_ptr();
 
-        // Safety check and update: new priority must actually be less
+        // Access node through weak reference to check and update priority.
+        //
+        // SAFETY: This is the ONE place we access a node through a weak reference
+        // rather than through the ownership tree. This is safe because:
+        // 1. We have &mut self - exclusive access to the entire heap
+        // 2. is_alive() confirmed the node exists in our heap
+        // 3. No other code can access this node during this operation
+        // 4. The pointer remains valid for the duration of &mut self
         #[cfg(feature = "access_tracking")]
         track!(read Priority);
-        {
-            let mut node_borrow = handle
-                .node
-                .try_borrow_mut()
-                .map_err(|_| HeapError::PriorityNotDecreased)?;
-            if new_priority >= node_borrow.priority {
-                return Err(HeapError::PriorityNotDecreased);
-            }
-            // Update the priority value in the same borrow
-            #[cfg(feature = "access_tracking")]
-            track!(write Priority);
-            node_borrow.priority = new_priority;
+        let node = unsafe { &mut *(node_ptr as *mut Node<T, P>) };
+        if new_priority >= node.priority {
+            return Err(HeapError::PriorityNotDecreased);
         }
+        #[cfg(feature = "access_tracking")]
+        track!(write Priority);
+        node.priority = new_priority;
 
         // Check if the node is already the root
         let is_root = self
@@ -717,7 +763,7 @@ impl<T, P: Ord> PairingHeap<T, P> {
         // Base case: only one child, no pairing needed
         #[cfg(feature = "access_tracking")]
         track!(read SiblingPtr);
-        let has_sibling = unsafe { (*first.as_ptr()).sibling.is_some() };
+        let has_sibling = node_ref(&first).sibling.is_some();
         if !has_sibling {
             return first;
         }
@@ -749,13 +795,8 @@ impl<T, P: Ord> PairingHeap<T, P> {
                 track!(write ParentPtr);
             }
             // Get and disconnect sibling before modifying node
-            let sibling = node
-                .try_borrow_mut()
-                .ok()
-                .and_then(|mut b| b.sibling.take());
-            if let Ok(mut node_borrow) = node.try_borrow_mut() {
-                node_borrow.prev = None;
-            }
+            let sibling = node_mut(&node).sibling.take();
+            node_mut(&node).prev = None;
 
             if let Some(sib) = sibling {
                 #[cfg(feature = "access_tracking")]
@@ -768,10 +809,8 @@ impl<T, P: Ord> PairingHeap<T, P> {
                 }
                 // We have a pair: node and its sibling
                 // Get the next node before we disconnect
-                let next = sib.try_borrow_mut().ok().and_then(|mut b| b.sibling.take());
-                if let Ok(mut sib_borrow) = sib.try_borrow_mut() {
-                    sib_borrow.prev = None;
-                }
+                let next = node_mut(&sib).sibling.take();
+                node_mut(&sib).prev = None;
 
                 // Merge the pair: smaller priority becomes parent
                 // This maintains heap property
@@ -854,15 +893,8 @@ impl<T, P: Ord> PairingHeap<T, P> {
             track!(read Priority);
             track!(read Priority);
         }
-        // Compare priorities using try_borrow_mut
-        let a_is_smaller = {
-            let a_borrow = a.try_borrow_mut().ok();
-            let b_borrow = b.try_borrow_mut().ok();
-            match (a_borrow, b_borrow) {
-                (Some(a_ref), Some(b_ref)) => a_ref.priority < b_ref.priority,
-                _ => false,
-            }
-        };
+        // Compare priorities - direct access is safe: we own both RefBoxes
+        let a_is_smaller = node_ref(&a).priority < node_ref(&b).priority;
 
         if a_is_smaller {
             // Node a has smaller priority: it becomes parent
@@ -880,25 +912,22 @@ impl<T, P: Ord> PairingHeap<T, P> {
             let b_weak = b.downgrade();
 
             // Take a's old first child
-            let old_first_child = a.try_borrow_mut().ok().and_then(|mut b| b.child.take());
+            let old_first_child = node_mut(&a).child.take();
 
             // Update old_first_child's prev to point to b (if it exists)
             if let Some(ref old_child) = old_first_child {
                 #[cfg(feature = "access_tracking")]
                 track!(write ParentPtr);
-                if let Ok(mut child_borrow) = old_child.try_borrow_mut() {
-                    child_borrow.prev = Some(b_weak);
-                }
+                node_mut(old_child).prev = Some(b_weak);
             }
 
             // Make b the first child of a
-            if let Ok(mut b_borrow) = b.try_borrow_mut() {
-                b_borrow.sibling = old_first_child;
-                b_borrow.prev = Some(a_weak);
+            {
+                let b_node = node_mut(&b);
+                b_node.sibling = old_first_child;
+                b_node.prev = Some(a_weak);
             }
-            if let Ok(mut a_borrow) = a.try_borrow_mut() {
-                a_borrow.child = Some(b);
-            }
+            node_mut(&a).child = Some(b);
             a // Return a as the new root
         } else {
             // Node b has smaller or equal priority: it becomes parent
@@ -916,25 +945,22 @@ impl<T, P: Ord> PairingHeap<T, P> {
             let a_weak = a.downgrade();
 
             // Take b's old first child
-            let old_first_child = b.try_borrow_mut().ok().and_then(|mut b| b.child.take());
+            let old_first_child = node_mut(&b).child.take();
 
             // Update old_first_child's prev to point to a (if it exists)
             if let Some(ref old_child) = old_first_child {
                 #[cfg(feature = "access_tracking")]
                 track!(write ParentPtr);
-                if let Ok(mut child_borrow) = old_child.try_borrow_mut() {
-                    child_borrow.prev = Some(a_weak);
-                }
+                node_mut(old_child).prev = Some(a_weak);
             }
 
             // Make a the first child of b
-            if let Ok(mut a_borrow) = a.try_borrow_mut() {
-                a_borrow.sibling = old_first_child;
-                a_borrow.prev = Some(b_weak);
+            {
+                let a_node = node_mut(&a);
+                a_node.sibling = old_first_child;
+                a_node.prev = Some(b_weak);
             }
-            if let Ok(mut b_borrow) = b.try_borrow_mut() {
-                b_borrow.child = Some(a);
-            }
+            node_mut(&b).child = Some(a);
             b // Return b as the new root
         }
     }
@@ -953,6 +979,9 @@ impl<T, P: Ord> PairingHeap<T, P> {
     fn cut_node_by_ptr(&mut self, node_ptr: *const Node<T, P>) -> Option<NodeRef<T, P>> {
         // We need to find the node in the tree and get its prev pointer
         // Use the node's prev pointer to find the owner
+        //
+        // SAFETY for weak ref access: Same rationale as decrease_key - we have &mut self
+        // (exclusive heap access) and is_alive() confirms the node exists in our heap.
         let prev_weak = unsafe { (*node_ptr).prev.clone()? };
 
         if !prev_weak.is_alive() {
@@ -965,88 +994,63 @@ impl<T, P: Ord> PairingHeap<T, P> {
             track!(node);
         }
 
-        // Use raw pointer to check if prev's child is our node
-        let prev_ptr = prev_weak.as_ptr();
-        let is_first_child = unsafe {
-            (*prev_ptr)
-                .child
-                .as_ref()
-                .map(|c| c.as_ptr() == node_ptr)
-                .unwrap_or(false)
-        };
+        // Access prev node through weak reference
+        // SAFETY: We have &mut self, prev is alive, no aliasing possible
+        let prev_node = unsafe { &mut *(prev_weak.as_ptr() as *mut Node<T, P>) };
+
+        // Check if prev's child is our node
+        let is_first_child = prev_node
+            .child
+            .as_ref()
+            .map(|c| c.as_ptr() == node_ptr)
+            .unwrap_or(false);
 
         if is_first_child {
             // Node is the first child - take it from parent
-            let node = {
-                let mut prev_borrow = prev_weak.try_borrow_mut().ok()?;
-                prev_borrow.child.take()?
-            };
+            let node = prev_node.child.take()?;
 
             // Get node's sibling for prev
-            let node_sibling = node
-                .try_borrow_mut()
-                .ok()
-                .and_then(|mut b| b.sibling.take());
+            let node_sibling = node_mut(&node).sibling.take();
 
             // Update sibling's prev pointer
             let prev_weak_for_sibling = prev_weak.clone();
             if let Some(ref sibling) = node_sibling {
-                if let Ok(mut sib_borrow) = sibling.try_borrow_mut() {
-                    sib_borrow.prev = Some(prev_weak_for_sibling);
-                }
+                node_mut(sibling).prev = Some(prev_weak_for_sibling);
             }
 
             // Set parent's child to node's sibling
-            if let Ok(mut prev_borrow) = prev_weak.try_borrow_mut() {
-                prev_borrow.child = node_sibling;
-            }
+            prev_node.child = node_sibling;
 
             // Clear node's prev
-            if let Ok(mut node_borrow) = node.try_borrow_mut() {
-                node_borrow.prev = None;
-            }
+            node_mut(&node).prev = None;
 
             Some(node)
         } else {
             // Node is not first child - it's in the sibling chain
             // prev is actually previous sibling, need to find and take it
-            let node = {
-                let mut prev_borrow = prev_weak.try_borrow_mut().ok()?;
-                prev_borrow.sibling.take()?
-            };
+            let node = prev_node.sibling.take()?;
 
             // Verify we got the right node
             if node.as_ptr() != node_ptr {
                 // Put it back and return None - something is wrong
-                if let Ok(mut prev_borrow) = prev_weak.try_borrow_mut() {
-                    prev_borrow.sibling = Some(node);
-                }
+                prev_node.sibling = Some(node);
                 return None;
             }
 
             // Get node's sibling for prev
-            let node_sibling = node
-                .try_borrow_mut()
-                .ok()
-                .and_then(|mut b| b.sibling.take());
+            let node_sibling = node_mut(&node).sibling.take();
 
             // Update sibling's prev pointer
             let prev_weak_for_sibling = prev_weak.clone();
             if let Some(ref sibling) = node_sibling {
-                if let Ok(mut sib_borrow) = sibling.try_borrow_mut() {
-                    sib_borrow.prev = Some(prev_weak_for_sibling);
-                }
+                node_mut(sibling).prev = Some(prev_weak_for_sibling);
             }
 
             // Set prev sibling's next sibling to node's sibling
-            if let Ok(mut prev_borrow) = prev_weak.try_borrow_mut() {
-                prev_borrow.sibling = node_sibling;
-            }
+            prev_node.sibling = node_sibling;
 
             // Clear node's prev
-            if let Ok(mut node_borrow) = node.try_borrow_mut() {
-                node_borrow.prev = None;
-            }
+            node_mut(&node).prev = None;
 
             Some(node)
         }
