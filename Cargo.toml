@@ -5,6 +5,7 @@ members = [".", "crates/intrusive-circular-list", "crates/perf-measurement"]
 name = "rust-advanced-heaps"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.82"
 authors = ["Your Name <you@example.com>"]
 description = "Comprehensive collection of advanced heap data structures with efficient decrease_key support"
 license = "MIT OR Apache-2.0"
