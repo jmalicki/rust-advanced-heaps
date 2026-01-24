@@ -33,15 +33,19 @@
 ```rust
 struct Node<T, P> {
     // HOT fields - accessed during consolidation & decrease_key
-    priority: P,       // Hot - compared frequently
-    marked: bool,      // Hot during decrease_key
+    priority: Option<P>,      // Hot - compared frequently (Option for extraction)
+    marked: bool,             // Hot during decrease_key
     // Medium fields - structure pointers
-    parent: Weak<...>, // Medium - cascade traversal
-    children: Vec<..>, // Medium - consolidation
+    parent: Option<Weak<..>>, // Medium - cascade traversal (Option for nullability)
+    children: Vec<RefBox<..>>,// Medium - consolidation (single owner)
     // COLD field - only accessed on pop
-    item: T,           // Cold - only accessed on pop
+    item: Option<T>,          // Cold - only accessed on pop (Option for extraction)
 }
 ```
+
+**RefBox Migration Status**: See detailed analysis in "RefBox Migration Analysis"
+section below. The Option wrappers required for extraction negate the heap
+overhead savings.
 
 ### Current Field Layout Analysis
 
@@ -112,9 +116,14 @@ items: Vec<T>
 
 ### 3. Pointer Representation
 
-**Current**: `Rc<RefCell<Node>>` with Weak backlinks
+**Baseline**: `Rc<RefCell<Node>>` with Weak backlinks (24 bytes heap overhead)
 
-**Optimal**: Arena indices with generation counters
+**Current experiment**: `RefBox<Node>` with Weak references (8 bytes heap overhead)
+
+- ⚠️ Option wrappers add 16 bytes to node struct, negating savings
+- See "RefBox Migration Analysis" section for details
+
+**Future optimal**: Arena indices with generation counters
 
 ```rust
 struct Handle {
@@ -125,9 +134,9 @@ struct Handle {
 
 **Benefit**:
 
-- 8 bytes instead of 8+ bytes (Rc pointer)
 - Better cache locality (arena is contiguous)
-- No reference counting overhead
+- No reference counting overhead at all
+- Fixed-size handles (8 bytes)
 
 ### 4. Children Storage
 
@@ -144,14 +153,70 @@ next_sibling: Option<u32>, // Index
 
 ## Estimated Improvement
 
-| Change | Cache Miss Reduction | Implementation Effort |
-| ------ | -------------------- | --------------------- |
-| Split hot/cold | 25-40% | High |
-| Field reorder | 5-10% | Low |
-| Arena + indices | 15-25% | High |
-| Intrusive lists | 10-15% | Medium |
+| Change | Cache Miss Reduction | Implementation Effort | Status |
+| ------ | -------------------- | --------------------- | ------ |
+| Field reorder | 5-10% | Low | ✅ Done (PR #81) |
+| RefBox + take() | **28%** | Medium | ✅ Done |
+| Split hot/cold | 25-40% | High | Planned |
+| Arena + indices | 15-25% | High | Planned |
+| Intrusive lists | 10-15% | Medium | Planned |
 
-**Combined potential**: 40-60% cache miss reduction
+**Implemented improvements**: ~28% reduction (RefBox + take())
+**Combined future potential**: 40-60% additional cache miss reduction
+
+## RefBox Migration Analysis
+
+### Cachegrind Results (100k elements, Dijkstra-like workload)
+
+| Metric | `Rc<RefCell>` | `RefBox` + Option | `RefBox` + take() | Change vs Rc |
+|--------|---------------|-------------------|-------------------|--------------|
+| Node struct size | 56 bytes | 72 bytes | **56 bytes** | 0% |
+| Heap overhead | 24 bytes | 8 bytes | **8 bytes** | -67% |
+| **Total per node** | **80 bytes** | **80 bytes** | **64 bytes** | **-20%** |
+| D1 misses (total) | 2,406,750 | 2,517,456 | **1,728,073** | **-28%** |
+| D1 read misses | 1,621,267 | 2,079,432 | 1,329,822 | -18% |
+| D1 write misses | 785,483 | 438,024 | 398,251 | -49% |
+| LL misses | 233,505 | 233,484 | 208,531 | -11% |
+
+### RefBox with Option: Why It Didn't Help
+
+The `Option<T>` and `Option<P>` wrappers (needed for `take()` on pop without
+Clone bounds) add 16 bytes to the node struct, completely negating the 16-byte
+savings from RefBox's reduced heap overhead.
+
+### RefBox with take(): The Solution
+
+By adding a `take()` method to RefBox
+([PR #5](https://github.com/yvesdum/refbox/pull/5)), we can move values out of
+the RefBox directly without needing Option wrappers:
+
+```rust
+// Before (with Option wrappers):
+struct Node<T, P> {
+    priority: Option<P>,  // 16 bytes for Option<i64>
+    item: Option<T>,      // 16 bytes for Option<i64>
+    ...
+}
+let (priority, item) = {
+    let mut node = min_node.try_borrow_mut().ok()?;
+    (node.priority.take()?, node.item.take()?)
+};
+
+// After (with RefBox::take()):
+struct Node<T, P> {
+    priority: P,  // 8 bytes
+    item: T,      // 8 bytes
+    ...
+}
+let node = min_node.take();  // Moves entire node out
+(node.priority, node.item)
+```
+
+This achieves:
+
+- **28% fewer D1 cache misses** vs `Rc<RefCell>`
+- **20% less memory per node** (64 bytes vs 80 bytes)
+- Node fits in **single cache line** (56 bytes struct + 8 bytes heap overhead)
 
 ## Trade-offs
 
@@ -163,11 +228,9 @@ next_sibling: Option<u32>, // Index
 ## Verification
 
 ```bash
-# Before optimization
-valgrind --tool=cachegrind ./target/release/cache_profile 100000 fibonacci
+# Run cache benchmark
+cargo build --release --bin cache_benchmark
+valgrind --tool=cachegrind --cache-sim=yes ./target/release/cache_benchmark 100000
 
-# Record: D1 miss rate, LL miss rate
-
-# After optimization (if implemented)
-# Compare metrics
+# Compare D1 miss rate between implementations
 ```

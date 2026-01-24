@@ -27,6 +27,9 @@ arena-storage = ["slotmap"]
 access_tracking = []
 
 [dependencies]
+# Single-owner smart pointer with weak references (reduced per-node overhead vs Rc<RefCell>)
+# Using fork with take() method until upstream merges https://github.com/yvesdum/refbox/pull/5
+refbox = { git = "https://github.com/jmalicki/refbox.git", branch = "add-take-method" }
 # For stack-allocated vectors in fixed-arity heaps
 smallvec = "1.13"
 # Fast hashing for pathfinding algorithms
