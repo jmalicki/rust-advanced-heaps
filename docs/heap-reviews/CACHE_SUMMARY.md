@@ -39,7 +39,7 @@ valgrind --tool=cachegrind ./target/release/access_analyzer dijkstra_sparse 1000
 ### Tree-Based Heaps (Fibonacci/Pairing/Rank-Pairing)
 
 | Metric | Fibonacci | Pairing | Rank-Pairing |
-| ------ | --------- | ------- | ------------ |
+|--------|-----------|---------|--------------|
 | Primary Access | priority | priority | priority, rank |
 | Cascade Depth | O(log n) | - | O(log n) |
 | Item Access | pop only | pop only | pop only |
@@ -54,7 +54,7 @@ valgrind --tool=cachegrind ./target/release/access_analyzer dijkstra_sparse 1000
 ### Binomial Heap
 
 | Metric | Current | Optimal |
-| ------ | ------- | ------- |
+|--------|---------|---------|
 | Storage | Rc nodes | Arena + indices |
 | Bubble-up | swap values | pointer swap |
 | Degree slots | Vec | array |
@@ -101,7 +101,7 @@ Inherently pointer-heavy due to skip list structure.
 Based on algorithm analysis:
 
 | Heap | Priority R/W | Item R/W | Pointer R/W | Other |
-| ---- | ------------ | -------- | ----------- | ----- |
+|------|--------------|----------|-------------|-------|
 | Fibonacci | 45%/16% | 3%/3% | 26%/9% | marked 13% |
 | Pairing | 50%/10% | 3%/3% | 40%/5% | - |
 | Rank-Pairing | 40%/15% | 3%/3% | 30%/10% | rank 12% |
