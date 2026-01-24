@@ -367,10 +367,10 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for RankPairingHeap<T, P> {
         };
 
         // Link new node into the tree structure
-        if self.root.is_some() {
+        if let Some(ref root) = self.root {
             let node_priority_less = {
                 let node_ref = node.try_borrow_mut().unwrap();
-                let root_ref = self.root.as_ref().unwrap().try_borrow_mut().unwrap();
+                let root_ref = root.try_borrow_mut().unwrap();
                 node_ref.priority < root_ref.priority
             };
             if node_priority_less {
@@ -385,7 +385,7 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for RankPairingHeap<T, P> {
                 // Case 2: Current root has smaller or equal priority
                 // Add new node as a child of the root
                 // Heap property maintained: new node >= root
-                Self::make_child(self.root.as_ref().unwrap(), node);
+                Self::make_child(root, node);
                 // Root stays the same, node is now a child
             }
         } else {
