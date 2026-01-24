@@ -34,22 +34,23 @@
 
 use crate::rank::Rank;
 use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError, MergeableHeap};
-use std::cell::RefCell;
-use std::rc::{Rc, Weak};
+#[cfg(feature = "access_tracking")]
+#[allow(unused_imports)]
+use crate::{track, track_op};
+use refbox::{RefBox, Weak};
 
 // ============================================================================
 // Rc-based implementation (default, stable)
 // ============================================================================
 
 /// Type alias for strong node reference
-type NodeRef<T, P> = Rc<RefCell<Node<T, P>>>;
+type NodeRef<T, P> = RefBox<Node<T, P>>;
 /// Type alias for weak node reference (used for parent backlinks)
-type WeakNodeRef<T, P> = Weak<RefCell<Node<T, P>>>;
+type WeakNodeRef<T, P> = Weak<Node<T, P>>;
 /// Type alias for optional strong node reference
 type OptNodeRef<T, P> = Option<NodeRef<T, P>>;
 
 /// Handle to an element in a Skew binomial heap
-#[derive(Debug)]
 pub struct SkewBinomialHandle<T, P> {
     node: WeakNodeRef<T, P>,
 }
@@ -64,11 +65,19 @@ impl<T, P> Clone for SkewBinomialHandle<T, P> {
 
 impl<T, P> PartialEq for SkewBinomialHandle<T, P> {
     fn eq(&self, other: &Self) -> bool {
-        self.node.ptr_eq(&other.node)
+        self.node.as_ptr() == other.node.as_ptr()
     }
 }
 
 impl<T, P> Eq for SkewBinomialHandle<T, P> {}
+
+impl<T, P> std::fmt::Debug for SkewBinomialHandle<T, P> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SkewBinomialHandle")
+            .field("node", &self.node.as_ptr())
+            .finish()
+    }
+}
 
 impl<T, P> Handle for SkewBinomialHandle<T, P> {}
 
@@ -81,27 +90,26 @@ impl<T, P> Handle for SkewBinomialHandle<T, P> {}
 /// - Cold path last: `item` is only accessed when popping
 struct Node<T, P> {
     /// Priority for heap ordering - Hot path: accessed on every comparison
-    /// Uses Option for take() semantics on pop
-    priority: Option<P>,
-    /// Parent node - weak reference to avoid cycles
-    parent: WeakNodeRef<T, P>,
+    priority: P,
+    /// Skew flag for skew link operations
+    skew: bool,
+    /// Rank: number of children. Uses Rank (u8) to save memory - max rank is O(log n).
+    rank: Rank,
+    /// Parent node - weak reference to avoid cycles (None if root)
+    parent: Option<WeakNodeRef<T, P>>,
     /// First child in child list - strong reference (None if leaf)
     child: OptNodeRef<T, P>,
     /// Next sibling in parent's child list - strong reference (None if last child)
     sibling: OptNodeRef<T, P>,
-    /// Rank: number of children. Uses Rank (u8) to save memory - max rank is O(log n).
-    rank: Rank,
-    /// Skew flag for skew link operations
-    skew: bool,
     /// The item stored in the heap - Cold path: only accessed on pop
-    /// Uses Option for take() semantics on pop
-    item: Option<T>,
+    item: T,
 }
 
-/// Skew Binomial Heap with Rc-based storage (default, stable)
+/// Skew Binomial Heap with RefBox-based storage
 pub struct SkewBinomialHeap<T, P: Ord> {
     trees: Vec<OptNodeRef<T, P>>,
-    min: OptNodeRef<T, P>,
+    /// Index of the minimum element in trees (since RefBox doesn't implement Clone)
+    min_index: Option<usize>,
     len: usize,
 }
 
@@ -109,13 +117,13 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
     fn new() -> Self {
         Self {
             trees: Vec::new(),
-            min: None,
+            min_index: None,
             len: 0,
         }
     }
 
     fn is_empty(&self) -> bool {
-        self.min.is_none()
+        self.min_index.is_none()
     }
 
     fn len(&self) -> usize {
@@ -127,47 +135,33 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
     }
 
     fn peek(&self) -> Option<(&P, &T)> {
-        self.min.as_ref().map(|min_ref| unsafe {
+        let idx = self.min_index?;
+        self.trees.get(idx)?.as_ref().map(|min_ref| unsafe {
             let ptr = min_ref.as_ptr();
-            (
-                (*ptr)
-                    .priority
-                    .as_ref()
-                    .expect("min node must have priority"),
-                (*ptr).item.as_ref().expect("min node must have item"),
-            )
+            (&(*ptr).priority, &(*ptr).item)
         })
     }
 
     fn pop(&mut self) -> Option<(P, T)> {
-        let min_ref = self.min.take()?;
-
-        // Clear from trees
-        let rank = min_ref.borrow().rank as usize;
-        if rank < self.trees.len() {
-            self.trees[rank] = None;
-        }
+        let min_idx = self.min_index.take()?;
+        let min_ref = self.trees.get_mut(min_idx)?.take()?;
 
         // Collect all children
-        let first_child = min_ref.borrow_mut().child.take();
+        let first_child = min_ref.try_borrow_mut().ok()?.child.take();
         let mut children_to_insert: Vec<NodeRef<T, P>> = Vec::new();
 
         if let Some(first) = first_child {
             let mut current = Some(first);
             while let Some(curr) = current {
-                let next = curr.borrow_mut().sibling.take();
-                curr.borrow_mut().parent = Weak::new();
+                let next = curr.try_borrow_mut().ok()?.sibling.take();
+                curr.try_borrow_mut().ok()?.parent = None;
                 children_to_insert.push(curr);
                 current = next;
             }
         }
 
-        let (priority, item) = {
-            let mut node = min_ref.borrow_mut();
-            (node.priority.take().unwrap(), node.item.take().unwrap())
-        };
-
-        drop(min_ref);
+        // Use RefBox::take() to consume the node
+        let node = RefBox::take(min_ref);
 
         for child in children_to_insert {
             self.insert_tree(child);
@@ -187,7 +181,7 @@ impl<T, P: Ord> Heap<T, P> for SkewBinomialHeap<T, P> {
             );
         }
 
-        Some((priority, item))
+        Some((node.priority, node.item))
     }
 }
 
@@ -216,7 +210,7 @@ impl<T, P: Ord> MergeableHeap<T, P> for SkewBinomialHeap<T, P> {
         self.len += other.len;
         self.find_and_update_min();
 
-        other.min = None;
+        other.min_index = None;
         other.len = 0;
     }
 }
@@ -225,22 +219,21 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for SkewBinomialHeap<T, P> {
     type Handle = SkewBinomialHandle<T, P>;
 
     fn push_with_handle(&mut self, priority: P, item: T) -> Self::Handle {
-        let node = Rc::new(RefCell::new(Node {
+        let node = RefBox::new(Node {
             // Hot path first
-            priority: Some(priority),
+            priority,
+            skew: true,
+            rank: 0,
             // Traversal fields
-            parent: Weak::new(),
+            parent: None,
             child: None,
             sibling: None,
-            // Small fields
-            rank: 0,
-            skew: true,
             // Cold path last
-            item: Some(item),
-        }));
+            item,
+        });
 
         let handle = SkewBinomialHandle {
-            node: Rc::downgrade(&node),
+            node: node.downgrade(),
         };
 
         self.insert_tree(node);
@@ -255,31 +248,46 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for SkewBinomialHeap<T, P> {
     }
 
     fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) -> Result<(), HeapError> {
-        let node_ref = handle.node.upgrade().ok_or(HeapError::InvalidHandle)?;
+        if !handle.node.is_alive() {
+            return Err(HeapError::InvalidHandle);
+        }
 
-        // Check if node has been deleted (priority is None)
+        // Check priority
         {
-            let node = node_ref.borrow();
-            if node.priority.is_none() {
-                return Err(HeapError::InvalidHandle);
-            }
-            if new_priority >= *node.priority.as_ref().unwrap() {
+            let node = handle
+                .node
+                .try_borrow_mut()
+                .ok()
+                .ok_or(HeapError::InvalidHandle)?;
+            if new_priority >= node.priority {
                 return Err(HeapError::PriorityNotDecreased);
             }
         }
 
         // Check if node is a root (no parent)
-        let has_parent = node_ref.borrow().parent.upgrade().is_some();
+        let has_parent = {
+            let node = handle
+                .node
+                .try_borrow_mut()
+                .ok()
+                .ok_or(HeapError::InvalidHandle)?;
+            node.parent.as_ref().is_some_and(|p| p.is_alive())
+        };
 
         if !has_parent {
             // Node is a root, just update priority and min
-            node_ref.borrow_mut().priority = Some(new_priority);
+            handle
+                .node
+                .try_borrow_mut()
+                .ok()
+                .ok_or(HeapError::InvalidHandle)?
+                .priority = new_priority;
             self.find_and_update_min();
             return Ok(());
         }
 
         // Cut the node from its parent and reinsert
-        self.cut_and_reinsert(node_ref, new_priority);
+        self.cut_and_reinsert_via_weak(&handle.node, new_priority);
 
         Ok(())
     }
@@ -298,102 +306,161 @@ impl<T, P: Ord> SkewBinomialHeap<T, P> {
 
     #[cfg(feature = "expensive_verify")]
     fn count_subtree(node: &NodeRef<T, P>) -> usize {
-        let node_ref = node.borrow();
-        // Verify node has valid priority
-        assert!(
-            node_ref.priority.is_some(),
-            "Found node with None priority in tree"
-        );
-
         let mut count = 1;
 
-        // Count children
-        let mut child_opt = node_ref.child.clone();
-        drop(node_ref);
+        // Count children using raw pointer for traversal
+        let first_child_ptr = {
+            let node_ref = node.try_borrow_mut().ok().unwrap();
+            node_ref.child.as_ref().map(|c| c.as_ptr())
+        };
 
-        while let Some(child) = child_opt {
-            count += Self::count_subtree(&child);
-            child_opt = child.borrow().sibling.clone();
+        if let Some(mut current_ptr) = first_child_ptr {
+            loop {
+                // SAFETY: we hold strong references through the tree
+                let current = unsafe { &*current_ptr };
+                count += 1;
+
+                // Recursively count this child's children
+                if let Some(ref child) = current.child {
+                    count += Self::count_subtree(child) - 1; // -1 since we already counted this node
+                }
+
+                if let Some(ref sibling) = current.sibling {
+                    current_ptr = sibling.as_ptr();
+                } else {
+                    break;
+                }
+            }
         }
 
         count
     }
 
-    /// Cuts a node from its parent and reinserts it with a new priority
-    fn cut_and_reinsert(&mut self, node: NodeRef<T, P>, new_priority: P) {
-        // Get parent before we modify anything
-        let parent_weak = node.borrow().parent.clone();
-        let parent = parent_weak.upgrade().unwrap();
+    /// Cuts a node from its parent and reinserts it with a new priority (via weak reference)
+    fn cut_and_reinsert_via_weak(&mut self, node_weak: &WeakNodeRef<T, P>, new_priority: P) {
+        if !node_weak.is_alive() {
+            return;
+        }
 
-        // Remove node from parent's child list
-        let mut found = false;
-        {
-            let parent_child = parent.borrow().child.clone();
+        // Get parent weak and node pointer
+        let (parent_weak_opt, node_ptr) = {
+            let node_ref = node_weak.try_borrow_mut().ok().unwrap();
+            (node_ref.parent.clone(), node_weak.as_ptr())
+        };
 
-            if let Some(ref first_child) = parent_child {
-                if Rc::ptr_eq(first_child, &node) {
-                    // Node is first child - update parent's child pointer
-                    let next_sibling = node.borrow().sibling.clone();
-                    parent.borrow_mut().child = next_sibling;
-                    found = true;
-                } else {
-                    // Search through sibling list
-                    let mut prev = Rc::clone(first_child);
-                    loop {
-                        let next = prev.borrow().sibling.clone();
-                        match next {
-                            Some(ref next_node) if Rc::ptr_eq(next_node, &node) => {
-                                // Found it - remove from list
-                                let skip_to = node.borrow().sibling.clone();
-                                prev.borrow_mut().sibling = skip_to;
-                                found = true;
-                                break;
-                            }
-                            Some(next_node) => {
-                                prev = next_node;
-                            }
-                            None => break,
-                        }
+        // Check if parent exists and is alive
+        let parent_weak = match parent_weak_opt {
+            Some(ref pw) if pw.is_alive() => pw,
+            _ => {
+                // Node is already a root, just update priority
+                if let Ok(mut node) = node_weak.try_borrow_mut() {
+                    node.priority = new_priority;
+                    node.parent = None;
+                }
+                self.find_and_update_min();
+                return;
+            }
+        };
+
+        // Get parent's first child pointer to traverse
+        let (parent_first_child_ptr, parent_old_rank, parent_is_root) = {
+            let parent_ref = parent_weak.try_borrow_mut().ok().unwrap();
+            let first_child_ptr = parent_ref.child.as_ref().map(|c| c.as_ptr());
+            let old_rank = parent_ref.rank as usize;
+            let is_root = parent_ref.parent.as_ref().is_none_or(|p| !p.is_alive());
+            (first_child_ptr, old_rank, is_root)
+        };
+
+        // Find and remove node from parent's child list
+        let mut cut_node: Option<NodeRef<T, P>> = None;
+
+        if let Some(first_child_ptr) = parent_first_child_ptr {
+            if first_child_ptr == node_ptr {
+                // Node is first child - take it from parent.child and capture
+                cut_node = parent_weak.try_borrow_mut().ok().unwrap().child.take();
+                if let Some(ref cn) = cut_node {
+                    // Set parent's child to the cut node's sibling
+                    let next_sibling = cn.try_borrow_mut().ok().unwrap().sibling.take();
+                    parent_weak.try_borrow_mut().ok().unwrap().child = next_sibling;
+                }
+            } else {
+                // Search through sibling list using position-based approach
+                // The sibling list is: first_child -> sib1 -> sib2 -> ... -> target -> ...
+                // We need to find which position target is at, then cut it
+                //
+                // First pass: count position using pointer comparison
+                // We take the child list, walk it collecting RefBoxes into a vec,
+                // find the target position, then rebuild with target removed.
+                // This moves RefBoxes (not values) so weak pointers remain valid.
+
+                let first_child = parent_weak.try_borrow_mut().ok().unwrap().child.take();
+                if let Some(fc) = first_child {
+                    // Collect all siblings into a vec by taking ownership
+                    let mut siblings: Vec<NodeRef<T, P>> = Vec::new();
+                    let mut current = Some(fc);
+                    while let Some(node) = current {
+                        let next = node.try_borrow_mut().ok().unwrap().sibling.take();
+                        siblings.push(node);
+                        current = next;
                     }
+
+                    // Find target position by pointer comparison
+                    let target_pos = siblings.iter().position(|n| n.as_ptr() == node_ptr);
+
+                    if let Some(pos) = target_pos {
+                        // Remove the target from the vec
+                        cut_node = Some(siblings.remove(pos));
+                    }
+
+                    // Rebuild sibling list from remaining nodes (in reverse order)
+                    let mut rebuilt: Option<NodeRef<T, P>> = None;
+                    for node in siblings.into_iter().rev() {
+                        node.try_borrow_mut().ok().unwrap().sibling = rebuilt;
+                        rebuilt = Some(node);
+                    }
+
+                    // Restore to parent
+                    parent_weak.try_borrow_mut().ok().unwrap().child = rebuilt;
                 }
             }
         }
 
-        if !found {
-            // Node might already be detached, just update priority
-            node.borrow_mut().priority = Some(new_priority);
-            node.borrow_mut().parent = Weak::new();
-            self.find_and_update_min();
-            return;
+        let node_to_reinsert = match cut_node {
+            Some(cn) => cn,
+            None => {
+                // Node might already be detached, just update priority
+                if let Ok(mut node) = node_weak.try_borrow_mut() {
+                    node.priority = new_priority;
+                    node.parent = None;
+                }
+                self.find_and_update_min();
+                return;
+            }
+        };
+
+        // Update parent's rank
+        if let Ok(mut parent) = parent_weak.try_borrow_mut() {
+            parent.rank = parent.rank.saturating_sub(1);
         }
 
-        // Get parent's old rank before modifying
-        let parent_old_rank = parent.borrow().rank as usize;
-        let parent_is_root = parent.borrow().parent.upgrade().is_none();
-
-        // Update parent's rank (one less child)
-        {
-            let mut parent_mut = parent.borrow_mut();
-            parent_mut.rank = parent_mut.rank.saturating_sub(1);
-        }
-
-        // If parent is a root, it needs to be repositioned in trees
+        // If parent is a root, reposition in trees
         if parent_is_root && parent_old_rank < self.trees.len() {
-            // Remove parent from old position
-            self.trees[parent_old_rank] = None;
-            // Reinsert parent at correct rank
-            self.insert_tree(Rc::clone(&parent));
+            let parent_node = self.trees[parent_old_rank].take();
+            if let Some(pn) = parent_node {
+                self.insert_tree(pn);
+            }
         }
 
-        // Clear node's parent and sibling (keep children!)
-        node.borrow_mut().parent = Weak::new();
-        node.borrow_mut().sibling = None;
+        // Clear node's parent and sibling (keep children!), update priority
+        {
+            let mut node = node_to_reinsert.try_borrow_mut().ok().unwrap();
+            node.parent = None;
+            node.sibling = None;
+            node.priority = new_priority;
+        }
 
-        // Update priority
-        node.borrow_mut().priority = Some(new_priority);
-
-        // Reinsert the node (with its subtree intact) as a new tree
-        self.insert_tree(node);
+        // Reinsert the node as a new tree
+        self.insert_tree(node_to_reinsert);
 
         // Update minimum
         self.find_and_update_min();
@@ -401,7 +468,7 @@ impl<T, P: Ord> SkewBinomialHeap<T, P> {
 
     fn insert_tree(&mut self, mut tree: NodeRef<T, P>) {
         loop {
-            let rank = tree.borrow().rank as usize;
+            let rank = tree.try_borrow_mut().ok().unwrap().rank as usize;
 
             while self.trees.len() <= rank {
                 self.trees.push(None);
@@ -419,37 +486,29 @@ impl<T, P: Ord> SkewBinomialHeap<T, P> {
 
     fn link_trees(a: NodeRef<T, P>, b: NodeRef<T, P>) -> NodeRef<T, P> {
         let a_priority_greater = {
-            let a_b = a.borrow();
-            let b_b = b.borrow();
-            // Debug assertions to catch nodes with invalid priorities
-            debug_assert!(
-                a_b.priority.is_some(),
-                "link_trees: node 'a' has None priority"
-            );
-            debug_assert!(
-                b_b.priority.is_some(),
-                "link_trees: node 'b' has None priority"
-            );
-            a_b.priority.as_ref().unwrap() > b_b.priority.as_ref().unwrap()
+            let a_b = a.try_borrow_mut().ok().unwrap();
+            let b_b = b.try_borrow_mut().ok().unwrap();
+            a_b.priority > b_b.priority
         };
 
         if a_priority_greater {
             return Self::link_trees(b, a);
         }
 
+        // Get a's child and set up b's pointers
+        let a_child = a.try_borrow_mut().ok().unwrap().child.take();
         {
-            let a_child = a.borrow().child.clone();
-            let mut b_mut = b.borrow_mut();
-            b_mut.parent = Rc::downgrade(&a);
+            let mut b_mut = b.try_borrow_mut().ok().unwrap();
+            b_mut.parent = Some(a.downgrade());
             b_mut.sibling = a_child;
         }
 
+        // Update a's child and rank
+        let b_skew = b.try_borrow_mut().ok().unwrap().skew;
         {
-            let mut a_mut = a.borrow_mut();
-            a_mut.child = Some(Rc::clone(&b));
+            let mut a_mut = a.try_borrow_mut().ok().unwrap();
+            a_mut.child = Some(b);
             a_mut.rank += 1;
-
-            let b_skew = b.borrow().skew;
             a_mut.skew = b_skew && a_mut.rank > 0;
         }
 
@@ -457,18 +516,25 @@ impl<T, P: Ord> SkewBinomialHeap<T, P> {
     }
 
     fn find_and_update_min(&mut self) {
-        self.min = None;
-        for root_opt in self.trees.iter().flatten() {
-            let should_update = match &self.min {
-                Some(min_ref) => {
-                    root_opt.borrow().priority.as_ref().unwrap()
-                        < min_ref.borrow().priority.as_ref().unwrap()
-                }
-                None => true,
-            };
+        self.min_index = None;
+        let mut min_priority_ptr: Option<*const P> = None;
 
-            if should_update {
-                self.min = Some(Rc::clone(root_opt));
+        for (i, root_opt) in self.trees.iter().enumerate() {
+            if let Some(root) = root_opt {
+                let root_priority_ptr = {
+                    let root_ref = root.try_borrow_mut().ok().unwrap();
+                    &root_ref.priority as *const P
+                };
+
+                let should_update = match min_priority_ptr {
+                    None => true,
+                    Some(min_ptr) => unsafe { *root_priority_ptr < *min_ptr },
+                };
+
+                if should_update {
+                    min_priority_ptr = Some(root_priority_ptr);
+                    self.min_index = Some(i);
+                }
             }
         }
     }

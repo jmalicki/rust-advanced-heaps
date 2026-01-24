@@ -15,7 +15,7 @@ science literature that provide better amortized bounds:
 - **Binomial Heap** (1978): O(log n) `decrease_key` - foundational, simple
 - **Pairing Heap** (1986): o(log n) amortized `decrease_key` - simple, fast
 - **Fibonacci Heap** (1987): O(1) amortized `decrease_key` - optimal amortized
-- **Radix Heap** (1990): O(1) expected `decrease_key` - monotone, integer keys, cache-friendly
+- **Radix Heap** (1990): O(1) expected `decrease_key` - monotone, integer keys
 - **Skip List Heap** (1990): O(log n) `decrease_key` - simple wrapper, good cache
 - **Skew Binomial Heap** (1996): O(1) insert, O(log n) `decrease_key`
 - **2-3 Heap** (1999): O(1) amortized `decrease_key` - simpler than Fibonacci

@@ -49,6 +49,9 @@
 //!   [ACM DL](https://dl.acm.org/doi/10.1145/2213977.2214082)
 
 use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError, MergeableHeap};
+#[cfg(feature = "access_tracking")]
+#[allow(unused_imports)]
+use crate::{track, track_op};
 use intrusive_circular_list::{container_of_mut, CircularLink, CircularListOps};
 use std::ptr::NonNull;
 
