@@ -357,7 +357,7 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for FibonacciHeap<T, P> {
         // Upgrade weak reference to get the node
         let node_rc = match handle.node.upgrade() {
             Some(rc) => rc,
-            None => return Err(HeapError::PriorityNotDecreased), // Handle is invalid
+            None => return Err(HeapError::InvalidHandle), // Handle is invalid (node was popped)
         };
 
         #[cfg(feature = "access_tracking")]
