@@ -171,10 +171,10 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
     }
 
     fn peek(&self) -> Option<(&P, &T)> {
-        // Safety: The references we return point to data inside an Rc that the heap owns.
-        // As long as the caller has a borrow of &self, the Rc stays alive and the data is valid.
+        // Safety: The references we return point to data inside a RefBox that the heap owns.
+        // As long as the caller has a borrow of &self, the RefBox stays alive and the data is valid.
         // This is effectively a lifetime extension that is safe because:
-        // 1. The heap owns the Rc (root)
+        // 1. The heap owns the RefBox (root)
         // 2. The returned references are bounded by the &self lifetime
         // 3. We're only reading, not mutating
         self.root.as_ref().map(|root| {
@@ -434,13 +434,11 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for PairingHeap<T, P> {
                 track!(read Priority);
             }
             // Compare priorities
+            // Since we own both nodes (just created node, took root), borrows will succeed
             let node_is_smaller = {
-                let node_borrow = node.try_borrow_mut().ok();
-                let root_borrow = root.try_borrow_mut().ok();
-                match (node_borrow, root_borrow) {
-                    (Some(n), Some(r)) => n.priority < r.priority,
-                    _ => false,
-                }
+                let node_borrow = node.try_borrow_mut().unwrap();
+                let root_borrow = root.try_borrow_mut().unwrap();
+                node_borrow.priority < root_borrow.priority
             };
 
             if node_is_smaller {
@@ -947,10 +945,10 @@ impl<T, P: Ord> PairingHeap<T, P> {
     /// Cuts a node from its parent by pointer, removing it from the child list
     /// and returning ownership of the node.
     ///
-    /// **Time Complexity**: O(n) worst case to find the node in the tree
+    /// **Time Complexity**: O(1) using prev pointers for direct access
     ///
     /// **Algorithm**:
-    /// - Find the node in the tree by pointer
+    /// - Use the node's prev pointer to find the parent/sibling
     /// - Remove it from its parent's child list or sibling chain
     /// - Return ownership of the node
     ///
