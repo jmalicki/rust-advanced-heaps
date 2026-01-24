@@ -478,10 +478,10 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for RankPairingHeap<T, P> {
             // Merge all cut nodes with root
             // Each cut node (including cascaded parents) needs to be added
             for cut_node in cut_nodes {
-                if self.root.is_some() {
+                if let Some(ref root) = self.root {
                     let cut_is_smaller = {
                         let cut_ref = cut_node.try_borrow_mut().unwrap();
-                        let root_ref = self.root.as_ref().unwrap().try_borrow_mut().unwrap();
+                        let root_ref = root.try_borrow_mut().unwrap();
                         cut_ref.priority < root_ref.priority
                     };
                     if cut_is_smaller {
@@ -491,7 +491,7 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for RankPairingHeap<T, P> {
                         self.root = Some(cut_node);
                     } else {
                         // Current root has smaller priority: add cut node as child
-                        Self::make_child(self.root.as_ref().unwrap(), cut_node);
+                        Self::make_child(root, cut_node);
                     }
                 } else {
                     // Heap is empty (shouldn't happen, but handle gracefully)
