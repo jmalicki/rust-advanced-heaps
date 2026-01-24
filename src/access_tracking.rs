@@ -108,8 +108,13 @@ impl AccessStats {
 
     /// Start tracking a new operation
     pub fn begin_op(&mut self, op_name: &'static str) {
+        debug_assert!(
+            self.current_op.is_empty(),
+            "nested access_tracking ops are not supported"
+        );
         self.current_op = op_name;
         self.nodes_touched = 0;
+        self.field_access.clear();
         self.chase_depth = 0;
         self.max_chase_depth = 0;
     }
@@ -145,22 +150,34 @@ impl AccessStats {
 
     /// Record a field access
     pub fn record(&mut self, field: Field, access_type: AccessType) {
+        if self.current_op.is_empty() {
+            return;
+        }
         *self.field_access.entry((field, access_type)).or_default() += 1;
     }
 
     /// Record a node being touched
     pub fn touch_node(&mut self) {
+        if self.current_op.is_empty() {
+            return;
+        }
         self.nodes_touched += 1;
     }
 
     /// Record a pointer chase (increment depth)
     pub fn inc_chase(&mut self) {
+        if self.current_op.is_empty() {
+            return;
+        }
         self.chase_depth += 1;
         self.max_chase_depth = self.max_chase_depth.max(self.chase_depth);
     }
 
     /// Record returning from a pointer chase (decrement depth)
     pub fn dec_chase(&mut self) {
+        if self.current_op.is_empty() {
+            return;
+        }
         self.chase_depth = self.chase_depth.saturating_sub(1);
     }
 

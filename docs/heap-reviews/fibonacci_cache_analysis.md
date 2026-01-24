@@ -32,18 +32,21 @@
 
 ```rust
 struct Node<T, P> {
-    item: T,           // Cold - only accessed on pop
+    // HOT fields - accessed during consolidation & decrease_key
     priority: P,       // Hot - compared frequently
+    marked: bool,      // Hot during decrease_key
+    // Medium fields - structure pointers
     parent: Weak<...>, // Medium - cascade traversal
     children: Vec<..>, // Medium - consolidation
-    marked: bool,      // Hot during decrease_key
+    // COLD field - only accessed on pop
+    item: T,           // Cold - only accessed on pop
 }
 ```
 
 ### Current Field Layout Analysis
 
 | Field | Size (i64/i64) | Access Frequency | Notes |
-|-------|----------------|------------------|-------|
+| ----- | -------------- | ---------------- | ----- |
 | item | 8 bytes | Low (pop only) | Could be cold |
 | priority | 8 bytes | High | Comparison hot path |
 | parent | 8 bytes | Medium | Cascade traversal |
@@ -59,7 +62,7 @@ struct Node<T, P> {
 ### Expected Distribution
 
 | Field | Read % | Write % | Notes |
-|-------|--------|---------|-------|
+| ----- | ------ | ------- | ----- |
 | Priority | 45% | 16% | Most accessed field |
 | Item | 3% | 3% | Only on pop |
 | ChildPtr | 26% | 9% | Consolidation |
@@ -69,7 +72,7 @@ struct Node<T, P> {
 ### Pointer Chase Depth
 
 | Operation | Max | Avg | Notes |
-|-----------|-----|-----|-------|
+| --------- | --- | --- | ----- |
 | push | 1 | 1.0 | Single node |
 | pop | ~log n | 2.1 | Consolidation |
 | decrease_key | ~log n | 1.3 | Cascading cuts |
@@ -142,7 +145,7 @@ next_sibling: Option<u32>, // Index
 ## Estimated Improvement
 
 | Change | Cache Miss Reduction | Implementation Effort |
-|--------|---------------------|----------------------|
+| ------ | -------------------- | --------------------- |
 | Split hot/cold | 25-40% | High |
 | Field reorder | 5-10% | Low |
 | Arena + indices | 15-25% | High |
