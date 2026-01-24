@@ -36,9 +36,12 @@ and their uses in improved network optimization algorithms."
    - Implementation: `Vec<Rc<RefCell<Node<T, P>>>>` (line 110)
    - Rationale: "Simplifies the implementation while maintaining the same
      asymptotic complexity (degree is O(log n))" (line 101-103)
-   - Impact: Child removal is O(degree) = O(log n) instead of O(1), but this
-     is acceptable since it happens during cut operations which are already
-     O(1) amortized.
+   - Impact: Child removal is O(degree) = O(log n) instead of O(1). This
+     doesn't violate Fibonacci heap's amortized bounds because: (1) the
+     maximum degree is bounded by O(log n) due to the Fibonacci property,
+     and (2) cuts are infrequent enough that the amortized analysis still
+     holds. The Vec approach trades O(1) splice for simpler code without
+     changing overall asymptotic complexity.
 
 2. **Roots stored in Vec instead of circular list**
    - Paper: Circular doubly-linked list for root list
@@ -91,8 +94,8 @@ The safety argument in comments (lines 185-190) is sound.
    (line 234). Any remaining handles become invalid (their `Weak::upgrade()`
    returns `None`).
 
-2. **Detection**: `decrease_key()` checks `handle.node.upgrade()` (line 301)
-   and returns `HeapError::PriorityNotDecreased` if invalid.
+2. **Detection**: `decrease_key()` checks `handle.node.upgrade()` (line 356)
+   and returns `HeapError::InvalidHandle` if the handle is no longer valid.
 
 ### Potential Issues/Risks
 
@@ -184,7 +187,16 @@ during the frequent comparison operations.
 
 #### Empirical Cache Efficiency Results
 
-Measured using `valgrind --tool=cachegrind` with Dijkstra-like workloads:
+Measured using `valgrind --tool=cachegrind` with Dijkstra-like workloads.
+
+**Workload characteristics**:
+
+- Sparse graph simulation: ~n nodes with average degree 4-6
+- Operation mix: ~n pushes, ~n/3 decrease_key calls, ~n pops
+- Represents typical Dijkstra usage where decrease_key is frequent but not
+  dominant (road network-style graphs)
+- This is a moderate case; dense graphs (more decrease_key) may see larger
+  improvements, while sort-only workloads (no decrease_key) see minimal benefit
 
 ##### Test: 100,000 elements
 
@@ -220,7 +232,11 @@ Measured using `valgrind --tool=cachegrind` with Dijkstra-like workloads:
    instead of in a separate Vec allocation.
 
 3. **Cache min node data**: Store priority directly in heap struct to avoid
-   `upgrade()` in `peek()`.
+   `upgrade()` in `peek()`. **Tradeoffs**: Every push, decrease_key, and pop
+   would need to update the cached value, adding synchronization overhead.
+   Also duplicates memory for the priority. Since `peek()` is typically
+   infrequent compared to other operations in Dijkstra-style algorithms,
+   this optimization is best suited for peek-heavy workloads.
 
 4. **Batch consolidation**: Delay consolidation across multiple pops when
    possible.
