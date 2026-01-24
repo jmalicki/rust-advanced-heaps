@@ -384,29 +384,43 @@ impl<T, P: Ord> SkewBinomialHeap<T, P> {
                     parent_weak.try_borrow_mut().ok().unwrap().child = next_sibling;
                 }
             } else {
-                // Search through sibling list using raw pointers
-                let mut prev_ptr = first_child_ptr;
-                loop {
-                    // SAFETY: We hold strong references through the tree structure
-                    let prev_node = unsafe { &*prev_ptr };
-                    let next_ptr = prev_node.sibling.as_ref().map(|s| s.as_ptr());
+                // Search through sibling list using position-based approach
+                // The sibling list is: first_child -> sib1 -> sib2 -> ... -> target -> ...
+                // We need to find which position target is at, then cut it
+                //
+                // First pass: count position using pointer comparison
+                // We take the child list, walk it collecting RefBoxes into a vec,
+                // find the target position, then rebuild with target removed.
+                // This moves RefBoxes (not values) so weak pointers remain valid.
 
-                    match next_ptr {
-                        Some(next) if next == node_ptr => {
-                            // Found it - extract the node from prev's sibling
-                            let prev_ref = unsafe { &mut *(prev_ptr as *mut Node<T, P>) };
-                            cut_node = prev_ref.sibling.take();
-                            if let Some(ref cut) = cut_node {
-                                let skip_to = cut.try_borrow_mut().ok().unwrap().sibling.take();
-                                prev_ref.sibling = skip_to;
-                            }
-                            break;
-                        }
-                        Some(next) => {
-                            prev_ptr = next;
-                        }
-                        None => break,
+                let first_child = parent_weak.try_borrow_mut().ok().unwrap().child.take();
+                if let Some(fc) = first_child {
+                    // Collect all siblings into a vec by taking ownership
+                    let mut siblings: Vec<NodeRef<T, P>> = Vec::new();
+                    let mut current = Some(fc);
+                    while let Some(node) = current {
+                        let next = node.try_borrow_mut().ok().unwrap().sibling.take();
+                        siblings.push(node);
+                        current = next;
                     }
+
+                    // Find target position by pointer comparison
+                    let target_pos = siblings.iter().position(|n| n.as_ptr() == node_ptr);
+
+                    if let Some(pos) = target_pos {
+                        // Remove the target from the vec
+                        cut_node = Some(siblings.remove(pos));
+                    }
+
+                    // Rebuild sibling list from remaining nodes (in reverse order)
+                    let mut rebuilt: Option<NodeRef<T, P>> = None;
+                    for node in siblings.into_iter().rev() {
+                        node.try_borrow_mut().ok().unwrap().sibling = rebuilt;
+                        rebuilt = Some(node);
+                    }
+
+                    // Restore to parent
+                    parent_weak.try_borrow_mut().ok().unwrap().child = rebuilt;
                 }
             }
         }

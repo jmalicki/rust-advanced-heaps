@@ -8,12 +8,15 @@
 //! heap operations, isolating just the effect of cache pollution.
 //!
 //! Run with:
-//!   cargo build --release --bin cache_benchmark_realistic
-//!   valgrind --tool=cachegrind ./target/release/cache_benchmark_realistic <heap_type> <n>
+//! ```text
+//! cargo build --release --bin cache_benchmark_realistic
+//! valgrind --tool=cachegrind ./target/release/cache_benchmark_realistic [heap_type] [n]
+//! ```
 //!
-//! heap_type: fibonacci, skew_binomial, pairing, rank_pairing, binomial, twothree
+//! `heap_type`: skew_binomial, pairing, rank_pairing, binomial, twothree, fibonacci
 
 use rust_advanced_heaps::binomial::BinomialHeap;
+use rust_advanced_heaps::fibonacci::FibonacciHeap;
 use rust_advanced_heaps::pairing::PairingHeap;
 use rust_advanced_heaps::rank_pairing::RankPairingHeap;
 use rust_advanced_heaps::skew_binomial::SkewBinomialHeap;
@@ -172,9 +175,10 @@ fn main() {
         "rank_pairing" => dijkstra_realistic(RankPairingHeap::<usize, i64>::new(), n, &graph),
         "binomial" => dijkstra_realistic(BinomialHeap::<usize, i64>::new(), n, &graph),
         "twothree" => dijkstra_realistic(TwoThreeHeap::<usize, i64>::new(), n, &graph),
+        "fibonacci" => dijkstra_realistic(FibonacciHeap::<usize, i64>::new(), n, &graph),
         _ => {
             eprintln!(
-                "Unknown heap type: {}. Use: skew_binomial, pairing, rank_pairing, binomial, twothree",
+                "Unknown heap type: {}. Use: skew_binomial, pairing, rank_pairing, binomial, twothree, fibonacci",
                 heap_type
             );
             std::process::exit(1);

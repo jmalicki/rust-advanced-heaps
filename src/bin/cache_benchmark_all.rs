@@ -1,12 +1,15 @@
 //! Cache benchmark for all heap types (ideal workload - no cache pollution)
 //!
 //! Run with:
-//!   cargo build --release --bin cache_benchmark_all
-//!   valgrind --tool=cachegrind ./target/release/cache_benchmark_all <heap_type> <n>
+//! ```text
+//! cargo build --release --bin cache_benchmark_all
+//! valgrind --tool=cachegrind ./target/release/cache_benchmark_all [heap_type] [n]
+//! ```
 //!
-//! heap_type: fibonacci, skew_binomial, pairing, rank_pairing, binomial, twothree
+//! `heap_type`: skew_binomial, pairing, rank_pairing, binomial, twothree, fibonacci
 
 use rust_advanced_heaps::binomial::BinomialHeap;
+use rust_advanced_heaps::fibonacci::FibonacciHeap;
 use rust_advanced_heaps::pairing::PairingHeap;
 use rust_advanced_heaps::rank_pairing::RankPairingHeap;
 use rust_advanced_heaps::skew_binomial::SkewBinomialHeap;
@@ -103,9 +106,10 @@ fn main() {
         "rank_pairing" => dijkstra_workload(RankPairingHeap::<usize, i64>::new(), n),
         "binomial" => dijkstra_workload(BinomialHeap::<usize, i64>::new(), n),
         "twothree" => dijkstra_workload(TwoThreeHeap::<usize, i64>::new(), n),
+        "fibonacci" => dijkstra_workload(FibonacciHeap::<usize, i64>::new(), n),
         _ => {
             eprintln!(
-                "Unknown heap type: {}. Use: skew_binomial, pairing, rank_pairing, binomial, twothree",
+                "Unknown heap type: {}. Use: skew_binomial, pairing, rank_pairing, binomial, twothree, fibonacci",
                 heap_type
             );
             std::process::exit(1);
