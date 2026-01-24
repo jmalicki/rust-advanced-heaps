@@ -211,16 +211,17 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
         #[cfg(feature = "access_tracking")]
         let _guard = track_op!("pop");
 
-        let root = self.root.take()?;
+        let root_refbox = self.root.take()?;
 
         #[cfg(feature = "access_tracking")]
         track!(node);
 
-        // Get the first child before we consume the root
-        // Borrow will succeed since we have exclusive ownership after take()
+        // Consume the RefBox immediately to get owned Node - no borrowing needed
+        // This is sound because we have exclusive ownership after take()
         #[cfg(feature = "access_tracking")]
         track!(read ChildPtr);
-        let first_child = root.try_borrow_mut().unwrap().child.take();
+        let mut root_node = root_refbox.take();
+        let first_child = root_node.child.take();
 
         // The root has been deleted, so we need to rebuild from its children
         // If there are no children, the heap becomes empty
@@ -255,15 +256,12 @@ impl<T, P: Ord> Heap<T, P> for PairingHeap<T, P> {
             );
         }
 
-        // Extract item and priority using RefBox::take()
-        // This moves the node data out of the RefBox
-        let node = root.take();
         #[cfg(feature = "access_tracking")]
         {
             track!(read Priority);
             track!(read Item);
         }
-        Some((node.priority, node.item))
+        Some((root_node.priority, root_node.item))
     }
 }
 
@@ -299,11 +297,11 @@ impl<T, P: Ord> MergeableHeap<T, P> for PairingHeap<T, P> {
         let other_root = other.root.take().unwrap();
 
         // Compare roots: smaller priority becomes parent (heap property)
-        // Since we own both roots exclusively after take(), borrows will succeed
-        let other_is_smaller = {
-            let self_borrow = self_root.try_borrow_mut().unwrap();
-            let other_borrow = other_root.try_borrow_mut().unwrap();
-            other_borrow.priority < self_borrow.priority
+        // Use raw pointers for comparison - safe because we own both RefBoxes exclusively
+        let other_is_smaller = unsafe {
+            let self_ptr = self_root.as_ptr();
+            let other_ptr = other_root.as_ptr();
+            (*other_ptr).priority < (*self_ptr).priority
         };
 
         if other_is_smaller {
@@ -433,12 +431,11 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for PairingHeap<T, P> {
                 track!(read Priority);
                 track!(read Priority);
             }
-            // Compare priorities
-            // Since we own both nodes (just created node, took root), borrows will succeed
-            let node_is_smaller = {
-                let node_borrow = node.try_borrow_mut().unwrap();
-                let root_borrow = root.try_borrow_mut().unwrap();
-                node_borrow.priority < root_borrow.priority
+            // Compare priorities using raw pointers - safe because we own both RefBoxes
+            let node_is_smaller = unsafe {
+                let node_ptr = node.as_ptr();
+                let root_ptr = root.as_ptr();
+                (*node_ptr).priority < (*root_ptr).priority
             };
 
             if node_is_smaller {
