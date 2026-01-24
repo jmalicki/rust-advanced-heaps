@@ -169,7 +169,7 @@ next_sibling: Option<u32>, // Index
 ### Cachegrind Results (100k elements, Dijkstra-like workload)
 
 | Metric | `Rc<RefCell>` | `RefBox` + Option | `RefBox` + take() | Change vs Rc |
-|--------|---------------|-------------------|-------------------|--------------|
+| ------ | ------------- | ----------------- | ----------------- | ------------ |
 | Node struct size | 56 bytes | 72 bytes | **56 bytes** | 0% |
 | Heap overhead | 24 bytes | 8 bytes | **8 bytes** | -67% |
 | **Total per node** | **80 bytes** | **80 bytes** | **64 bytes** | **-20%** |
