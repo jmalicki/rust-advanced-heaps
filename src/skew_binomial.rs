@@ -34,6 +34,9 @@
 
 use crate::rank::Rank;
 use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError, MergeableHeap};
+#[cfg(feature = "access_tracking")]
+#[allow(unused_imports)]
+use crate::{track, track_op};
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 

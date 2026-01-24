@@ -65,6 +65,7 @@
 //! assert_eq!(heap.peek(), Some((&1, &"item1")));
 //! ```
 
+pub mod access_tracking;
 pub mod binomial;
 pub mod fibonacci;
 pub mod hollow;

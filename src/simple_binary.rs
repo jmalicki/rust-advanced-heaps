@@ -35,6 +35,9 @@
 //! ```
 
 use crate::traits::{Heap, MergeableHeap};
+#[cfg(feature = "access_tracking")]
+#[allow(unused_imports)]
+use crate::{track, track_op};
 
 /// A simple binary min-heap
 ///

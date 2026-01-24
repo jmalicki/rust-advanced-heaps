@@ -50,6 +50,8 @@
 //! - [Wikipedia: Fibonacci heap](https://en.wikipedia.org/wiki/Fibonacci_heap)
 
 use crate::traits::{DecreaseKeyHeap, Handle, Heap, HeapError, MergeableHeap};
+#[cfg(feature = "access_tracking")]
+use crate::{track, track_op};
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
@@ -209,6 +211,9 @@ impl<T, P: Ord> Heap<T, P> for FibonacciHeap<T, P> {
     }
 
     fn pop(&mut self) -> Option<(P, T)> {
+        #[cfg(feature = "access_tracking")]
+        let _guard = track_op!("pop");
+
         // Find min in roots using the weak reference
         let min_idx = {
             let min_rc = self.min.upgrade()?;
@@ -222,13 +227,25 @@ impl<T, P: Ord> Heap<T, P> for FibonacciHeap<T, P> {
         // Remove min from roots - now we have the only strong reference
         let min_node = self.roots.swap_remove(min_idx);
 
+        #[cfg(feature = "access_tracking")]
+        track!(node);
+
         // Clear min reference before any operations
         self.min = Weak::new();
 
         // Add children to root list
         {
             let mut min_borrowed = min_node.borrow_mut();
+            #[cfg(feature = "access_tracking")]
+            track!(read ChildPtr);
             for child in min_borrowed.children.drain(..) {
+                #[cfg(feature = "access_tracking")]
+                {
+                    track!(node);
+                    track!(chase);
+                    track!(write ParentPtr);
+                    track!(write Marked);
+                }
                 child.borrow_mut().parent = Weak::new();
                 child.borrow_mut().marked = false;
                 self.roots.push(child);
@@ -248,6 +265,12 @@ impl<T, P: Ord> Heap<T, P> for FibonacciHeap<T, P> {
             Ok(cell) => cell.into_inner(),
             Err(_) => panic!("min node should have no other references"),
         };
+
+        #[cfg(feature = "access_tracking")]
+        {
+            track!(read Priority);
+            track!(read Item);
+        }
 
         Some((node.priority, node.item))
     }
@@ -290,13 +313,28 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for FibonacciHeap<T, P> {
     type Handle = FibonacciHandle<T, P>;
 
     fn push_with_handle(&mut self, priority: P, item: T) -> Self::Handle {
+        #[cfg(feature = "access_tracking")]
+        let _guard = track_op!("push");
+
         let node = Rc::new(RefCell::new(Node::new(item, priority)));
         let handle = FibonacciHandle {
             node: Rc::downgrade(&node),
         };
 
+        #[cfg(feature = "access_tracking")]
+        {
+            track!(node);
+            track!(write Priority);
+            track!(write Item);
+        }
+
         // Update min if necessary
         let should_update_min = if let Some(min_rc) = self.min.upgrade() {
+            #[cfg(feature = "access_tracking")]
+            {
+                track!(read Priority);
+                track!(read Priority);
+            }
             node.borrow().priority < min_rc.borrow().priority
         } else {
             true // No current min, so this becomes min
@@ -312,31 +350,53 @@ impl<T, P: Ord> DecreaseKeyHeap<T, P> for FibonacciHeap<T, P> {
     }
 
     fn decrease_key(&mut self, handle: &Self::Handle, new_priority: P) -> Result<(), HeapError> {
+        #[cfg(feature = "access_tracking")]
+        let _guard = track_op!("decrease_key");
+
         // Upgrade weak reference to get the node
         let node_rc = match handle.node.upgrade() {
             Some(rc) => rc,
             None => return Err(HeapError::PriorityNotDecreased), // Handle is invalid
         };
 
+        #[cfg(feature = "access_tracking")]
+        track!(node);
+
         // Check that new priority is actually less
         {
             let node = node_rc.borrow();
+            #[cfg(feature = "access_tracking")]
+            track!(read Priority);
             if new_priority >= node.priority {
                 return Err(HeapError::PriorityNotDecreased);
             }
         }
 
         // Update priority
+        #[cfg(feature = "access_tracking")]
+        track!(write Priority);
         node_rc.borrow_mut().priority = new_priority;
 
         // Get parent (if any)
+        #[cfg(feature = "access_tracking")]
+        track!(read ParentPtr);
         let parent_weak = node_rc.borrow().parent.clone();
 
         if let Some(parent_rc) = parent_weak.upgrade() {
+            #[cfg(feature = "access_tracking")]
+            {
+                track!(chase);
+                track!(node);
+            }
             // Check if heap property is violated
             let should_cut = {
                 let node = node_rc.borrow();
                 let parent = parent_rc.borrow();
+                #[cfg(feature = "access_tracking")]
+                {
+                    track!(read Priority);
+                    track!(read Priority);
+                }
                 node.priority < parent.priority
             };
 
@@ -370,16 +430,32 @@ impl<T, P: Ord> FibonacciHeap<T, P> {
         let roots_to_process: Vec<_> = self.roots.drain(..).collect();
 
         for mut root in roots_to_process {
+            #[cfg(feature = "access_tracking")]
+            {
+                track!(node);
+                track!(read Rank); // degree read
+            }
             let mut d = root.borrow().degree();
 
             // Link with existing trees of the same degree
             while d < degree_table.len() && degree_table[d].is_some() {
                 let mut other = degree_table[d].take().unwrap();
 
+                #[cfg(feature = "access_tracking")]
+                {
+                    track!(node);
+                    track!(chase);
+                }
+
                 // Ensure root has smaller priority
                 let should_swap = {
                     let root_priority = &root.borrow().priority;
                     let other_priority = &other.borrow().priority;
+                    #[cfg(feature = "access_tracking")]
+                    {
+                        track!(read Priority);
+                        track!(read Priority);
+                    }
                     other_priority < root_priority
                 };
 
@@ -405,7 +481,11 @@ impl<T, P: Ord> FibonacciHeap<T, P> {
 
         for root_opt in degree_table.into_iter().flatten() {
             // Check if this is the new min
+            #[cfg(feature = "access_tracking")]
+            track!(read Priority);
             let is_new_min = if let Some(current_min) = self.min.upgrade() {
+                #[cfg(feature = "access_tracking")]
+                track!(read Priority);
                 root_opt.borrow().priority < current_min.borrow().priority
             } else {
                 true
@@ -421,6 +501,12 @@ impl<T, P: Ord> FibonacciHeap<T, P> {
 
     /// Links node y as a child of node x
     fn link(&self, y: &Rc<RefCell<Node<T, P>>>, x: &Rc<RefCell<Node<T, P>>>) {
+        #[cfg(feature = "access_tracking")]
+        {
+            track!(write ParentPtr);
+            track!(write Marked);
+            track!(write ChildPtr);
+        }
         // Make y a child of x
         y.borrow_mut().parent = Rc::downgrade(x);
         y.borrow_mut().marked = false;
@@ -432,16 +518,25 @@ impl<T, P: Ord> FibonacciHeap<T, P> {
         // Remove from parent's children
         {
             let mut parent_borrowed = parent.borrow_mut();
+            #[cfg(feature = "access_tracking")]
+            track!(read ChildPtr);
             if let Some(pos) = parent_borrowed
                 .children
                 .iter()
                 .position(|c| Rc::ptr_eq(c, node))
             {
+                #[cfg(feature = "access_tracking")]
+                track!(write ChildPtr);
                 parent_borrowed.children.swap_remove(pos);
             }
         }
 
         // Clear parent and marked flag
+        #[cfg(feature = "access_tracking")]
+        {
+            track!(write ParentPtr);
+            track!(write Marked);
+        }
         node.borrow_mut().parent = Weak::new();
         node.borrow_mut().marked = false;
 
@@ -451,14 +546,25 @@ impl<T, P: Ord> FibonacciHeap<T, P> {
 
     /// Performs cascading cut on parent if it's marked
     fn cascading_cut(&mut self, node: Rc<RefCell<Node<T, P>>>) {
+        #[cfg(feature = "access_tracking")]
+        track!(read ParentPtr);
         let parent_weak = node.borrow().parent.clone();
 
         if let Some(parent_rc) = parent_weak.upgrade() {
+            #[cfg(feature = "access_tracking")]
+            {
+                track!(chase);
+                track!(node);
+            }
             // Node has a parent (not a root)
+            #[cfg(feature = "access_tracking")]
+            track!(read Marked);
             let is_marked = node.borrow().marked;
 
             if !is_marked {
                 // First child lost: mark it
+                #[cfg(feature = "access_tracking")]
+                track!(write Marked);
                 node.borrow_mut().marked = true;
             } else {
                 // Already marked: cut it and cascade
