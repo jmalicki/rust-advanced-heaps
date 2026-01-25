@@ -143,7 +143,7 @@ jobs:
       - name: Install markdownlint-cli
         run: npm install -g markdownlint-cli
       - name: Run markdownlint
-        run: markdownlint "**/*.md" --ignore node_modules
+        run: markdownlint "**/*.md" --ignore node_modules --config .markdownlint.json
 
   docs:
     name: Rust Documentation
