@@ -41,7 +41,7 @@ repos:
     rev: v0.38.0
     hooks:
       - id: markdownlint
-        args: ['--fix']
+        args: ['--fix', '--config', '.markdownlint.json']
         types: [markdown]
 
   # Shell script linting
