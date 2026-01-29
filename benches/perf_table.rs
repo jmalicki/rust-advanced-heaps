@@ -11,8 +11,13 @@
 //! # Enable perf access (requires Linux)
 //! sudo sysctl kernel.perf_event_paranoid=1
 //!
-//! # Run the table benchmark
+//! # Run the table benchmark with synthetic data
 //! cargo bench --features perf-counters --bench perf_table
+//!
+//! # Run with real DIMACS road network data
+//! ./scripts/download-dimacs.sh USA  # Download full USA road network
+//! DIMACS_DATA=data/USA-road-d.USA.gr cargo bench --features perf-counters \
+//!     --bench perf_table
 //!
 //! # Run only specific sizes (in parallel on different CPUs)
 //! cargo bench --features perf-counters --bench perf_table -- 8    # 2^8 only
@@ -29,6 +34,11 @@
 //! BENCH_PIN_CPU=3 cargo bench --features perf-counters --bench perf_table -- 20 &
 //! wait
 //! ```
+//!
+//! ## Environment Variables
+//!
+//! - `DIMACS_DATA`: Path to a DIMACS .gr file (uses synthetic data if not set)
+//! - `BENCH_PIN_CPU`: Pin benchmark to a specific CPU core (0, 1, 2, ...)
 
 #[cfg(all(feature = "perf-counters", target_os = "linux"))]
 mod perf_table {

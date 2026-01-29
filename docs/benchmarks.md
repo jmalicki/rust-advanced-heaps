@@ -182,6 +182,202 @@ Dijkstra rank analysis on real NY road network data (2^12, 2^14, 2^16, 2^18).
 
 Quick sanity check that pathfinding produces correct results on a small grid.
 
+## Full USA Road Network Benchmark
+
+The `usa_road_benchmark` provides detailed per-query benchmarking on the full
+USA road network (23.9M nodes, 58.3M edges) with hardware performance counters.
+
+### Features
+
+- **Parallel execution**: Runs all 11 heap implementations simultaneously on
+  separate pinned CPUs
+- **Hardware counters**: Captures instructions, cycles, cache references, cache
+  misses, IPC, and cache miss rate (Linux only, requires `perf-counters` feature)
+- **Per-query results**: Individual timing for each query (not batched averages)
+- **CSV output**: Results saved to `data/usa_bench_<heap>.csv` for easy plotting
+
+### Setup
+
+```bash
+# 1. Enable perf counters (Linux only, requires root once)
+sudo sysctl kernel.perf_event_paranoid=1
+
+# 2. Download the full USA road network (~335MB compressed, ~1.5GB uncompressed)
+./scripts/download-dimacs.sh USA
+```
+
+### Running the Benchmark
+
+The benchmark runs in two phases:
+
+```bash
+# Step 1: Generate queries across Dijkstra rank buckets
+# Default: 2^10 to 2^16, or specify max rank (e.g., 20 for 2^20, max 24)
+cargo bench --features perf-counters --bench usa_road_benchmark -- generate      # default: up to 2^16
+cargo bench --features perf-counters --bench usa_road_benchmark -- generate 20   # up to 2^20
+cargo bench --features perf-counters --bench usa_road_benchmark -- generate 24   # up to 2^24 (maximum)
+
+# Step 2: Run all heaps in parallel on separate pinned CPUs
+cargo bench --features perf-counters --bench usa_road_benchmark -- run-parallel
+```
+
+You can also run a single heap manually:
+
+```bash
+# Run a specific heap on a specific CPU
+BENCH_PIN_CPU=0 cargo bench --features perf-counters --bench usa_road_benchmark -- run pairing_opt
+```
+
+### Available Commands
+
+| Command | Description |
+| --- | --- |
+| `generate [MAX_RANK]` | Generate queries up to 2^MAX_RANK (default: 16, max: 24) |
+| `run-parallel` | Run all heaps in parallel on separate CPUs |
+| `run <heap> [heap2 ...]` | Run one or more heaps (use with `BENCH_PIN_CPU=N`) |
+| `list` | List available heap implementations |
+| `help` | Show usage information |
+
+### Available Heaps
+
+The benchmark includes 11 heap implementations (13 with `arena-storage` feature):
+
+| Heap | Algorithm | Description |
+| --- | --- | --- |
+| `simple_binary` | lazy | Standard binary heap (baseline) |
+| `pairing_lazy` | lazy | Pairing heap without decrease_key |
+| `pairing_opt` | optimized | Pairing heap with decrease_key |
+| `fibonacci_lazy` | lazy | Fibonacci heap without decrease_key |
+| `fibonacci_opt` | optimized | Fibonacci heap with decrease_key |
+| `rank_pairing_opt` | optimized | Rank-pairing heap |
+| `hollow_lazy` | lazy | Hollow heap |
+| `twothree_opt` | optimized | 2-3 heap |
+| `strict_fib_opt` | optimized | Strict Fibonacci heap |
+| `binomial_opt` | optimized | Binomial heap |
+| `skew_binomial_opt` | optimized | Skew binomial heap |
+| `binomial_arena` | optimized | Binomial heap with arena storage (requires `arena-storage` feature) |
+| `skew_binomial_arena` | optimized | Skew binomial heap with arena storage (requires `arena-storage` feature) |
+
+### Output Format
+
+Results are saved to `data/usa_bench_<heap>.csv` with the following columns:
+
+| Column | Description |
+| --- | --- |
+| `query_id` | Query identifier (0-indexed) |
+| `source` | Source node ID |
+| `target` | Target node ID |
+| `dijkstra_rank` | Number of nodes settled to reach target |
+| `log2_rank` | Log2 of target rank bucket (10, 12, 14, 16, 18) |
+| `time_ns` | Wall-clock time in nanoseconds |
+| `instructions` | Hardware instruction count |
+| `cycles` | CPU cycles |
+| `cache_refs` | LLC cache references |
+| `cache_misses` | LLC cache misses |
+| `ipc` | Instructions per cycle |
+| `cache_miss_rate` | Cache miss percentage |
+
+### Example Output
+
+```csv
+query_id,source,target,dijkstra_rank,log2_rank,time_ns,instructions,cycles,cache_refs,cache_misses,ipc,cache_miss_rate
+0,2912745,4729006,1312,10,921516,2677602,1765800,33955,4209,1.5164,12.3958
+1,12917471,12939516,7923,12,7672419,21556355,13774298,274985,61944,1.5650,22.5263
+...
+```
+
+### CPU Pinning
+
+The benchmark uses the `BENCH_PIN_CPU` environment variable to pin each process
+to a specific CPU core. When using `run-parallel`, heaps are automatically
+assigned to CPUs 0 through 10 (for 11 heaps).
+
+For manual runs:
+
+```bash
+# Pin to CPU 0
+BENCH_PIN_CPU=0 cargo bench --features perf-counters --bench usa_road_benchmark -- run pairing_opt
+
+# Pin to CPU 5
+BENCH_PIN_CPU=5 cargo bench --features perf-counters --bench usa_road_benchmark -- run fibonacci_opt
+```
+
+### Comparing Different Build Configurations
+
+A key design goal is enabling apples-to-apples comparisons across different
+build configurations, feature flags, or code changes. Since queries are saved
+to `data/usa_queries.json`, you can:
+
+1. Generate queries once
+2. Run benchmarks with different configurations
+3. Compare results knowing all runs used identical queries
+
+#### Comparing with and without arena storage
+
+```bash
+# Step 1: Generate queries (only needed once)
+cargo bench --features perf-counters --bench usa_road_benchmark -- generate
+
+# Step 2: Run with default configuration
+cargo bench --features perf-counters --bench usa_road_benchmark -- run-parallel
+
+# Save results
+mkdir -p results/default
+mv data/usa_bench_*.csv results/default/
+
+# Step 3: Run with arena-storage feature enabled
+cargo bench --features perf-counters,arena-storage --bench usa_road_benchmark -- run-parallel
+
+# Save results
+mkdir -p results/arena
+mv data/usa_bench_*.csv results/arena/
+
+# Step 4: Compare results
+# Both runs used the exact same queries from data/usa_queries.json
+diff results/default/usa_bench_pairing_opt.csv results/arena/usa_bench_pairing_opt.csv
+```
+
+#### Comparing code changes
+
+```bash
+# Generate queries on main branch
+git checkout main
+cargo bench --features perf-counters --bench usa_road_benchmark -- generate
+
+# Run benchmark
+cargo bench --features perf-counters --bench usa_road_benchmark -- run-parallel
+mkdir -p results/before
+mv data/usa_bench_*.csv results/before/
+
+# Switch to feature branch (queries are preserved in data/)
+git checkout my-optimization-branch
+cargo bench --features perf-counters --bench usa_road_benchmark -- run-parallel
+mkdir -p results/after
+mv data/usa_bench_*.csv results/after/
+
+# Compare - same queries, different code
+paste results/before/usa_bench_pairing_opt.csv results/after/usa_bench_pairing_opt.csv | \
+  awk -F',' '{print $1, $6, $19, ($6-$19)/$6*100 "%"}'
+```
+
+#### Running specific heaps for A/B comparison
+
+```bash
+# Run just two heaps to compare on the same CPU
+BENCH_PIN_CPU=0 cargo bench --features perf-counters --bench usa_road_benchmark -- run pairing_opt
+mv data/usa_bench_pairing_opt.csv results/pairing_opt_baseline.csv
+
+# Make a code change, rebuild, re-run
+BENCH_PIN_CPU=0 cargo bench --features perf-counters --bench usa_road_benchmark -- run pairing_opt
+mv data/usa_bench_pairing_opt.csv results/pairing_opt_optimized.csv
+```
+
+The query file (`data/usa_queries.json`) contains:
+
+- Graph metadata (node/edge counts for verification)
+- All query parameters (source, target, expected Dijkstra rank)
+- Reproducible across runs as long as the file is preserved
+
 ## DIMACS Data
 
 Download road network datasets from the
@@ -197,6 +393,7 @@ The `data/` directory is git-ignored. Available datasets:
 | USA-road-d.FLA | 1.1M | 2.7M | Florida |
 | USA-road-d.NE | 1.5M | 3.9M | Northeast USA |
 | USA-road-d.CAL | 1.9M | 4.7M | California/Nevada |
+| USA-road-d.USA | 23.9M | 58.3M | Full USA (largest) |
 
 ## DIMACS Format
 
